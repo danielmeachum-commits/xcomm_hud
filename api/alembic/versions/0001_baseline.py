@@ -60,43 +60,6 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "utc",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("site_id", sa.BigInteger(), nullable=False),
-        sa.Column("designation", sa.String(64), nullable=False),
-        sa.Column("name", sa.String(128), nullable=True),
-        sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.ForeignKeyConstraint(["site_id"], ["site.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("site_id", "designation", name="uq_utc_site_designation"),
-    )
-
-    op.create_table(
-        "equipment",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("site_id", sa.BigInteger(), nullable=False),
-        sa.Column("utc_id", sa.BigInteger(), nullable=True),
-        sa.Column("name", sa.String(128), nullable=False),
-        sa.Column("kind", sa.String(16), nullable=False, server_default="other"),
-        sa.Column("vendor", sa.String(64), nullable=True),
-        sa.Column("model", sa.String(128), nullable=True),
-        sa.Column("role", sa.String(64), nullable=True),
-        sa.Column("status", sa.String(16), nullable=False, server_default="unknown"),
-        sa.Column("manual_status_override", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("source_enclave_id", sa.BigInteger(), nullable=True),
-        sa.Column("source_device_ref", sa.String(256), nullable=True),
-        sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.ForeignKeyConstraint(["site_id"], ["site.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["utc_id"], ["utc.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["source_enclave_id"], ["enclave_source.id"], ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("site_id", "name", name="uq_equipment_site_name"),
-    )
-
-    op.create_table(
         "service",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("site_id", sa.BigInteger(), nullable=True),
@@ -104,23 +67,11 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(16), nullable=False, server_default="other"),
         sa.Column("hosting", sa.String(16), nullable=False, server_default="self"),
         sa.Column("status", sa.String(16), nullable=False, server_default="unknown"),
-        sa.Column("manual_status_override", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.ForeignKeyConstraint(["site_id"], ["site.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
-    )
-
-    op.create_table(
-        "service_component",
-        sa.Column("service_id", sa.BigInteger(), nullable=False),
-        sa.Column("equipment_id", sa.BigInteger(), nullable=False),
-        sa.Column("role", sa.String(16), nullable=False, server_default="primary"),
-        sa.Column("required", sa.Boolean(), nullable=False, server_default="true"),
-        sa.ForeignKeyConstraint(["service_id"], ["service.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["equipment_id"], ["equipment.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("service_id", "equipment_id"),
     )
 
     op.create_table(
@@ -143,10 +94,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_status_event_ts", table_name="status_event")
     op.drop_table("status_event")
-    op.drop_table("service_component")
     op.drop_table("service")
-    op.drop_table("equipment")
-    op.drop_table("utc")
     op.drop_table("enclave_source")
     op.drop_table("site")
     op.drop_table("user")

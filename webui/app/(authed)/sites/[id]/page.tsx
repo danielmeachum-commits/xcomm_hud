@@ -1,10 +1,9 @@
 import { notFound } from "next/navigation"
 
 import { requireSession } from "@/lib/auth"
-import { apiGet } from "@/lib/api"
-import { ApiError } from "@/lib/api"
+import { apiGet, ApiError } from "@/lib/api"
 import { SiteDetailClient } from "@/components/sites/site-detail-client"
-import type { Equipment, Site, UTC } from "@/lib/types"
+import type { Service, Site } from "@/lib/types"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -24,14 +23,8 @@ export default async function SiteDetailPage({ params }: PageProps) {
     throw err
   }
 
-  const [utcs, equipment] = await Promise.all([
-    apiGet<UTC[]>(`/sites/${siteId}/utcs`).catch(() => [] as UTC[]),
-    apiGet<Equipment[]>(`/equipment?site_id=${siteId}`).catch(
-      () => [] as Equipment[],
-    ),
-  ])
+  const services = await apiGet<Service[]>(`/services`).catch(() => [] as Service[])
+  const siteServices = services.filter((s) => s.site_id === siteId)
 
-  return (
-    <SiteDetailClient site={site} initialUtcs={utcs} initialEquipment={equipment} />
-  )
+  return <SiteDetailClient site={site} services={siteServices} />
 }

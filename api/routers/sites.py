@@ -1,4 +1,4 @@
-"""Site CRUD."""
+"""Site CRUD with status rollup from its services."""
 
 from __future__ import annotations
 
@@ -7,27 +7,17 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import Equipment, Service, Site, UTC
-from rollup import site_status, utc_status
+from models import Service, Site
+from rollup import site_status
 from schemas import SiteIn, SiteOut, SitePatch
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
 
 def _site_with_status(db: Session, site: Site) -> SiteOut:
-    equipment = db.query(Equipment).filter(Equipment.site_id == site.id).all()
-    utcs = db.query(UTC).filter(UTC.site_id == site.id).all()
     services = db.query(Service).filter(Service.site_id == site.id).all()
-
-    utc_states = [
-        utc_status([e.status for e in equipment if e.utc_id == u.id]) for u in utcs
-    ]
-    unassigned_equipment_states = [e.status for e in equipment if e.utc_id is None]
-    service_states = [s.status for s in services]
-
-    rollup = site_status(utc_states + unassigned_equipment_states + service_states)
     out = SiteOut.model_validate(site)
-    out.status = rollup
+    out.status = site_status([s.status for s in services])
     return out
 
 

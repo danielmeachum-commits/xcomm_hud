@@ -2,8 +2,9 @@ import Link from "next/link"
 
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
+import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { SiteForm } from "@/components/sites/site-form"
-import { statusBadgeClass, statusLabel } from "@/lib/status"
+import { statusBadgeClass, statusLabel, statusToIndicatorState } from "@/lib/status"
 import type { Site } from "@/lib/types"
 
 export default async function SitesPage() {
@@ -22,7 +23,7 @@ export default async function SitesPage() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Sites</h1>
           <p className="text-xs text-muted-foreground">
-            Physical locations and the equipment they host.
+            Physical locations. Status rolls up from the services at each site.
           </p>
         </div>
         <SiteForm />
@@ -40,11 +41,15 @@ export default async function SitesPage() {
               href={`/sites/${s.id}`}
               className={`flex flex-col gap-2 rounded-lg border p-4 transition-colors hover:bg-accent ${statusBadgeClass(s.status)}`}
             >
-              <div className="flex items-baseline justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">{s.name}</span>
-                <span className="text-xs uppercase tracking-wider">
-                  {statusLabel(s.status)}
-                </span>
+                <div className="flex items-center gap-2 text-xs uppercase tracking-wider">
+                  <StatusIndicator
+                    state={statusToIndicatorState(s.status)}
+                    size="sm"
+                  />
+                  <span>{statusLabel(s.status)}</span>
+                </div>
               </div>
               {s.location_label && (
                 <p className="text-xs text-muted-foreground">

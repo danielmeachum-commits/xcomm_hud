@@ -13,19 +13,9 @@ export type Role = "viewer" | "operator" | "admin"
 
 export type StatusValue = "up" | "degraded" | "down" | "unknown"
 
-export type EquipmentKind =
-  | "router"
-  | "switch"
-  | "server"
-  | "crypto"
-  | "phone"
-  | "other"
-
 export type ServiceKind = "voip" | "data" | "video" | "crypto" | "other"
 
 export type ServiceHosting = "self" | "cloud" | "hybrid"
-
-export type ComponentRole = "primary" | "backup" | "uplink" | "dependency"
 
 export interface Me {
   user_id: number
@@ -53,37 +43,6 @@ export interface Site {
   status: StatusValue
 }
 
-export interface UTC {
-  id: number
-  site_id: number
-  designation: string
-  name: string | null
-  notes: string | null
-  status: StatusValue
-}
-
-export interface Equipment {
-  id: number
-  site_id: number
-  utc_id: number | null
-  name: string
-  kind: EquipmentKind
-  vendor: string | null
-  model: string | null
-  role: string | null
-  status: StatusValue
-  manual_status_override: boolean
-  source_enclave_id: number | null
-  source_device_ref: string | null
-  notes: string | null
-}
-
-export interface ServiceComponent {
-  equipment_id: number
-  role: ComponentRole
-  required: boolean
-}
-
 export interface Service {
   id: number
   name: string
@@ -91,17 +50,13 @@ export interface Service {
   kind: ServiceKind
   hosting: ServiceHosting
   status: StatusValue
-  manual_status_override: boolean
   notes: string | null
-  components: ServiceComponent[]
 }
 
 export interface SiteRollup {
   id: number
   name: string
   status: StatusValue
-  utc_count: number
-  equipment_count: number
   service_count: number
 }
 
@@ -112,6 +67,7 @@ export interface ServiceRollup {
   hosting: ServiceHosting
   status: StatusValue
   site_id: number | null
+  site_name: string | null
 }
 
 export interface StatusRollup {

@@ -3,7 +3,7 @@
 Validates X-Ingest-Token against any EnclaveSource.ingest_token_hash via argon2,
 updates last_contact_at + sync_status, logs the payload, and returns 202.
 
-TODO: write-through to equipment/services + emit status_event rows with
+TODO: write-through to services + emit status_event rows with
 source="ingest" once scoi-side push is wired up.
 """
 
@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from models import EnclaveSource
-from rollup import worst_of  # noqa: F401  (kept here so future write-through is local)
 from schemas import IngestAck, IngestPayload
 
 log = logging.getLogger("xcomm_hud.ingest")
@@ -59,10 +58,8 @@ def ingest(
         extra={
             "enclave_source": src.name,
             "claimed_source_name": body.source_name,
-            "equipment_count": len(body.equipment),
             "service_count": len(body.services),
             "ts": body.ts.isoformat(),
         },
     )
-    # TODO: write-through to equipment/services + status_event(source="ingest").
     return IngestAck(accepted=True, enclave_source_id=src.id)

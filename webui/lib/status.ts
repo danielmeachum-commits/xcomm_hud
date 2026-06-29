@@ -1,5 +1,7 @@
 import type { StatusValue } from "./types"
 
+export const STATUS_VALUES: StatusValue[] = ["up", "degraded", "down", "unknown"]
+
 export function statusLabel(s: StatusValue): string {
   switch (s) {
     case "up":
@@ -25,5 +27,22 @@ export function statusBadgeClass(s: StatusValue): string {
     case "unknown":
     default:
       return "border-muted-foreground/30 bg-muted/30"
+  }
+}
+
+/** Map StatusValue → the StatusIndicator component's `state` prop. */
+export function statusToIndicatorState(
+  s: StatusValue,
+): "active" | "down" | "fixing" | "idle" {
+  switch (s) {
+    case "up":
+      return "active"
+    case "down":
+      return "down"
+    case "degraded":
+      return "fixing"
+    case "unknown":
+    default:
+      return "idle"
   }
 }

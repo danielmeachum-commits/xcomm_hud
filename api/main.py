@@ -16,13 +16,11 @@ from models import User
 from routers import (
     auth,
     enclave_sources,
-    equipment,
     ingest,
     services,
     sites,
     status as status_router,
     users,
-    utcs,
 )
 from schemas import MeOut
 
@@ -80,8 +78,6 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(sites.router)
-app.include_router(utcs.router)
-app.include_router(equipment.router)
 app.include_router(services.router)
 app.include_router(status_router.router)
 app.include_router(ingest.router)

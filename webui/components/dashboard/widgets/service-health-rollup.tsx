@@ -2,8 +2,8 @@
 
 import Link from "next/link"
 
+import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import type { WidgetProps } from "@/lib/dashboard/registry"
-import { statusBadgeClass, statusLabel } from "@/lib/status"
 import type { ServiceRollup } from "@/lib/types"
 
 function groupByKind(services: ServiceRollup[]): Map<string, ServiceRollup[]> {
@@ -38,16 +38,21 @@ export function ServiceHealthRollupWidget({ data }: WidgetProps) {
             </h3>
             <ul className="flex flex-col gap-1.5">
               {items.map((s) => (
-                <li key={s.id}>
+                <li
+                  key={s.id}
+                  className="flex items-center justify-between gap-3 rounded-md border bg-background/50 px-3 py-2 text-sm"
+                >
                   <Link
                     href={`/services/${s.id}`}
-                    className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent ${statusBadgeClass(s.status)}`}
+                    className="min-w-0 flex-1 truncate font-medium hover:underline"
                   >
-                    <span className="font-medium">{s.name}</span>
-                    <span className="text-xs uppercase tracking-wider">
-                      {statusLabel(s.status)} · {s.hosting}
+                    {s.name}
+                    <span className="ml-2 text-xs uppercase tracking-wider text-muted-foreground">
+                      {s.hosting}
+                      {s.site_name ? ` · ${s.site_name}` : " · cross-site"}
                     </span>
                   </Link>
+                  <ServiceStatusPill serviceId={s.id} status={s.status} />
                 </li>
               ))}
             </ul>

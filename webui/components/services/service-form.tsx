@@ -14,15 +14,14 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { Equipment, ServiceHosting, ServiceKind, Site } from "@/lib/types"
+import { STATUS_VALUES, statusLabel } from "@/lib/status"
+import type { ServiceHosting, ServiceKind, Site, StatusValue } from "@/lib/types"
 
 const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
 const HOSTING: ServiceHosting[] = ["self", "cloud", "hybrid"]
 
 interface Props {
   sites: Site[]
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  equipment: Equipment[] // accepted for parity with later component picker
 }
 
 export function ServiceForm({ sites }: Props) {
@@ -44,8 +43,8 @@ export function ServiceForm({ sites }: Props) {
           site_id: siteRaw ? Number(siteRaw) : null,
           kind: String(formData.get("kind") ?? "other"),
           hosting: String(formData.get("hosting") ?? "self"),
+          status: String(formData.get("status") ?? "unknown") as StatusValue,
           notes: String(formData.get("notes") ?? "") || null,
-          components: [],
         }),
       })
       if (!res.ok) {
@@ -107,22 +106,40 @@ export function ServiceForm({ sites }: Props) {
               </select>
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="site_id">Site (optional — leave blank for cross-site)</Label>
-            <select
-              id="site_id"
-              name="site_id"
-              defaultValue=""
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              disabled={pending}
-            >
-              <option value="">(none / cross-site)</option>
-              {sites.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="site_id">Site</Label>
+              <select
+                id="site_id"
+                name="site_id"
+                defaultValue=""
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={pending}
+              >
+                <option value="">(none / cross-site)</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="status">Initial status</Label>
+              <select
+                id="status"
+                name="status"
+                defaultValue="unknown"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={pending}
+              >
+                {STATUS_VALUES.map((v) => (
+                  <option key={v} value={v}>
+                    {statusLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           {error && (
             <p className="text-sm text-destructive" role="alert">
