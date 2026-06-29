@@ -1,0 +1,20 @@
+# env
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+api/.venv/
+
+# node
+node_modules/
+.next/
+webui/node_modules/
+webui/.next/
+webui/tsconfig.tsbuildinfo
+
+# editor
+.idea/
+.vscode/
+*.swp
