@@ -8,10 +8,10 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
-ServiceKind = Literal["voip", "data", "video", "crypto", "other"]
-ServiceCategory = Literal["core_critical_local", "sustainment", "other"]
+ServiceKind = Literal["voice", "data", "other"]
+ServiceCategory = Literal["critical", "sustainment", "other"]
 ServiceReach = Literal["local", "external"]
-GatewayKind = Literal["isp", "modem", "satellite", "other"]
+GatewayKind = Literal["milsat", "commercial", "other"]
 GatewayPace = Literal["primary", "alternate", "contingency", "emergency"]
 UserRole = Literal["viewer", "operator", "admin"]
 SubjectKind = Literal["service", "site", "gateway"]

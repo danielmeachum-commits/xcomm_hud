@@ -19,7 +19,7 @@ import { MoreHorizontal } from "lucide-react"
 
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
-import { NodeActionSheet } from "@/components/sites/node-action-sheet"
+import { NodeActionPanel } from "@/components/sites/node-action-sheet"
 import {
   gatewayIcon,
   gatewayKindLabel,
@@ -139,9 +139,10 @@ function GatewayCanvasNode({ data }: NodeProps) {
       style={{ width: LANE_WIDTH }}
     >
       {/* Targets on BOTH sides — local services connect from the left,
-       *  external services connect from the right. */}
-      <Handle type="target" position={Position.Left} className="!bg-amber-500" />
-      <Handle type="target" position={Position.Right} className="!bg-amber-500" />
+       *  external services connect from the right. Handle IDs make sure
+       *  React Flow doesn't auto-pick the wrong side. */}
+      <Handle id="left" type="target" position={Position.Left} className="!bg-amber-500" />
+      <Handle id="right" type="target" position={Position.Right} className="!bg-amber-500" />
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
@@ -281,6 +282,7 @@ function SiteCanvasInner({
           id: `e-svc${svc.id}-gw${gw.id}`,
           source: `service-${svc.id}`,
           target: `gateway-${gw.id}`,
+          targetHandle: "left",
           animated: statusEdgeAnimates(status),
           style: {
             stroke: statusEdgeStroke(status),
@@ -296,6 +298,7 @@ function SiteCanvasInner({
           id: `e-svc${svc.id}-gw${gw.id}`,
           source: `service-${svc.id}`,
           target: `gateway-${gw.id}`,
+          targetHandle: "right",
           animated: statusEdgeAnimates(status),
           style: {
             stroke: statusEdgeStroke(status),
@@ -337,9 +340,10 @@ export function SiteCanvas(props: Props) {
       </div>
     )
   }
+  const hasSelection = !!(selectedService || selectedGateway)
   return (
-    <>
-      <div className="h-[480px] w-full rounded-lg border border-border">
+    <div className="flex h-[480px] w-full overflow-hidden rounded-lg border border-border">
+      <div className="min-w-0 flex-1">
         <ReactFlowProvider>
           <SiteCanvasInner
             {...props}
@@ -354,15 +358,16 @@ export function SiteCanvas(props: Props) {
           />
         </ReactFlowProvider>
       </div>
-      <NodeActionSheet
-        open={!!(selectedService || selectedGateway)}
-        onClose={() => {
-          setSelectedService(null)
-          setSelectedGateway(null)
-        }}
-        service={selectedService}
-        gateway={selectedGateway}
-      />
-    </>
+      {hasSelection && (
+        <NodeActionPanel
+          onClose={() => {
+            setSelectedService(null)
+            setSelectedGateway(null)
+          }}
+          service={selectedService}
+          gateway={selectedGateway}
+        />
+      )}
+    </div>
   )
 }

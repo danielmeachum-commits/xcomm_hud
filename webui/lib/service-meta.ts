@@ -28,7 +28,7 @@ import type {
   ServiceReach,
 } from "./types"
 
-const ICON_MAP: Record<string, LucideIcon> = {
+export const ICON_MAP: Record<string, LucideIcon> = {
   globe: Globe,
   shield: Shield,
   phone: Phone,
@@ -49,11 +49,11 @@ const ICON_MAP: Record<string, LucideIcon> = {
   boxes: Boxes,
 }
 
+export const ICON_NAMES = Object.keys(ICON_MAP)
+
 const KIND_DEFAULT_ICON: Record<ServiceKind, LucideIcon> = {
-  voip: Phone,
+  voice: Phone,
   data: Globe,
-  video: Video,
-  crypto: KeyRound,
   other: Boxes,
 }
 
@@ -66,9 +66,8 @@ export function serviceIcon(
 }
 
 const GATEWAY_KIND_ICON: Record<GatewayKind, LucideIcon> = {
-  isp: Cloud,
-  modem: Router,
-  satellite: Satellite,
+  milsat: Satellite,
+  commercial: Cloud,
   other: Network,
 }
 
@@ -77,15 +76,15 @@ export function gatewayIcon(kind: GatewayKind): LucideIcon {
 }
 
 export const SERVICE_CATEGORIES: ServiceCategory[] = [
-  "core_critical_local",
+  "critical",
   "sustainment",
   "other",
 ]
 
 export function categoryLabel(c: ServiceCategory): string {
   switch (c) {
-    case "core_critical_local":
-      return "Core Critical Local"
+    case "critical":
+      return "Critical"
     case "sustainment":
       return "Sustainment"
     case "other":
@@ -96,7 +95,7 @@ export function categoryLabel(c: ServiceCategory): string {
 
 export function categoryAccentClass(c: ServiceCategory): string {
   switch (c) {
-    case "core_critical_local":
+    case "critical":
       return "border-sky-500/40 bg-sky-500/5"
     case "sustainment":
       return "border-violet-500/40 bg-violet-500/5"
@@ -126,16 +125,14 @@ export function reachShort(r: ServiceReach): string {
   }
 }
 
-export const GATEWAY_KINDS: GatewayKind[] = ["isp", "modem", "satellite", "other"]
+export const GATEWAY_KINDS: GatewayKind[] = ["milsat", "commercial", "other"]
 
 export function gatewayKindLabel(k: GatewayKind): string {
   switch (k) {
-    case "isp":
-      return "ISP"
-    case "modem":
-      return "Modem"
-    case "satellite":
-      return "Satellite"
+    case "milsat":
+      return "MILSAT"
+    case "commercial":
+      return "Commercial"
     case "other":
     default:
       return "Other"

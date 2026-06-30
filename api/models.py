@@ -28,10 +28,10 @@ def _now() -> datetime.datetime:
 
 
 STATUS_VALUES = ("up", "degraded", "down", "unknown", "offline", "setup")
-SERVICE_KINDS = ("voip", "data", "video", "crypto", "other")
-SERVICE_CATEGORIES = ("core_critical_local", "sustainment", "other")
+SERVICE_KINDS = ("voice", "data", "other")
+SERVICE_CATEGORIES = ("critical", "sustainment", "other")
 SERVICE_REACH = ("local", "external")
-GATEWAY_KINDS = ("isp", "modem", "satellite", "other")
+GATEWAY_KINDS = ("milsat", "commercial", "other")
 GATEWAY_PACE = ("primary", "alternate", "contingency", "emergency")
 USER_ROLES = ("viewer", "operator", "admin")
 VALIDATION_SOURCES = ("manual", "ingest")

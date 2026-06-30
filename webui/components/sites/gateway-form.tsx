@@ -40,7 +40,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState({
     name: gateway?.name ?? "",
-    kind: (gateway?.kind ?? "isp") as GatewayKind,
+    kind: (gateway?.kind ?? "commercial") as GatewayKind,
     provider: gateway?.provider ?? "",
     status: (gateway?.status ?? "unknown") as StatusValue,
     pace: (gateway?.pace ?? "primary") as GatewayPace,
@@ -78,7 +78,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
       if (!editing) {
         setDraft({
           name: "",
-          kind: "isp",
+          kind: "commercial",
           provider: "",
           status: "unknown",
           pace: "primary",

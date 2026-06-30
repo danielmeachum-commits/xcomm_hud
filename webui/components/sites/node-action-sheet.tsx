@@ -3,19 +3,13 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { ArrowDown, ArrowUp, ExternalLink, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, ExternalLink, Trash2, X } from "lucide-react"
 
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { LocalTime, TimeAgo } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import {
   categoryLabel,
   gatewayIcon,
@@ -28,14 +22,16 @@ import { formatZulu } from "@/lib/time"
 import type { Gateway, Service } from "@/lib/types"
 
 interface Props {
-  open: boolean
   onClose: () => void
   /** Either a service or a gateway being acted on. */
   service?: Service | null
   gateway?: Gateway | null
 }
 
-export function NodeActionSheet({ open, onClose, service, gateway }: Props) {
+/** Inline side panel for the site canvas. Renders next to the canvas (no
+ *  overlay / no dim) — the parent decides layout. Returns null when nothing
+ *  is selected. */
+export function NodeActionPanel({ onClose, service, gateway }: Props) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
 
@@ -69,27 +65,32 @@ export function NodeActionSheet({ open, onClose, service, gateway }: Props) {
     }
   }
 
+  if (!service && !gateway) return null
+
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-[420px] sm:max-w-[420px]">
-        {service && (
-          <ServiceSheetBody
-            service={service}
-            pending={pending}
-            onMove={(dir) => move("service", service.id, dir)}
-            onDelete={() => remove("service", service.id, service.name)}
-          />
-        )}
-        {gateway && (
-          <GatewaySheetBody
-            gateway={gateway}
-            pending={pending}
-            onMove={(dir) => move("gateway", gateway.id, dir)}
-            onDelete={() => remove("gateway", gateway.id, gateway.name)}
-          />
-        )}
-      </SheetContent>
-    </Sheet>
+    <aside className="h-full w-[380px] shrink-0 overflow-auto border-l border-border bg-background">
+      <div className="flex items-center justify-end p-2">
+        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close">
+          <X className="size-3.5" />
+        </Button>
+      </div>
+      {service && (
+        <ServiceSheetBody
+          service={service}
+          pending={pending}
+          onMove={(dir) => move("service", service.id, dir)}
+          onDelete={() => remove("service", service.id, service.name)}
+        />
+      )}
+      {gateway && (
+        <GatewaySheetBody
+          gateway={gateway}
+          pending={pending}
+          onMove={(dir) => move("gateway", gateway.id, dir)}
+          onDelete={() => remove("gateway", gateway.id, gateway.name)}
+        />
+      )}
+    </aside>
   )
 }
 
@@ -107,11 +108,11 @@ function ServiceSheetBody({
   const Icon = serviceIcon(service.icon, service.kind)
   return (
     <div className="flex flex-col gap-4 p-4">
-      <SheetHeader className="p-0">
+      <header className="p-0">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <Icon className="size-5 shrink-0 text-muted-foreground" />
-            <SheetTitle className="truncate">{service.name}</SheetTitle>
+            <h3 className="truncate text-base font-semibold">{service.name}</h3>
           </div>
           <ServiceStatusPill
             serviceId={service.id}
@@ -123,7 +124,7 @@ function ServiceSheetBody({
             allowedStatuses={service.allowed_statuses}
           />
         </div>
-      </SheetHeader>
+      </header>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
         <dt className="text-muted-foreground">Category</dt>
@@ -198,11 +199,11 @@ function GatewaySheetBody({
   const Icon = gatewayIcon(gateway.kind)
   return (
     <div className="flex flex-col gap-4 p-4">
-      <SheetHeader className="p-0">
+      <header className="p-0">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <Icon className="size-5 shrink-0 text-amber-700 dark:text-amber-400" />
-            <SheetTitle className="truncate">{gateway.name}</SheetTitle>
+            <h3 className="truncate text-base font-semibold">{gateway.name}</h3>
           </div>
           <GatewayStatusPill
             gatewayId={gateway.id}
@@ -212,7 +213,7 @@ function GatewaySheetBody({
             lastValidatedBy={gateway.validated_by_username}
           />
         </div>
-      </SheetHeader>
+      </header>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
         <dt className="text-muted-foreground">Kind</dt>

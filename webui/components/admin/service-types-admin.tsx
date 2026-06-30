@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  ICON_MAP,
+  ICON_NAMES,
   SERVICE_CATEGORIES,
   SERVICE_REACH_VALUES,
   categoryLabel,
@@ -33,27 +35,7 @@ import type {
   StatusValue,
 } from "@/lib/types"
 
-const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
-const ICON_OPTIONS = [
-  "globe",
-  "shield",
-  "phone",
-  "phone-call",
-  "message-square",
-  "lock",
-  "folder",
-  "printer",
-  "cloud",
-  "router",
-  "satellite",
-  "antenna",
-  "network",
-  "radio",
-  "database",
-  "video",
-  "key-round",
-  "boxes",
-]
+const KINDS: ServiceKind[] = ["voice", "data", "other"]
 
 interface Props {
   templates: ServiceTemplate[]
@@ -316,22 +298,45 @@ function TemplateDialog({
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="icon">Icon</Label>
-              <select
-                id="icon"
-                value={draft.icon}
-                onChange={(e) => setDraft({ ...draft, icon: e.target.value })}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                disabled={pending}
-              >
-                <option value="">(default from kind)</option>
-                {ICON_OPTIONS.map((i) => (
-                  <option key={i} value={i}>
-                    {i}
-                  </option>
-                ))}
-              </select>
+              <Label htmlFor="icon-grid">Icon</Label>
+              <p className="text-[10px] text-muted-foreground">
+                Click to pick. Leave unset to default from kind.
+              </p>
             </div>
+          </div>
+          <div id="icon-grid" className="grid grid-cols-9 gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, icon: "" })}
+              className={cn(
+                "flex h-9 items-center justify-center rounded-md border text-[10px] uppercase",
+                draft.icon === "" ? "border-foreground bg-accent" : "border-input",
+              )}
+              title="Default from kind"
+              disabled={pending}
+            >
+              auto
+            </button>
+            {ICON_NAMES.map((name) => {
+              const IconComp = ICON_MAP[name]
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setDraft({ ...draft, icon: name })}
+                  className={cn(
+                    "flex h-9 items-center justify-center rounded-md border",
+                    draft.icon === name
+                      ? "border-foreground bg-accent"
+                      : "border-input hover:bg-accent/50",
+                  )}
+                  title={name}
+                  disabled={pending}
+                >
+                  <IconComp className="size-4" />
+                </button>
+              )
+            })}
           </div>
           <div className="space-y-1.5">
             <Label>Allowed statuses</Label>

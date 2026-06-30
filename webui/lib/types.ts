@@ -10,13 +10,13 @@ export type StatusValue =
   | "offline"
   | "setup"
 
-export type ServiceKind = "voip" | "data" | "video" | "crypto" | "other"
+export type ServiceKind = "voice" | "data" | "other"
 
-export type ServiceCategory = "core_critical_local" | "sustainment" | "other"
+export type ServiceCategory = "critical" | "sustainment" | "other"
 
 export type ServiceReach = "local" | "external"
 
-export type GatewayKind = "isp" | "modem" | "satellite" | "other"
+export type GatewayKind = "milsat" | "commercial" | "other"
 
 export type GatewayPace = "primary" | "alternate" | "contingency" | "emergency"
 

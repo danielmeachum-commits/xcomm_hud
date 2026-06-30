@@ -34,7 +34,7 @@ export default async function ServicesPage() {
     list.push(s)
     byCategory.set(s.category, list)
   }
-  const categoryOrder = ["core_critical_local", "sustainment", "other"] as const
+  const categoryOrder = ["critical", "sustainment", "other"] as const
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">

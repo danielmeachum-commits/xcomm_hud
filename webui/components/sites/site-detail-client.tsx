@@ -43,7 +43,7 @@ interface Props {
 }
 
 const CATEGORY_ORDER: ServiceCategory[] = [
-  "core_critical_local",
+  "critical",
   "sustainment",
   "other",
 ]

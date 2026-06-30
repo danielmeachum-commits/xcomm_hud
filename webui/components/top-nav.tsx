@@ -105,6 +105,9 @@ export function TopNav({ user, title = "xCOMM HUD" }: TopNavProps) {
                   <DropdownMenuItem render={<Link href="/admin/service-types" />}>
                     Service catalog
                   </DropdownMenuItem>
+                  <DropdownMenuItem render={<Link href="/admin/gateways" />}>
+                    Gateways
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
               </>
             )}

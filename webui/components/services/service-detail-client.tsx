@@ -28,7 +28,7 @@ import type {
   Validation,
 } from "@/lib/types"
 
-const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
+const KINDS: ServiceKind[] = ["voice", "data", "other"]
 
 interface Props {
   service: Service
