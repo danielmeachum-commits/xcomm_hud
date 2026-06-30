@@ -98,6 +98,26 @@ class SiteOut(_ORM):
 # --- Service template ---
 
 
+class ServiceTemplateIn(BaseModel):
+    name: str
+    kind: ServiceKind = "other"
+    category: ServiceCategory = "other"
+    reach: ServiceReach = "local"
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    allowed_statuses: Optional[list[StatusValue]] = None
+
+
+class ServiceTemplatePatch(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[ServiceKind] = None
+    category: Optional[ServiceCategory] = None
+    reach: Optional[ServiceReach] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    allowed_statuses: Optional[list[StatusValue]] = None
+
+
 class ServiceTemplateOut(_ORM):
     id: int
     name: str
@@ -106,6 +126,7 @@ class ServiceTemplateOut(_ORM):
     reach: ServiceReach
     icon: Optional[str] = None
     description: Optional[str] = None
+    allowed_statuses: Optional[list[StatusValue]] = None
 
 
 # --- Service ---
@@ -114,6 +135,7 @@ class ServiceTemplateOut(_ORM):
 class ServiceIn(BaseModel):
     name: str
     site_id: int
+    service_template_id: Optional[int] = None
     kind: ServiceKind = "other"
     category: ServiceCategory = "other"
     reach: ServiceReach = "local"
@@ -126,12 +148,14 @@ class ServiceIn(BaseModel):
 class ServicePatch(BaseModel):
     name: Optional[str] = None
     site_id: Optional[int] = None
+    service_template_id: Optional[int] = None
     kind: Optional[ServiceKind] = None
     category: Optional[ServiceCategory] = None
     reach: Optional[ServiceReach] = None
     icon: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
+    display_order: Optional[int] = None
 
 
 class ServiceValidateIn(BaseModel):
@@ -144,6 +168,7 @@ class ServiceOut(_ORM):
     id: int
     name: str
     site_id: int
+    service_template_id: Optional[int] = None
     kind: ServiceKind
     category: ServiceCategory
     reach: ServiceReach
@@ -151,9 +176,11 @@ class ServiceOut(_ORM):
     description: Optional[str] = None
     status: StatusValue
     effective_status: StatusValue = "unknown"  # cascaded; same as status for local
+    allowed_statuses: Optional[list[StatusValue]] = None  # from template if has one
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
+    display_order: int = 0
     notes: Optional[str] = None
 
 
@@ -173,6 +200,7 @@ class GatewayPatch(BaseModel):
     kind: Optional[GatewayKind] = None
     provider: Optional[str] = None
     notes: Optional[str] = None
+    display_order: Optional[int] = None
 
 
 class GatewayValidateIn(BaseModel):
@@ -191,6 +219,7 @@ class GatewayOut(_ORM):
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
+    display_order: int = 0
     notes: Optional[str] = None
 
 
@@ -259,6 +288,7 @@ class ServiceRollup(BaseModel):
     icon: Optional[str] = None
     status: StatusValue
     effective_status: StatusValue
+    allowed_statuses: Optional[list[StatusValue]] = None
     site_id: int
     site_name: str
     validated_at: Optional[datetime.datetime] = None

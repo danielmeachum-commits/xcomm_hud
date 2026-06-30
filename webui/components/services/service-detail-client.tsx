@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
+import { Breadcrumbs } from "@/components/breadcrumbs"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { ValidationHistory } from "@/components/services/validation-history"
 import { Button } from "@/components/ui/button"
@@ -86,8 +87,18 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
     if (res.ok) router.push("/services")
   }
 
+  const siteName = sites.find((s) => s.id === service.site_id)?.name
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/sites" },
+          ...(siteName
+            ? [{ label: siteName, href: `/sites/${service.site_id}` }]
+            : []),
+          { label: service.name },
+        ]}
+      />
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="flex items-center gap-3">
           <Icon className="size-7 text-muted-foreground" />
@@ -111,6 +122,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
           effectiveStatus={service.effective_status}
           lastValidatedAt={service.validated_at}
           lastValidatedBy={service.validated_by_username}
+          allowedStatuses={service.allowed_statuses}
         />
       </header>
 

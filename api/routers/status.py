@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from effective import effective_service_status
-from models import Gateway, Service, Site
+from models import Gateway, Service, ServiceTemplate, Site
 from rollup import site_status
 from schemas import ServiceRollup, SiteRollup, StatusRollupOut
 
@@ -18,7 +20,11 @@ router = APIRouter(prefix="/status", tags=["status"])
 @router.get("/rollup", response_model=StatusRollupOut)
 def rollup(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
     sites = db.query(Site).order_by(Site.name).all()
-    services = db.query(Service).order_by(Service.category, Service.name).all()
+    services = (
+        db.query(Service)
+        .order_by(Service.category, Service.display_order, Service.name)
+        .all()
+    )
     gateways = db.query(Gateway).all()
 
     services_by_site: dict[int, list[Service]] = {}
@@ -49,23 +55,35 @@ def rollup(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
             )
         )
 
-    service_rollups = [
-        ServiceRollup(
-            id=s.id,
-            name=s.name,
-            kind=s.kind,
-            category=s.category,
-            reach=s.reach,
-            icon=s.icon,
-            status=s.status,
-            effective_status=effective_service_status(
-                s, gateways_by_site.get(s.site_id, [])
-            ),
-            site_id=s.site_id,
-            site_name=site_name_by_id[s.site_id],
-            validated_at=s.validated_at,
+    template_cache: dict[int, ServiceTemplate] = {}
+    service_rollups: list[ServiceRollup] = []
+    for s in services:
+        allowed: Optional[list[str]] = None
+        if s.service_template_id is not None:
+            tpl = template_cache.get(s.service_template_id)
+            if tpl is None:
+                tpl = db.get(ServiceTemplate, s.service_template_id)
+                if tpl:
+                    template_cache[s.service_template_id] = tpl
+            if tpl and tpl.allowed_statuses:
+                allowed = tpl.allowed_statuses
+        service_rollups.append(
+            ServiceRollup(
+                id=s.id,
+                name=s.name,
+                kind=s.kind,
+                category=s.category,
+                reach=s.reach,
+                icon=s.icon,
+                status=s.status,
+                effective_status=effective_service_status(
+                    s, gateways_by_site.get(s.site_id, [])
+                ),
+                allowed_statuses=allowed,
+                site_id=s.site_id,
+                site_name=site_name_by_id[s.site_id],
+                validated_at=s.validated_at,
+            )
         )
-        for s in services
-    ]
 
     return StatusRollupOut(sites=site_rollups, services=service_rollups)

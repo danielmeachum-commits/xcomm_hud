@@ -57,6 +57,7 @@ export interface Service {
   id: number
   name: string
   site_id: number
+  service_template_id: number | null
   kind: ServiceKind
   category: ServiceCategory
   reach: ServiceReach
@@ -64,9 +65,11 @@ export interface Service {
   description: string | null
   status: StatusValue
   effective_status: StatusValue
+  allowed_statuses: StatusValue[] | null
   validated_at: string | null
   validated_by_user_id: number | null
   validated_by_username: string | null
+  display_order: number
   notes: string | null
 }
 
@@ -78,6 +81,7 @@ export interface ServiceTemplate {
   reach: ServiceReach
   icon: string | null
   description: string | null
+  allowed_statuses: StatusValue[] | null
 }
 
 export interface Gateway {
@@ -90,6 +94,7 @@ export interface Gateway {
   validated_at: string | null
   validated_by_user_id: number | null
   validated_by_username: string | null
+  display_order: number
   notes: string | null
 }
 
@@ -135,6 +140,7 @@ export interface ServiceRollup {
   icon: string | null
   status: StatusValue
   effective_status: StatusValue
+  allowed_statuses: StatusValue[] | null
   site_id: number
   site_name: string
   validated_at: string | null

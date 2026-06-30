@@ -1,8 +1,8 @@
-"""Gateway CRUD + validation endpoint."""
+"""Gateway CRUD + validation + reorder."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from db import get_db
@@ -33,7 +33,7 @@ def list_site_gateways(
     rows = (
         db.query(Gateway)
         .filter(Gateway.site_id == site_id)
-        .order_by(Gateway.name)
+        .order_by(Gateway.display_order, Gateway.name)
         .all()
     )
     return [_gateway_out(db, g) for g in rows]
@@ -52,7 +52,14 @@ def create_gateway(
 ):
     if db.get(Site, site_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
-    gw = Gateway(site_id=site_id, **body.model_dump())
+    max_order = (
+        db.query(Gateway)
+        .filter(Gateway.site_id == site_id)
+        .order_by(Gateway.display_order.desc())
+        .first()
+    )
+    next_order = (max_order.display_order + 1) if max_order else 0
+    gw = Gateway(site_id=site_id, display_order=next_order, **body.model_dump())
     db.add(gw)
     db.flush()
     return _gateway_out(db, gw)
@@ -63,7 +70,11 @@ def list_all_gateways(
     db: Session = Depends(get_db),
     _=Depends(requires("viewer")),
 ):
-    rows = db.query(Gateway).order_by(Gateway.site_id, Gateway.name).all()
+    rows = (
+        db.query(Gateway)
+        .order_by(Gateway.site_id, Gateway.display_order, Gateway.name)
+        .all()
+    )
     return [_gateway_out(db, g) for g in rows]
 
 
@@ -112,6 +123,38 @@ def validate_gateway(
     gw.status = body.status
     gw.validated_at = v.validated_at
     gw.validated_by_user_id = current_user.id
+    db.flush()
+    db.refresh(gw)
+    return _gateway_out(db, gw)
+
+
+@router.post("/gateways/{gateway_id}/move", response_model=GatewayOut)
+def move_gateway(
+    gateway_id: int,
+    direction: str = Query(..., pattern="^(up|down)$"),
+    db: Session = Depends(get_db),
+    _=Depends(requires("operator")),
+):
+    gw = db.get(Gateway, gateway_id)
+    if gw is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+
+    siblings = (
+        db.query(Gateway)
+        .filter(Gateway.site_id == gw.site_id)
+        .order_by(Gateway.display_order, Gateway.id)
+        .all()
+    )
+    idx = next((i for i, g in enumerate(siblings) if g.id == gw.id), None)
+    if idx is None:
+        return _gateway_out(db, gw)
+
+    swap_idx = idx - 1 if direction == "up" else idx + 1
+    if swap_idx < 0 or swap_idx >= len(siblings):
+        return _gateway_out(db, gw)
+
+    other = siblings[swap_idx]
+    gw.display_order, other.display_order = other.display_order, gw.display_order
     db.flush()
     db.refresh(gw)
     return _gateway_out(db, gw)

@@ -9,6 +9,15 @@ export const STATUS_VALUES: StatusValue[] = [
   "setup",
 ]
 
+export type StatusCategory = "operational" | "issue" | "transitional" | "unknown"
+
+export const STATUS_CATEGORIES: { key: StatusCategory; label: string; values: StatusValue[] }[] = [
+  { key: "operational", label: "Operational", values: ["up"] },
+  { key: "issue", label: "Issue", values: ["degraded", "down", "offline"] },
+  { key: "transitional", label: "Transitional", values: ["setup"] },
+  { key: "unknown", label: "Unknown", values: ["unknown"] },
+]
+
 export function statusLabel(s: StatusValue): string {
   switch (s) {
     case "up":

@@ -2,6 +2,7 @@ import Link from "next/link"
 
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
+import { Breadcrumbs } from "@/components/breadcrumbs"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import {
@@ -36,6 +37,7 @@ export default async function ServicesPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
+      <Breadcrumbs items={[{ label: "Services" }]} />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Services</h1>
@@ -95,6 +97,7 @@ export default async function ServicesPage() {
                           effectiveStatus={s.effective_status}
                           lastValidatedAt={s.validated_at}
                           lastValidatedBy={s.validated_by_username}
+                          allowedStatuses={s.allowed_statuses}
                         />
                       </li>
                     )

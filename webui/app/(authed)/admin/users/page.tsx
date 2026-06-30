@@ -1,5 +1,6 @@
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
+import { Breadcrumbs } from "@/components/breadcrumbs"
 import { UsersAdminClient } from "@/components/users-admin-client"
 import type { User } from "@/lib/types"
 
@@ -20,5 +21,10 @@ export default async function UsersAdminPage() {
     // ignore
   }
 
-  return <UsersAdminClient initialUsers={users} />
+  return (
+    <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
+      <Breadcrumbs items={[{ label: "Admin" }, { label: "Users" }]} />
+      <UsersAdminClient initialUsers={users} />
+    </div>
+  )
 }

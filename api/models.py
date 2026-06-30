@@ -10,10 +10,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -112,6 +114,8 @@ class ServiceTemplate(Base):
     reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # null = all 6 status values allowed; otherwise restricts the picker.
+    allowed_statuses: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
 
 
 class Service(Base):
@@ -120,6 +124,11 @@ class Service(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     site_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False
+    )
+    service_template_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("service_template.id", ondelete="SET NULL"),
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
@@ -134,6 +143,7 @@ class Service(Base):
     validated_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -165,6 +175,7 @@ class Gateway(Base):
     validated_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now

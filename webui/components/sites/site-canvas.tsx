@@ -2,7 +2,7 @@
 
 import "@xyflow/react/dist/style.css"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import {
   Background,
   BackgroundVariant,
@@ -15,9 +15,11 @@ import {
   ReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react"
+import { MoreHorizontal } from "lucide-react"
 
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
+import { NodeActionSheet } from "@/components/sites/node-action-sheet"
 import { gatewayIcon, gatewayKindLabel, serviceIcon } from "@/lib/service-meta"
 import { cn } from "@/lib/utils"
 import type { Gateway, Service } from "@/lib/types"
@@ -30,10 +32,12 @@ const LANE_TOP = 80
 
 interface ServiceNodeData extends Record<string, unknown> {
   service: Service
+  onOpen: () => void
 }
 
 interface GatewayNodeData extends Record<string, unknown> {
   gateway: Gateway
+  onOpen: () => void
 }
 
 interface LaneHeaderData extends Record<string, unknown> {
@@ -61,7 +65,7 @@ function LaneHeaderNode({ data }: NodeProps) {
 }
 
 function ServiceCanvasNode({ data }: NodeProps) {
-  const { service } = data as ServiceNodeData
+  const { service, onOpen } = data as ServiceNodeData
   const Icon = serviceIcon(service.icon, service.kind)
   const isExternal = service.reach === "external"
   return (
@@ -69,9 +73,7 @@ function ServiceCanvasNode({ data }: NodeProps) {
       className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm transition-colors hover:bg-accent/40"
       style={{ width: LANE_WIDTH }}
     >
-      {isExternal && (
-        <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
-      )}
+      <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
       <div className="flex items-center justify-between gap-2">
         <a
           href={`/services/${service.id}`}
@@ -90,17 +92,32 @@ function ServiceCanvasNode({ data }: NodeProps) {
           effectiveStatus={service.effective_status}
           lastValidatedAt={service.validated_at}
           lastValidatedBy={service.validated_by_username}
+          allowedStatuses={service.allowed_statuses}
         />
       </div>
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        {service.kind}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          {service.kind} {isExternal ? "· external" : "· local"}
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+          onPointerDownCapture={(e) => e.stopPropagation()}
+          className="nodrag rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label="Actions"
+        >
+          <MoreHorizontal className="size-3.5" />
+        </button>
       </div>
     </div>
   )
 }
 
 function GatewayCanvasNode({ data }: NodeProps) {
-  const { gateway } = data as GatewayNodeData
+  const { gateway, onOpen } = data as GatewayNodeData
   const Icon = gatewayIcon(gateway.kind)
   return (
     <div
@@ -122,9 +139,23 @@ function GatewayCanvasNode({ data }: NodeProps) {
           lastValidatedBy={gateway.validated_by_username}
         />
       </div>
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        {gatewayKindLabel(gateway.kind)}
-        {gateway.provider ? ` · ${gateway.provider}` : ""}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          {gatewayKindLabel(gateway.kind)}
+          {gateway.provider ? ` · ${gateway.provider}` : ""}
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+          onPointerDownCapture={(e) => e.stopPropagation()}
+          className="nodrag rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label="Actions"
+        >
+          <MoreHorizontal className="size-3.5" />
+        </button>
       </div>
     </div>
   )
@@ -141,8 +172,17 @@ interface Props {
   gateways: Gateway[]
 }
 
-function SiteCanvasInner({ services, gateways }: Props) {
+function SiteCanvasInner({
+  services,
+  gateways,
+  onOpenService,
+  onOpenGateway,
+}: Props & {
+  onOpenService: (svc: Service) => void
+  onOpenGateway: (gw: Gateway) => void
+}) {
   const { nodes, edges } = useMemo(() => {
+    // Services are pre-sorted by display_order from the API; preserve that here.
     const local = services.filter((s) => s.reach === "local")
     const external = services.filter((s) => s.reach === "external")
 
@@ -179,7 +219,7 @@ function SiteCanvasInner({ services, gateways }: Props) {
         id: `service-${svc.id}`,
         type: "service",
         position: { x: LANE_X.local, y: LANE_TOP + i * (NODE_HEIGHT + NODE_GAP) },
-        data: { service: svc },
+        data: { service: svc, onOpen: () => onOpenService(svc) },
         draggable: false,
       })
     })
@@ -189,7 +229,7 @@ function SiteCanvasInner({ services, gateways }: Props) {
         id: `gateway-${gw.id}`,
         type: "gateway",
         position: { x: LANE_X.gateways, y: LANE_TOP + i * (NODE_HEIGHT + NODE_GAP) },
-        data: { gateway: gw },
+        data: { gateway: gw, onOpen: () => onOpenGateway(gw) },
         draggable: false,
       })
     })
@@ -199,30 +239,50 @@ function SiteCanvasInner({ services, gateways }: Props) {
         id: `service-${svc.id}`,
         type: "service",
         position: { x: LANE_X.external, y: LANE_TOP + i * (NODE_HEIGHT + NODE_GAP) },
-        data: { service: svc },
+        data: { service: svc, onOpen: () => onOpenService(svc) },
         draggable: false,
       })
     })
 
-    if (gateways.length > 0) {
-      for (const gw of gateways) {
-        for (const svc of external) {
-          builtEdges.push({
-            id: `e-gw${gw.id}-svc${svc.id}`,
-            source: `gateway-${gw.id}`,
-            target: `service-${svc.id}`,
-            animated: gw.status === "up" && svc.effective_status === "up",
-            style: {
-              stroke: gw.status === "down" ? "rgb(239 68 68)" : "rgb(245 158 11)",
-              strokeDasharray: gw.status === "down" ? "4 4" : undefined,
-            },
-          })
-        }
+    // Edges from each gateway to ALL services at the site. Local edges are
+    // subtle (slate, dashed, no recolor when gateway down) since local is not
+    // gateway-dependent; external edges go red when the gateway drops.
+    for (const gw of gateways) {
+      // local: gateway is on the right of locals, so source=service target=gateway
+      for (const svc of local) {
+        const animated = gw.status === "up" && svc.effective_status === "up"
+        builtEdges.push({
+          id: `e-svc${svc.id}-gw${gw.id}`,
+          source: `service-${svc.id}`,
+          target: `gateway-${gw.id}`,
+          animated,
+          style: {
+            stroke: "rgb(148 163 184)",
+            strokeDasharray: "2 4",
+            strokeWidth: 1.2,
+            opacity: 0.7,
+          },
+        })
+      }
+      // external: gateway is on the left of externals, so source=gateway target=service
+      for (const svc of external) {
+        const isDown = gw.status === "down"
+        builtEdges.push({
+          id: `e-gw${gw.id}-svc${svc.id}`,
+          source: `gateway-${gw.id}`,
+          target: `service-${svc.id}`,
+          animated: gw.status === "up" && svc.effective_status === "up",
+          style: {
+            stroke: isDown ? "rgb(239 68 68)" : "rgb(245 158 11)",
+            strokeDasharray: isDown ? "4 4" : undefined,
+            strokeWidth: 1.8,
+          },
+        })
       }
     }
 
     return { nodes: built, edges: builtEdges }
-  }, [services, gateways])
+  }, [services, gateways, onOpenService, onOpenGateway])
 
   return (
     <ReactFlow
@@ -242,6 +302,9 @@ function SiteCanvasInner({ services, gateways }: Props) {
 }
 
 export function SiteCanvas(props: Props) {
+  const [selectedService, setSelectedService] = useState<Service | null>(null)
+  const [selectedGateway, setSelectedGateway] = useState<Gateway | null>(null)
+
   if (props.services.length === 0 && props.gateways.length === 0) {
     return (
       <div className="flex h-[480px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
@@ -250,10 +313,31 @@ export function SiteCanvas(props: Props) {
     )
   }
   return (
-    <div className="h-[480px] w-full rounded-lg border border-border">
-      <ReactFlowProvider>
-        <SiteCanvasInner {...props} />
-      </ReactFlowProvider>
-    </div>
+    <>
+      <div className="h-[480px] w-full rounded-lg border border-border">
+        <ReactFlowProvider>
+          <SiteCanvasInner
+            {...props}
+            onOpenService={(svc) => {
+              setSelectedService(svc)
+              setSelectedGateway(null)
+            }}
+            onOpenGateway={(gw) => {
+              setSelectedGateway(gw)
+              setSelectedService(null)
+            }}
+          />
+        </ReactFlowProvider>
+      </div>
+      <NodeActionSheet
+        open={!!(selectedService || selectedGateway)}
+        onClose={() => {
+          setSelectedService(null)
+          setSelectedGateway(null)
+        }}
+        service={selectedService}
+        gateway={selectedGateway}
+      />
+    </>
   )
 }

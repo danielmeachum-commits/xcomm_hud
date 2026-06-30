@@ -5,6 +5,7 @@ import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import TransportBadge from "@/components/8starlabs-ui/transport-badge"
+import { Breadcrumbs } from "@/components/breadcrumbs"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceForm } from "@/components/services/service-form"
@@ -62,6 +63,12 @@ export function SiteDetailClient({
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/sites" },
+          { label: site.name },
+        ]}
+      />
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="text-lg font-semibold tracking-tight">{site.name}</h1>
@@ -199,6 +206,7 @@ export function SiteDetailClient({
                           effectiveStatus={s.effective_status}
                           lastValidatedAt={s.validated_at}
                           lastValidatedBy={s.validated_by_username}
+                          allowedStatuses={s.allowed_statuses}
                         />
                       </li>
                     )

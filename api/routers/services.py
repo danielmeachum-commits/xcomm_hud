@@ -1,14 +1,14 @@
-"""Service CRUD + validation endpoint."""
+"""Service CRUD + validation endpoint + reorder."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from effective import effective_service_status
-from models import Gateway, Service, Site, User, Validation
+from models import Gateway, Service, ServiceTemplate, Site, User, Validation
 from schemas import ServiceIn, ServiceOut, ServicePatch, ServiceValidateIn
 
 router = APIRouter(prefix="/services", tags=["services"])
@@ -20,6 +20,10 @@ def _service_out(db: Session, service: Service) -> ServiceOut:
     )
     out = ServiceOut.model_validate(service)
     out.effective_status = effective_service_status(service, gateways)
+    if service.service_template_id is not None:
+        tpl = db.get(ServiceTemplate, service.service_template_id)
+        if tpl and tpl.allowed_statuses:
+            out.allowed_statuses = tpl.allowed_statuses
     if service.validated_by_user_id is not None:
         u = db.get(User, service.validated_by_user_id)
         if u:
@@ -32,7 +36,11 @@ def list_services(
     db: Session = Depends(get_db),
     _=Depends(requires("viewer")),
 ):
-    services = db.query(Service).order_by(Service.name).all()
+    services = (
+        db.query(Service)
+        .order_by(Service.site_id, Service.display_order, Service.name)
+        .all()
+    )
     return [_service_out(db, s) for s in services]
 
 
@@ -44,7 +52,21 @@ def create_service(
 ):
     if db.get(Site, body.site_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
-    service = Service(**body.model_dump())
+    if body.service_template_id is not None and db.get(
+        ServiceTemplate, body.service_template_id
+    ) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service template not found")
+
+    # Place new service at the end of the site's current list.
+    max_order = (
+        db.query(Service)
+        .filter(Service.site_id == body.site_id)
+        .order_by(Service.display_order.desc())
+        .first()
+    )
+    next_order = (max_order.display_order + 1) if max_order else 0
+
+    service = Service(**body.model_dump(), display_order=next_order)
     db.add(service)
     db.flush()
     return _service_out(db, service)
@@ -76,6 +98,11 @@ def patch_service(
     data = body.model_dump(exclude_unset=True)
     if "site_id" in data and db.get(Site, data["site_id"]) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    if "service_template_id" in data and data["service_template_id"] is not None:
+        if db.get(ServiceTemplate, data["service_template_id"]) is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Service template not found"
+            )
 
     for k, v in data.items():
         setattr(service, k, v)
@@ -92,11 +119,6 @@ def validate_service(
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
-    """Record a validation: someone confirmed the service is in this state.
-
-    Always creates a `validation` row; updates the service's stored status,
-    validated_at, validated_by_user_id.
-    """
     service = db.get(Service, service_id)
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
@@ -124,11 +146,52 @@ def validate_service(
     return _service_out(db, service)
 
 
+@router.post("/{service_id}/move", response_model=ServiceOut)
+def move_service(
+    service_id: int,
+    direction: str = Query(..., pattern="^(up|down)$"),
+    db: Session = Depends(get_db),
+    _=Depends(requires("operator")),
+):
+    """Swap display_order with the adjacent service at the same site.
+
+    Adjacency is computed over services sharing the same `reach` lane so a
+    move only reshuffles within Local or within External, matching the canvas
+    layout the operator sees.
+    """
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+
+    siblings = (
+        db.query(Service)
+        .filter(
+            Service.site_id == service.site_id,
+            Service.reach == service.reach,
+        )
+        .order_by(Service.display_order, Service.id)
+        .all()
+    )
+    idx = next((i for i, s in enumerate(siblings) if s.id == service.id), None)
+    if idx is None:
+        return _service_out(db, service)
+
+    swap_idx = idx - 1 if direction == "up" else idx + 1
+    if swap_idx < 0 or swap_idx >= len(siblings):
+        return _service_out(db, service)
+
+    other = siblings[swap_idx]
+    service.display_order, other.display_order = other.display_order, service.display_order
+    db.flush()
+    db.refresh(service)
+    return _service_out(db, service)
+
+
 @router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_service(
     service_id: int,
     db: Session = Depends(get_db),
-    _=Depends(requires("admin")),
+    _=Depends(requires("operator")),
 ):
     service = db.get(Service, service_id)
     if service is None:

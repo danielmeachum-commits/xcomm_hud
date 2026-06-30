@@ -15,7 +15,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
+import {
+  STATUS_CATEGORIES,
+  statusLabel,
+  statusToIndicatorState,
+} from "@/lib/status"
 import { formatLocal, formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { StatusValue } from "@/lib/types"
@@ -30,6 +34,8 @@ interface Props {
   currentStatus: StatusValue
   lastValidatedAt: string | null
   lastValidatedBy: string | null
+  /** Optional whitelist from the service template; if omitted, all are allowed. */
+  allowedStatuses?: StatusValue[] | null
 }
 
 /** "YYYY-MM-DDTHH:mm" — value format for <input type="datetime-local">. */
@@ -49,6 +55,7 @@ export function ValidationDialog({
   currentStatus,
   lastValidatedAt,
   lastValidatedBy,
+  allowedStatuses,
 }: Props) {
   const router = useRouter()
   const [status, setStatus] = useState<StatusValue>(currentStatus)
@@ -180,27 +187,45 @@ export function ValidationDialog({
             </div>
           </div>
 
-          {/* Status picker */}
+          {/* Status picker — grouped by category, optionally restricted by template. */}
           <div className="space-y-1.5">
             <Label>Status</Label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {STATUS_VALUES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatus(s)}
-                  className={cn(
-                    "flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
-                    status === s
-                      ? "border-foreground bg-accent"
-                      : "border-input hover:bg-accent/50",
-                  )}
-                  disabled={pending}
-                >
-                  <StatusIndicator state={statusToIndicatorState(s)} size="sm" />
-                  {statusLabel(s)}
-                </button>
-              ))}
+            <div className="flex flex-col gap-3">
+              {STATUS_CATEGORIES.map((cat) => {
+                const options = cat.values.filter(
+                  (s) => !allowedStatuses || allowedStatuses.includes(s),
+                )
+                if (options.length === 0) return null
+                return (
+                  <div key={cat.key} className="flex flex-col gap-1.5">
+                    <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                      {cat.label}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {options.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setStatus(s)}
+                          className={cn(
+                            "flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                            status === s
+                              ? "border-foreground bg-accent"
+                              : "border-input hover:bg-accent/50",
+                          )}
+                          disabled={pending}
+                        >
+                          <StatusIndicator
+                            state={statusToIndicatorState(s)}
+                            size="sm"
+                          />
+                          {statusLabel(s)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 

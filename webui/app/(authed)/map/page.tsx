@@ -1,5 +1,6 @@
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
+import { Breadcrumbs } from "@/components/breadcrumbs"
 import { MapCanvas } from "@/components/map/map-canvas"
 import type { MapBundle } from "@/lib/types"
 
@@ -21,6 +22,7 @@ export default async function MapPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
+      <Breadcrumbs items={[{ label: "Map" }]} />
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Map</h1>
         <p className="text-xs text-muted-foreground">

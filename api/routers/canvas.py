@@ -12,6 +12,7 @@ from models import (
     CanvasAnnotation,
     Gateway,
     Service,
+    ServiceTemplate,
     Site,
     SiteCanvasPosition,
     User,
@@ -35,8 +36,16 @@ router = APIRouter(prefix="/canvas", tags=["canvas"])
 @router.get("/map", response_model=MapBundle)
 def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
     sites = db.query(Site).order_by(Site.name).all()
-    services = db.query(Service).order_by(Service.name).all()
-    gateways = db.query(Gateway).order_by(Gateway.site_id, Gateway.name).all()
+    services = (
+        db.query(Service)
+        .order_by(Service.site_id, Service.display_order, Service.name)
+        .all()
+    )
+    gateways = (
+        db.query(Gateway)
+        .order_by(Gateway.site_id, Gateway.display_order, Gateway.name)
+        .all()
+    )
     positions = db.query(SiteCanvasPosition).all()
     annotations = db.query(CanvasAnnotation).order_by(CanvasAnnotation.id).all()
 
@@ -56,12 +65,21 @@ def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
         out.status = site_status([effective_service_status(s, gws) for s in svcs])
         site_outs.append(out)
 
+    template_cache: dict[int, ServiceTemplate] = {}
     service_outs: list[ServiceOut] = []
     user_cache: dict[int, str] = {}
     for s in services:
         gws = gateways_by_site.get(s.site_id, [])
         so = ServiceOut.model_validate(s)
         so.effective_status = effective_service_status(s, gws)
+        if s.service_template_id is not None:
+            tpl = template_cache.get(s.service_template_id)
+            if tpl is None:
+                tpl = db.get(ServiceTemplate, s.service_template_id)
+                if tpl:
+                    template_cache[s.service_template_id] = tpl
+            if tpl and tpl.allowed_statuses:
+                so.allowed_statuses = tpl.allowed_statuses
         if s.validated_by_user_id is not None:
             uname = user_cache.get(s.validated_by_user_id)
             if uname is None:

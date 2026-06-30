@@ -18,6 +18,8 @@ interface Props {
   effectiveStatus?: StatusValue
   lastValidatedAt?: string | null
   lastValidatedBy?: string | null
+  /** Optional whitelist of statuses this service can be set to. */
+  allowedStatuses?: StatusValue[] | null
   className?: string
 }
 
@@ -28,6 +30,7 @@ export function ServiceStatusPill({
   effectiveStatus,
   lastValidatedAt = null,
   lastValidatedBy = null,
+  allowedStatuses = null,
   className,
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -67,6 +70,7 @@ export function ServiceStatusPill({
         currentStatus={status}
         lastValidatedAt={lastValidatedAt}
         lastValidatedBy={lastValidatedBy}
+        allowedStatuses={allowedStatuses}
       />
     </>
   )

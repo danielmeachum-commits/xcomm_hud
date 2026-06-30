@@ -65,6 +65,7 @@ export function ServiceHealthRollupWidget({ data }: WidgetProps) {
                       status={s.status}
                       effectiveStatus={s.effective_status}
                       lastValidatedAt={s.validated_at}
+                      allowedStatuses={s.allowed_statuses}
                     />
                   </li>
                 )

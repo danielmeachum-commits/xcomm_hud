@@ -50,6 +50,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
 
   const initial = {
     template_id: "" as string,
+    service_template_id: null as number | null,
     name: "",
     site_id: defaultSiteId ?? sites[0]?.id ?? 0,
     kind: "other" as ServiceKind,
@@ -65,7 +66,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
 
   function pickTemplate(idStr: string) {
     if (!idStr) {
-      setDraft({ ...draft, template_id: "" })
+      setDraft({ ...draft, template_id: "", service_template_id: null })
       return
     }
     const t = templates.find((t) => String(t.id) === idStr)
@@ -73,6 +74,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
     setDraft({
       ...draft,
       template_id: idStr,
+      service_template_id: t.id,
       name: t.name,
       kind: t.kind,
       category: t.category,
@@ -96,6 +98,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
         body: JSON.stringify({
           name: draft.name,
           site_id: draft.site_id,
+          service_template_id: draft.service_template_id,
           kind: draft.kind,
           category: draft.category,
           reach: draft.reach,
