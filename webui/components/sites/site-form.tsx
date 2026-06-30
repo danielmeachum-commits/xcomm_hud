@@ -53,16 +53,21 @@ export function SiteForm({ site, triggerLabel }: Props) {
     setPending(true)
     setError(null)
     try {
-      const body = {
+      // On edit, omit fpcon/emcon — those now flow through the audit-logged
+      // pills on the site detail page. The dialog still owns the
+      // show_fpcon/show_emcon visibility toggles.
+      const body: Record<string, unknown> = {
         name: draft.name,
         location_label: draft.location_label || null,
-        fpcon: draft.fpcon,
-        emcon: draft.emcon,
         show_fpcon: draft.show_fpcon,
         show_emcon: draft.show_emcon,
         lat: draft.lat ? Number(draft.lat) : null,
         lon: draft.lon ? Number(draft.lon) : null,
         notes: draft.notes || null,
+      }
+      if (!editing) {
+        body.fpcon = draft.fpcon
+        body.emcon = draft.emcon
       }
       const url = editing ? `/api/be/sites/${site!.id}` : "/api/be/sites"
       const method = editing ? "PATCH" : "POST"
@@ -119,44 +124,46 @@ export function SiteForm({ site, triggerLabel }: Props) {
               disabled={pending}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="fpcon">FPCON</Label>
-              <select
-                id="fpcon"
-                value={draft.fpcon}
-                onChange={(e) =>
-                  setDraft({ ...draft, fpcon: e.target.value as Fpcon })
-                }
-                disabled={pending}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {FPCON_LEVELS.map((f) => (
-                  <option key={f} value={f}>
-                    {fpconLabel(f)}
-                  </option>
-                ))}
-              </select>
+          {!editing && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="fpcon">Initial FPCON</Label>
+                <select
+                  id="fpcon"
+                  value={draft.fpcon}
+                  onChange={(e) =>
+                    setDraft({ ...draft, fpcon: e.target.value as Fpcon })
+                  }
+                  disabled={pending}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {FPCON_LEVELS.map((f) => (
+                    <option key={f} value={f}>
+                      {fpconLabel(f)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="emcon">Initial EMCON</Label>
+                <select
+                  id="emcon"
+                  value={draft.emcon}
+                  onChange={(e) =>
+                    setDraft({ ...draft, emcon: e.target.value as Emcon })
+                  }
+                  disabled={pending}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {EMCON_LEVELS.map((e) => (
+                    <option key={e} value={e}>
+                      {emconLabel(e)}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="emcon">EMCON</Label>
-              <select
-                id="emcon"
-                value={draft.emcon}
-                onChange={(e) =>
-                  setDraft({ ...draft, emcon: e.target.value as Emcon })
-                }
-                disabled={pending}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {EMCON_LEVELS.map((e) => (
-                  <option key={e} value={e}>
-                    {emconLabel(e)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+          )}
           <div className="flex flex-wrap items-center gap-3">
             <TransportBadge
               fpcon={draft.show_fpcon ? draft.fpcon : undefined}
@@ -184,6 +191,12 @@ export function SiteForm({ site, triggerLabel }: Props) {
               />
               Show EMCON
             </label>
+            {editing && (
+              <p className="text-[11px] text-muted-foreground">
+                Change FPCON/EMCON levels from the site header — those changes
+                are logged to the event feed.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

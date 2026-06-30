@@ -4,7 +4,6 @@ import Link from "next/link"
 import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
-import TransportBadge from "@/components/8starlabs-ui/transport-badge"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
@@ -12,6 +11,7 @@ import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
 import { SiteForm } from "@/components/sites/site-form"
+import { SiteThreatPill } from "@/components/sites/site-threat-pill"
 import { LocalTime } from "@/components/time-display"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import { LayoutGrid, Network } from "lucide-react"
@@ -79,10 +79,24 @@ export function SiteDetailClient({
           <p className="text-xs text-muted-foreground">
             {site.location_label ?? "—"}
           </p>
-          <TransportBadge
-            fpcon={site.show_fpcon ? site.fpcon : undefined}
-            emcon={site.show_emcon ? site.emcon : undefined}
-          />
+          <div className="inline-flex items-center gap-1">
+            {site.show_fpcon && (
+              <SiteThreatPill
+                siteId={site.id}
+                siteName={site.name}
+                kind="fpcon"
+                level={site.fpcon}
+              />
+            )}
+            {site.show_emcon && (
+              <SiteThreatPill
+                siteId={site.id}
+                siteName={site.name}
+                kind="emcon"
+                level={site.emcon}
+              />
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider">

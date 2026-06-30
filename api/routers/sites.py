@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from db import get_db
 from deps import requires
 from effective import effective_service_status
-from models import Gateway, Service, Site
+from models import Gateway, Service, Site, User, Validation
 from rollup import site_status
-from schemas import SiteIn, SiteOut, SitePatch
+from schemas import SiteEmconIn, SiteFpconIn, SiteIn, SiteOut, SitePatch
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
@@ -65,6 +65,62 @@ def patch_site(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(site, k, v)
+    db.flush()
+    return _site_with_status(db, site)
+
+
+@router.post("/{site_id}/fpcon", response_model=SiteOut)
+def set_site_fpcon(
+    site_id: int,
+    body: SiteFpconIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(requires("operator")),
+):
+    """Change a site's FPCON level and append a validation row to the event log."""
+    site = db.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    kwargs = dict(
+        subject_kind="site_fpcon",
+        subject_id=site.id,
+        prev_status=site.fpcon,
+        status=body.level,
+        source="manual",
+        validated_by_user_id=current_user.id,
+        note=body.note,
+    )
+    if body.validated_at is not None:
+        kwargs["validated_at"] = body.validated_at
+    db.add(Validation(**kwargs))
+    site.fpcon = body.level
+    db.flush()
+    return _site_with_status(db, site)
+
+
+@router.post("/{site_id}/emcon", response_model=SiteOut)
+def set_site_emcon(
+    site_id: int,
+    body: SiteEmconIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(requires("operator")),
+):
+    """Change a site's EMCON level and append a validation row to the event log."""
+    site = db.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    kwargs = dict(
+        subject_kind="site_emcon",
+        subject_id=site.id,
+        prev_status=site.emcon,
+        status=body.level,
+        source="manual",
+        validated_by_user_id=current_user.id,
+        note=body.note,
+    )
+    if body.validated_at is not None:
+        kwargs["validated_at"] = body.validated_at
+    db.add(Validation(**kwargs))
+    site.emcon = body.level
     db.flush()
     return _site_with_status(db, site)
 

@@ -37,7 +37,7 @@ GATEWAY_KINDS = ("milsat", "commercial", "other")
 GATEWAY_PACE = ("primary", "alternate", "contingency", "emergency")
 USER_ROLES = ("viewer", "operator", "admin")
 VALIDATION_SOURCES = ("manual", "ingest")
-SUBJECT_KINDS = ("service", "site", "gateway")
+SUBJECT_KINDS = ("service", "site", "gateway", "site_fpcon", "site_emcon")
 FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
 EMCON_LEVELS = ("a", "b", "c", "d")
 

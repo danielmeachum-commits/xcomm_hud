@@ -48,7 +48,7 @@ export function ServiceStatusPill({
         }}
         title={
           cascaded
-            ? `Stored: ${statusLabel(status)} — overridden by gateways down`
+            ? `Stored: ${statusLabel(status)} — overridden because no enabled gateway is live`
             : `Tap to validate`
         }
         className={cn(
@@ -59,7 +59,7 @@ export function ServiceStatusPill({
       >
         <StatusIndicator state={statusToIndicatorState(shown)} size="sm" />
         <span>{statusLabel(shown)}</span>
-        {cascaded && <span className="text-[10px] text-muted-foreground">(ISP)</span>}
+        {cascaded && <span className="text-[10px] text-muted-foreground">(no path)</span>}
       </button>
       <ValidationDialog
         open={open}

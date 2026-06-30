@@ -13,8 +13,56 @@ import {
   statusToIndicatorState,
 } from "@/lib/status"
 import { formatZulu } from "@/lib/time"
+import {
+  emconClasses,
+  emconLabel,
+  fpconClasses,
+  fpconLabel,
+} from "@/lib/threat-level"
 import { cn } from "@/lib/utils"
-import type { AnyStatus, SubjectKind, Validation } from "@/lib/types"
+import type {
+  AnyStatus,
+  Emcon,
+  Fpcon,
+  SubjectKind,
+  Validation,
+} from "@/lib/types"
+
+const FPCON_SET = new Set<string>(["normal", "alpha", "bravo", "charlie", "delta"])
+const EMCON_SET = new Set<string>(["a", "b", "c", "d"])
+
+function renderLevelBadge(kind: "fpcon" | "emcon", value: string) {
+  if (kind === "fpcon" && FPCON_SET.has(value)) {
+    const c = fpconClasses(value as Fpcon)
+    return (
+      <span
+        className={cn(
+          "rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ring-inset",
+          c.bg,
+          c.text,
+          c.ring,
+        )}
+      >
+        FPCON {fpconLabel(value as Fpcon)}
+      </span>
+    )
+  }
+  if (kind === "emcon" && EMCON_SET.has(value)) {
+    const c = emconClasses(value as Emcon)
+    return (
+      <span
+        className={cn(
+          "rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+          c.bg,
+          c.text,
+        )}
+      >
+        {emconLabel(value as Emcon)}
+      </span>
+    )
+  }
+  return <span className="text-[10px] uppercase tracking-wider">{value}</span>
+}
 
 const ALL_STATUS_VALUES: AnyStatus[] = Array.from(
   new Set<AnyStatus>([...SERVICE_STATUS_VALUES, ...GATEWAY_STATUS_VALUES]),
@@ -164,6 +212,8 @@ export function EventsTable({ validations }: Props) {
           <option value="service">Service</option>
           <option value="gateway">Gateway</option>
           <option value="site">Site</option>
+          <option value="site_fpcon">Site FPCON</option>
+          <option value="site_emcon">Site EMCON</option>
         </select>
         <select
           value={statusFilter}
@@ -210,7 +260,11 @@ export function EventsTable({ validations }: Props) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((v) => (
+            {filtered.map((v) => {
+              const isFpcon = v.subject_kind === "site_fpcon"
+              const isEmcon = v.subject_kind === "site_emcon"
+              const threatKind = isFpcon ? "fpcon" : isEmcon ? "emcon" : null
+              return (
               <tr key={v.id} className="border-t border-border">
                 <td className="px-3 py-2 font-mono text-xs">
                   <LocalTime iso={v.validated_at} />
@@ -230,18 +284,29 @@ export function EventsTable({ validations }: Props) {
                   {v.site_name ?? "—"}
                 </td>
                 <td className="px-3 py-2">
-                  <span className="inline-flex items-center gap-2">
-                    <StatusIndicator
-                      state={statusToIndicatorState(v.status)}
-                      size="sm"
-                    />
-                    {statusLabel(v.status)}
-                    {v.prev_status && v.prev_status !== v.status && (
-                      <span className="text-[10px] text-muted-foreground">
-                        (was {statusLabel(v.prev_status)})
-                      </span>
-                    )}
-                  </span>
+                  {threatKind ? (
+                    <span className="inline-flex items-center gap-2">
+                      {renderLevelBadge(threatKind, v.status)}
+                      {v.prev_status && v.prev_status !== v.status && (
+                        <span className="text-[10px] text-muted-foreground">
+                          (was {renderLevelBadge(threatKind, v.prev_status)})
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2">
+                      <StatusIndicator
+                        state={statusToIndicatorState(v.status)}
+                        size="sm"
+                      />
+                      {statusLabel(v.status)}
+                      {v.prev_status && v.prev_status !== v.status && (
+                        <span className="text-[10px] text-muted-foreground">
+                          (was {statusLabel(v.prev_status)})
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {v.validated_by_username ?? v.source}
@@ -250,7 +315,8 @@ export function EventsTable({ validations }: Props) {
                   {v.note ?? ""}
                 </td>
               </tr>
-            ))}
+              )
+            })}
             {filtered.length === 0 && (
               <tr>
                 <td

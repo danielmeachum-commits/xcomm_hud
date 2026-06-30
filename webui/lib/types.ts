@@ -21,8 +21,10 @@ export type GatewayStatus =
 /** Service-shaped status value (legacy name). Keeps existing imports working. */
 export type StatusValue = ServiceStatus
 
-/** Either a service or gateway status — used by shared helpers. */
-export type AnyStatus = ServiceStatus | GatewayStatus
+/** Either a service or gateway status — used by shared helpers. Also
+ *  includes FPCON/EMCON levels since site_fpcon/site_emcon validation rows
+ *  reuse the same `status` column. */
+export type AnyStatus = ServiceStatus | GatewayStatus | Fpcon | Emcon
 
 export type ServiceKind = "voice" | "data" | "other"
 
@@ -38,7 +40,12 @@ export type Fpcon = "normal" | "alpha" | "bravo" | "charlie" | "delta"
 
 export type Emcon = "a" | "b" | "c" | "d"
 
-export type SubjectKind = "service" | "site" | "gateway"
+export type SubjectKind =
+  | "service"
+  | "site"
+  | "gateway"
+  | "site_fpcon"
+  | "site_emcon"
 
 export interface Me {
   user_id: number

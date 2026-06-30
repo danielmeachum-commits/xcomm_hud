@@ -38,7 +38,7 @@ def _enrich(db: Session, v: Validation) -> ValidationOut:
             site = db.get(Site, gw.site_id)
             if site:
                 out.site_name = site.name
-    elif v.subject_kind == "site":
+    elif v.subject_kind in ("site", "site_fpcon", "site_emcon"):
         site = db.get(Site, v.subject_id)
         if site:
             out.subject_name = site.name

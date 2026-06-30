@@ -10,8 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
 ServiceStatusValue = StatusValue
 GatewayStatusValue = Literal["active", "ready", "degraded", "down", "offline", "setup"]
+# Validation rows for FPCON/EMCON changes reuse the `status` column to record
+# the new level — keep this union in sync with FPCON_LEVELS + EMCON_LEVELS.
 AnyStatusValue = Literal[
-    "up", "active", "ready", "degraded", "down", "unknown", "offline", "setup"
+    "up", "active", "ready", "degraded", "down", "unknown", "offline", "setup",
+    "normal", "alpha", "bravo", "charlie", "delta",
+    "a", "b", "c", "d",
 ]
 ServiceKind = Literal["voice", "data", "other"]
 ServiceCategory = Literal["critical", "sustainment", "other"]
@@ -19,7 +23,7 @@ ServiceReach = Literal["local", "external"]
 GatewayKind = Literal["milsat", "commercial", "other"]
 GatewayPace = Literal["primary", "alternate", "contingency", "emergency"]
 UserRole = Literal["viewer", "operator", "admin"]
-SubjectKind = Literal["service", "site", "gateway"]
+SubjectKind = Literal["service", "site", "gateway", "site_fpcon", "site_emcon"]
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]
 
@@ -173,6 +177,18 @@ class ServiceValidateIn(BaseModel):
     status: StatusValue
     note: Optional[str] = None
     validated_at: Optional[datetime.datetime] = None  # override; defaults to now
+
+
+class SiteFpconIn(BaseModel):
+    level: Fpcon
+    note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None
+
+
+class SiteEmconIn(BaseModel):
+    level: Emcon
+    note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None
 
 
 class ServiceOut(_ORM):

@@ -63,11 +63,16 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
     icon: null as string | null,
     description: "",
     status: "unknown" as StatusValue,
+    // Local services default to no gateway dependency; operator opts in via
+    // the checkbox below. External services are always gateway-bound.
+    connects_externally: false,
     enabled_pace: [...GATEWAY_PACE_VALUES] as GatewayPace[],
   }
   const [draft, setDraft] = useState(initial)
   const Icon = serviceIcon(draft.icon, draft.kind)
   const siteFixed = defaultSiteId != null
+  const showsPaceConfig =
+    draft.reach === "external" || draft.connects_externally
 
   function pickTemplate(idStr: string) {
     if (!idStr) {
@@ -110,7 +115,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
           icon: draft.icon,
           description: draft.description || null,
           status: draft.status,
-          enabled_pace: draft.reach === "external" ? draft.enabled_pace : [],
+          enabled_pace: showsPaceConfig ? draft.enabled_pace : [],
         }),
       })
       if (!res.ok) {
@@ -199,7 +204,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="reach">Reach</Label>
+              <Label htmlFor="reach">Service origination</Label>
               <select
                 id="reach"
                 value={draft.reach}
@@ -218,42 +223,56 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
             </div>
           </div>
 
-          {draft.reach === "external" && (
-            <div className="space-y-1.5">
-              <Label>PACE tiers this service rides</Label>
-              <div className="grid grid-cols-4 gap-2">
-                {GATEWAY_PACE_VALUES.map((p) => {
-                  const on = draft.enabled_pace.includes(p)
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() =>
-                        setDraft({
-                          ...draft,
-                          enabled_pace: on
-                            ? draft.enabled_pace.filter((x) => x !== p)
-                            : [...draft.enabled_pace, p],
-                        })
-                      }
-                      className={cn(
-                        "flex flex-col items-center gap-0.5 rounded-md border px-2 py-1.5 text-xs transition-colors",
-                        on
-                          ? "border-foreground bg-accent"
-                          : "border-input text-muted-foreground hover:bg-accent/50",
-                      )}
-                      disabled={pending}
-                    >
-                      <span className="text-sm font-semibold">{paceShort(p)}</span>
-                      <span className="text-[10px]">{paceLabel(p)}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Edge to a gateway only renders when its PACE tier is enabled here.
-              </p>
+          {draft.reach === "local" && (
+            <label className="inline-flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={draft.connects_externally}
+                onChange={(e) =>
+                  setDraft({ ...draft, connects_externally: e.target.checked })
+                }
+                disabled={pending}
+              />
+              Connects externally (rides one or more gateways)
+            </label>
+          )}
+
+          {showsPaceConfig && (
+          <div className="space-y-1.5">
+            <Label>PACE tiers this service rides</Label>
+            <div className="grid grid-cols-4 gap-2">
+              {GATEWAY_PACE_VALUES.map((p) => {
+                const on = draft.enabled_pace.includes(p)
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        enabled_pace: on
+                          ? draft.enabled_pace.filter((x) => x !== p)
+                          : [...draft.enabled_pace, p],
+                      })
+                    }
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 rounded-md border px-2 py-1.5 text-xs transition-colors",
+                      on
+                        ? "border-foreground bg-accent"
+                        : "border-input text-muted-foreground hover:bg-accent/50",
+                    )}
+                    disabled={pending}
+                  >
+                    <span className="text-sm font-semibold">{paceShort(p)}</span>
+                    <span className="text-[10px]">{paceLabel(p)}</span>
+                  </button>
+                )
+              })}
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Canvas edges only render to gateways at an enabled PACE tier.
+            </p>
+          </div>
           )}
 
           <div className={cn(siteFixed ? "" : "grid grid-cols-2 gap-3")}>

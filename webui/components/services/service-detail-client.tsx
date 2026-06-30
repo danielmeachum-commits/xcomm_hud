@@ -54,11 +54,20 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
     site_id: service.site_id,
     description: service.description ?? "",
     notes: service.notes ?? "",
+    // Local services opt into a gateway path via this checkbox. External
+    // services always ride gateways, so it's implicitly on for them. Inferred
+    // from stored `enabled_pace` so reopening the form reflects what's saved.
+    connects_externally:
+      service.reach === "external" ||
+      (service.enabled_pace?.length ?? 0) > 0,
     enabled_pace:
       service.enabled_pace && service.enabled_pace.length > 0
         ? [...service.enabled_pace]
         : [...GATEWAY_PACE_VALUES],
   })
+
+  const showsPaceConfig =
+    draft.reach === "external" || draft.connects_externally
 
   const Icon = serviceIcon(service.icon, service.kind)
 
@@ -77,7 +86,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
           site_id: draft.site_id,
           description: draft.description || null,
           notes: draft.notes || null,
-          enabled_pace: draft.reach === "external" ? draft.enabled_pace : [],
+          enabled_pace: showsPaceConfig ? draft.enabled_pace : [],
         }),
       })
       if (!res.ok) {
@@ -199,7 +208,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="reach">Reach</Label>
+            <Label htmlFor="reach">Service origination</Label>
             <select
               id="reach"
               value={draft.reach}
@@ -217,6 +226,19 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
             </select>
           </div>
         </div>
+        {draft.reach === "local" && (
+          <label className="inline-flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={draft.connects_externally}
+              onChange={(e) =>
+                setDraft({ ...draft, connects_externally: e.target.checked })
+              }
+              disabled={pending}
+            />
+            Connects externally (rides one or more gateways)
+          </label>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="category">Category</Label>
@@ -258,7 +280,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
             </select>
           </div>
         </div>
-        {draft.reach === "external" && (
+        {showsPaceConfig && (
           <div className="space-y-1.5">
             <Label>PACE tiers this service rides</Label>
             <div className="grid grid-cols-4 gap-2">
@@ -291,7 +313,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
               })}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Canvas edges only render for gateways at an enabled PACE tier.
+              Canvas edges only render to gateways at an enabled PACE tier.
             </p>
           </div>
         )}
