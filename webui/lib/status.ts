@@ -11,6 +11,32 @@ export const STATUS_VALUES: StatusValue[] = [
 
 export type StatusCategory = "operational" | "issue" | "transitional" | "unknown"
 
+/** Stroke color used on canvas edges keyed on a service's status. */
+export function statusEdgeStroke(s: StatusValue): string {
+  switch (s) {
+    case "up":
+      return "rgb(34 197 94)" // green-500
+    case "degraded":
+      return "rgb(245 158 11)" // amber-500
+    case "down":
+      return "rgb(239 68 68)" // red-500
+    case "setup":
+      return "rgb(14 165 233)" // sky-500
+    case "offline":
+      return "rgb(71 85 105)" // slate-600
+    case "unknown":
+    default:
+      return "rgb(148 163 184)" // slate-400
+  }
+}
+
+/** Whether an edge should animate (data appears to flow) for this status. */
+export function statusEdgeAnimates(s: StatusValue): boolean {
+  // Animate when traffic is plausibly flowing: up, degraded (still passing
+  // but slow), and setup (transitioning into service).
+  return s === "up" || s === "degraded" || s === "setup"
+}
+
 export const STATUS_CATEGORIES: { key: StatusCategory; label: string; values: StatusValue[] }[] = [
   { key: "operational", label: "Operational", values: ["up"] },
   { key: "issue", label: "Issue", values: ["degraded", "down", "offline"] },

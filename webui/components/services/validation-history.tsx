@@ -1,6 +1,7 @@
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { LocalTime, TimeAgo } from "@/components/time-display"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
-import { formatLocal, formatZulu, timeAgo } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import type { Validation } from "@/lib/types"
 
 interface Props {
@@ -31,9 +32,9 @@ export function ValidationHistory({ validations }: Props) {
           {validations.map((v) => (
             <tr key={v.id} className="border-t border-border">
               <td className="px-3 py-2 font-mono text-xs">
-                <div>{formatLocal(v.validated_at)}</div>
+                <div><LocalTime iso={v.validated_at} /></div>
                 <div className="text-[10px] text-muted-foreground">
-                  {timeAgo(v.validated_at)}
+                  <TimeAgo iso={v.validated_at} />
                 </div>
               </td>
               <td className="px-3 py-2 font-mono text-xs">

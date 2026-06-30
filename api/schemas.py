@@ -12,6 +12,7 @@ ServiceKind = Literal["voip", "data", "video", "crypto", "other"]
 ServiceCategory = Literal["core_critical_local", "sustainment", "other"]
 ServiceReach = Literal["local", "external"]
 GatewayKind = Literal["isp", "modem", "satellite", "other"]
+GatewayPace = Literal["primary", "alternate", "contingency", "emergency"]
 UserRole = Literal["viewer", "operator", "admin"]
 SubjectKind = Literal["service", "site", "gateway"]
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
@@ -192,6 +193,7 @@ class GatewayIn(BaseModel):
     kind: GatewayKind = "other"
     provider: Optional[str] = None
     status: StatusValue = "unknown"
+    pace: GatewayPace = "primary"
     notes: Optional[str] = None
 
 
@@ -199,6 +201,7 @@ class GatewayPatch(BaseModel):
     name: Optional[str] = None
     kind: Optional[GatewayKind] = None
     provider: Optional[str] = None
+    pace: Optional[GatewayPace] = None
     notes: Optional[str] = None
     display_order: Optional[int] = None
 
@@ -216,6 +219,7 @@ class GatewayOut(_ORM):
     kind: GatewayKind
     provider: Optional[str] = None
     status: StatusValue
+    pace: GatewayPace = "primary"
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None

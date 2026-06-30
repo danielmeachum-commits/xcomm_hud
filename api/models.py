@@ -32,6 +32,7 @@ SERVICE_KINDS = ("voip", "data", "video", "crypto", "other")
 SERVICE_CATEGORIES = ("core_critical_local", "sustainment", "other")
 SERVICE_REACH = ("local", "external")
 GATEWAY_KINDS = ("isp", "modem", "satellite", "other")
+GATEWAY_PACE = ("primary", "alternate", "contingency", "emergency")
 USER_ROLES = ("viewer", "operator", "admin")
 VALIDATION_SOURCES = ("manual", "ingest")
 SUBJECT_KINDS = ("service", "site", "gateway")
@@ -169,6 +170,7 @@ class Gateway(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
     provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    pace: Mapped[str] = mapped_column(String(16), nullable=False, default="primary")
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

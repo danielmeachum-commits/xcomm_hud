@@ -6,6 +6,7 @@ import { useState } from "react"
 import { Breadcrumbs } from "@/components/breadcrumbs"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { ValidationHistory } from "@/components/services/validation-history"
+import { LocalTime, TimeAgo } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,7 +18,7 @@ import {
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
-import { formatLocal, formatZulu, timeAgo } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import type {
   Service,
   ServiceCategory,
@@ -134,7 +135,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
           <div className="mt-1 grid grid-cols-2 gap-3 sm:max-w-md">
             <div>
               <div className="text-[10px] uppercase text-muted-foreground">Local</div>
-              <div className="font-mono">{formatLocal(service.validated_at)}</div>
+              <div className="font-mono"><LocalTime iso={service.validated_at} /></div>
             </div>
             <div>
               <div className="text-[10px] uppercase text-muted-foreground">Zulu</div>
@@ -142,7 +143,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
             </div>
           </div>
           <div className="mt-1 text-muted-foreground">
-            {timeAgo(service.validated_at)}
+            <TimeAgo iso={service.validated_at} />
             {service.validated_by_username ? ` · ${service.validated_by_username}` : ""}
           </div>
         </section>

@@ -20,7 +20,14 @@ import { MoreHorizontal } from "lucide-react"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { NodeActionSheet } from "@/components/sites/node-action-sheet"
-import { gatewayIcon, gatewayKindLabel, serviceIcon } from "@/lib/service-meta"
+import {
+  gatewayIcon,
+  gatewayKindLabel,
+  paceClasses,
+  paceShort,
+  serviceIcon,
+} from "@/lib/service-meta"
+import { statusEdgeAnimates, statusEdgeStroke } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type { Gateway, Service } from "@/lib/types"
 
@@ -73,10 +80,10 @@ function ServiceCanvasNode({ data }: NodeProps) {
       className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm transition-colors hover:bg-accent/40"
       style={{ width: LANE_WIDTH }}
     >
-      {/* Local services sit left of gateways → emit from the right.
-       *  External services sit right of gateways → receive on the left. */}
+      {/* Both local and external services emit edges toward the gateway —
+       *  the visual "service → ISP" direction the operator expects. */}
       {isExternal ? (
-        <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
+        <Handle type="source" position={Position.Left} className="!bg-muted-foreground" />
       ) : (
         <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
       )}
@@ -125,13 +132,16 @@ function ServiceCanvasNode({ data }: NodeProps) {
 function GatewayCanvasNode({ data }: NodeProps) {
   const { gateway, onOpen } = data as GatewayNodeData
   const Icon = gatewayIcon(gateway.kind)
+  const pace = paceClasses(gateway.pace)
   return (
     <div
       className="flex flex-col gap-1 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 p-3 shadow-sm"
       style={{ width: LANE_WIDTH }}
     >
+      {/* Targets on BOTH sides — local services connect from the left,
+       *  external services connect from the right. */}
       <Handle type="target" position={Position.Left} className="!bg-amber-500" />
-      <Handle type="source" position={Position.Right} className="!bg-amber-500" />
+      <Handle type="target" position={Position.Right} className="!bg-amber-500" />
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
@@ -146,9 +156,21 @@ function GatewayCanvasNode({ data }: NodeProps) {
         />
       </div>
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          {gatewayKindLabel(gateway.kind)}
-          {gateway.provider ? ` · ${gateway.provider}` : ""}
+        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span
+            title={`PACE: ${gateway.pace}`}
+            className={cn(
+              "inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold",
+              pace.bg,
+              pace.text,
+            )}
+          >
+            {paceShort(gateway.pace)}
+          </span>
+          <span>
+            {gatewayKindLabel(gateway.kind)}
+            {gateway.provider ? ` · ${gateway.provider}` : ""}
+          </span>
         </div>
         <button
           type="button"
@@ -188,7 +210,6 @@ function SiteCanvasInner({
   onOpenGateway: (gw: Gateway) => void
 }) {
   const { nodes, edges } = useMemo(() => {
-    // Services are pre-sorted by display_order from the API; preserve that here.
     const local = services.filter((s) => s.reach === "local")
     const external = services.filter((s) => s.reach === "external")
 
@@ -250,38 +271,36 @@ function SiteCanvasInner({
       })
     })
 
-    // Edges from each gateway to ALL services at the site. Local edges are
-    // subtle (slate, dashed, no recolor when gateway down) since local is not
-    // gateway-dependent; external edges go red when the gateway drops.
+    // Every edge: source = service, target = gateway, so the animation flows
+    // service → ISP for both local (left side) and external (right side).
+    // Color follows the service's effective status; animates for up/degraded.
     for (const gw of gateways) {
-      // local: gateway is on the right of locals, so source=service target=gateway
       for (const svc of local) {
-        const animated = gw.status === "up" && svc.effective_status === "up"
+        const status = svc.effective_status
         builtEdges.push({
           id: `e-svc${svc.id}-gw${gw.id}`,
           source: `service-${svc.id}`,
           target: `gateway-${gw.id}`,
-          animated,
+          animated: statusEdgeAnimates(status),
           style: {
-            stroke: "rgb(148 163 184)",
-            strokeDasharray: "2 4",
-            strokeWidth: 1.2,
-            opacity: 0.7,
+            stroke: statusEdgeStroke(status),
+            strokeWidth: 1.6,
+            strokeDasharray: status === "down" ? "4 4" : undefined,
+            opacity: 0.85,
           },
         })
       }
-      // external: gateway is on the left of externals, so source=gateway target=service
       for (const svc of external) {
-        const isDown = gw.status === "down"
+        const status = svc.effective_status
         builtEdges.push({
-          id: `e-gw${gw.id}-svc${svc.id}`,
-          source: `gateway-${gw.id}`,
-          target: `service-${svc.id}`,
-          animated: gw.status === "up" && svc.effective_status === "up",
+          id: `e-svc${svc.id}-gw${gw.id}`,
+          source: `service-${svc.id}`,
+          target: `gateway-${gw.id}`,
+          animated: statusEdgeAnimates(status),
           style: {
-            stroke: isDown ? "rgb(239 68 68)" : "rgb(245 158 11)",
-            strokeDasharray: isDown ? "4 4" : undefined,
+            stroke: statusEdgeStroke(status),
             strokeWidth: 1.8,
+            strokeDasharray: status === "down" ? "4 4" : undefined,
           },
         })
       }

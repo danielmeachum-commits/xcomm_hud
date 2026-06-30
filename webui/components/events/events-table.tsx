@@ -4,9 +4,10 @@ import { useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { LocalTime } from "@/components/time-display"
 import { Input } from "@/components/ui/input"
 import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
-import { formatLocal, formatZulu } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { StatusValue, SubjectKind, Validation } from "@/lib/types"
 
@@ -203,7 +204,7 @@ export function EventsTable({ validations }: Props) {
             {filtered.map((v) => (
               <tr key={v.id} className="border-t border-border">
                 <td className="px-3 py-2 font-mono text-xs">
-                  {formatLocal(v.validated_at)}
+                  <LocalTime iso={v.validated_at} />
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">
                   {formatZulu(v.validated_at)}

@@ -12,17 +12,20 @@ import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
 import { SiteForm } from "@/components/sites/site-form"
+import { LocalTime } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import {
   categoryAccentClass,
   categoryLabel,
   gatewayIcon,
   gatewayKindLabel,
+  paceClasses,
+  paceShort,
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
-import { formatLocal, formatZulu } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import type {
   Gateway,
   Service,
@@ -129,6 +132,7 @@ export function SiteDetailClient({
               <ul className="flex flex-col gap-2">
                 {gateways.map((g) => {
                   const Icon = gatewayIcon(g.kind)
+                  const pace = paceClasses(g.pace)
                   return (
                     <li
                       key={g.id}
@@ -137,14 +141,22 @@ export function SiteDetailClient({
                       <div className="flex min-w-0 items-center gap-3">
                         <Icon className="size-5 shrink-0 text-amber-700 dark:text-amber-400" />
                         <div className="min-w-0">
-                          <div className="font-medium">{g.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold ${pace.bg} ${pace.text}`}
+                              title={`PACE: ${g.pace}`}
+                            >
+                              {paceShort(g.pace)}
+                            </span>
+                            <span className="font-medium">{g.name}</span>
+                          </div>
                           <div className="text-xs text-muted-foreground">
                             {gatewayKindLabel(g.kind)}
                             {g.provider ? ` · ${g.provider}` : ""}
                           </div>
                           {g.validated_at && (
                             <div className="text-[10px] font-mono text-muted-foreground">
-                              {formatLocal(g.validated_at)} ·{" "}
+                              <LocalTime iso={g.validated_at} /> ·{" "}
                               {formatZulu(g.validated_at)}
                               {g.validated_by_username ? ` · ${g.validated_by_username}` : ""}
                             </div>
@@ -193,7 +205,7 @@ export function SiteDetailClient({
                             </div>
                             {s.validated_at && (
                               <div className="text-[10px] font-mono text-muted-foreground">
-                                {formatLocal(s.validated_at)} ·{" "}
+                                <LocalTime iso={s.validated_at} /> ·{" "}
                                 {formatZulu(s.validated_at)}
                               </div>
                             )}

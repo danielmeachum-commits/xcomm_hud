@@ -22,6 +22,7 @@ import {
 
 import type {
   GatewayKind,
+  GatewayPace,
   ServiceCategory,
   ServiceKind,
   ServiceReach,
@@ -138,5 +139,44 @@ export function gatewayKindLabel(k: GatewayKind): string {
     case "other":
     default:
       return "Other"
+  }
+}
+
+export const GATEWAY_PACE_VALUES: GatewayPace[] = [
+  "primary",
+  "alternate",
+  "contingency",
+  "emergency",
+]
+
+export function paceLabel(p: GatewayPace): string {
+  switch (p) {
+    case "primary":
+      return "Primary"
+    case "alternate":
+      return "Alternate"
+    case "contingency":
+      return "Contingency"
+    case "emergency":
+      return "Emergency"
+  }
+}
+
+/** Short PACE letter (P/A/C/E). */
+export function paceShort(p: GatewayPace): string {
+  return p[0].toUpperCase()
+}
+
+/** Color treatment for the PACE badge inside a gateway node. */
+export function paceClasses(p: GatewayPace): { bg: string; text: string } {
+  switch (p) {
+    case "primary":
+      return { bg: "bg-emerald-600", text: "text-white" }
+    case "alternate":
+      return { bg: "bg-sky-600", text: "text-white" }
+    case "contingency":
+      return { bg: "bg-amber-500", text: "text-black" }
+    case "emergency":
+      return { bg: "bg-red-700", text: "text-white" }
   }
 }

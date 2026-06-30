@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { LocalTime } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,7 +21,7 @@ import {
   statusLabel,
   statusToIndicatorState,
 } from "@/lib/status"
-import { formatLocal, formatZulu } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { StatusValue } from "@/lib/types"
 
@@ -146,7 +147,7 @@ export function ValidationDialog({
               <div className="mt-1.5 grid grid-cols-2 gap-3">
                 <div>
                   <div className="text-[10px] uppercase text-muted-foreground">Local</div>
-                  <div className="font-mono">{formatLocal(lastValidatedAt)}</div>
+                  <div className="font-mono"><LocalTime iso={lastValidatedAt} /></div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase text-muted-foreground">Zulu</div>
@@ -178,7 +179,7 @@ export function ValidationDialog({
             <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/20 p-2 text-[11px]">
               <div>
                 <div className="text-[10px] uppercase text-muted-foreground">Local</div>
-                <div className="font-mono">{formatLocal(whenIso)}</div>
+                <div className="font-mono"><LocalTime iso={whenIso} /></div>
               </div>
               <div>
                 <div className="text-[10px] uppercase text-muted-foreground">Zulu</div>

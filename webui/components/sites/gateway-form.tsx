@@ -15,9 +15,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { GATEWAY_KINDS, gatewayKindLabel } from "@/lib/service-meta"
+import {
+  GATEWAY_KINDS,
+  GATEWAY_PACE_VALUES,
+  gatewayKindLabel,
+  paceLabel,
+} from "@/lib/service-meta"
 import { STATUS_VALUES, statusLabel } from "@/lib/status"
-import type { Gateway, GatewayKind, StatusValue } from "@/lib/types"
+import type { Gateway, GatewayKind, GatewayPace, StatusValue } from "@/lib/types"
 
 interface Props {
   siteId: number
@@ -38,6 +43,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
     kind: (gateway?.kind ?? "isp") as GatewayKind,
     provider: gateway?.provider ?? "",
     status: (gateway?.status ?? "unknown") as StatusValue,
+    pace: (gateway?.pace ?? "primary") as GatewayPace,
     notes: gateway?.notes ?? "",
   })
 
@@ -53,6 +59,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
         name: draft.name,
         kind: draft.kind,
         provider: draft.provider || null,
+        pace: draft.pace,
         notes: draft.notes || null,
       }
       if (!editing) {
@@ -69,7 +76,14 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
       }
       setOpen(false)
       if (!editing) {
-        setDraft({ name: "", kind: "isp", provider: "", status: "unknown", notes: "" })
+        setDraft({
+          name: "",
+          kind: "isp",
+          provider: "",
+          status: "unknown",
+          pace: "primary",
+          notes: "",
+        })
       }
       router.refresh()
     } catch (err) {
@@ -140,15 +154,33 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
               </div>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="provider">Provider</Label>
-            <Input
-              id="provider"
-              value={draft.provider}
-              onChange={(e) => setDraft({ ...draft, provider: e.target.value })}
-              placeholder="Comcast, Starlink, Viasat…"
-              disabled={pending}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="provider">Provider</Label>
+              <Input
+                id="provider"
+                value={draft.provider}
+                onChange={(e) => setDraft({ ...draft, provider: e.target.value })}
+                placeholder="Comcast, Starlink…"
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pace">PACE</Label>
+              <select
+                id="pace"
+                value={draft.pace}
+                onChange={(e) => setDraft({ ...draft, pace: e.target.value as GatewayPace })}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={pending}
+              >
+                {GATEWAY_PACE_VALUES.map((p) => (
+                  <option key={p} value={p}>
+                    {paceLabel(p)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="notes">Notes</Label>

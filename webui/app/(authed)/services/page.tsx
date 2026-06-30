@@ -5,13 +5,14 @@ import { apiGet } from "@/lib/api"
 import { Breadcrumbs } from "@/components/breadcrumbs"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
+import { LocalTime } from "@/components/time-display"
 import {
   categoryAccentClass,
   categoryLabel,
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
-import { formatLocal, formatZulu } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import type { Service, ServiceTemplate, Site } from "@/lib/types"
 
 export default async function ServicesPage() {
@@ -83,7 +84,7 @@ export default async function ServicesPage() {
                             </div>
                             {s.validated_at && (
                               <div className="text-[10px] font-mono text-muted-foreground">
-                                Validated {formatLocal(s.validated_at)} /{" "}
+                                Validated <LocalTime iso={s.validated_at} /> /{" "}
                                 {formatZulu(s.validated_at)}
                                 {s.validated_by_username ? ` · ${s.validated_by_username}` : ""}
                               </div>

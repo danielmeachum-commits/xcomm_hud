@@ -8,6 +8,7 @@ import { ArrowDown, ArrowUp, ExternalLink, Trash2 } from "lucide-react"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { GatewayForm } from "@/components/sites/gateway-form"
+import { LocalTime, TimeAgo } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import {
   Sheet,
@@ -19,10 +20,11 @@ import {
   categoryLabel,
   gatewayIcon,
   gatewayKindLabel,
+  paceLabel,
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
-import { formatLocal, formatZulu, timeAgo } from "@/lib/time"
+import { formatZulu } from "@/lib/time"
 import type { Gateway, Service } from "@/lib/types"
 
 interface Props {
@@ -144,11 +146,11 @@ function ServiceSheetBody({
             Last validation
           </div>
           <div className="mt-1 grid grid-cols-2 gap-2 font-mono">
-            <div>{formatLocal(service.validated_at)}</div>
+            <div><LocalTime iso={service.validated_at} /></div>
             <div>{formatZulu(service.validated_at)}</div>
           </div>
           <div className="mt-1 text-muted-foreground">
-            {timeAgo(service.validated_at)}
+            <TimeAgo iso={service.validated_at} />
             {service.validated_by_username ? ` · ${service.validated_by_username}` : ""}
           </div>
         </div>
@@ -215,6 +217,8 @@ function GatewaySheetBody({
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
         <dt className="text-muted-foreground">Kind</dt>
         <dd>{gatewayKindLabel(gateway.kind)}</dd>
+        <dt className="text-muted-foreground">PACE</dt>
+        <dd>{paceLabel(gateway.pace)}</dd>
         <dt className="text-muted-foreground">Provider</dt>
         <dd>{gateway.provider ?? "—"}</dd>
       </dl>
@@ -231,11 +235,11 @@ function GatewaySheetBody({
             Last validation
           </div>
           <div className="mt-1 grid grid-cols-2 gap-2 font-mono">
-            <div>{formatLocal(gateway.validated_at)}</div>
+            <div><LocalTime iso={gateway.validated_at} /></div>
             <div>{formatZulu(gateway.validated_at)}</div>
           </div>
           <div className="mt-1 text-muted-foreground">
-            {timeAgo(gateway.validated_at)}
+            <TimeAgo iso={gateway.validated_at} />
             {gateway.validated_by_username ? ` · ${gateway.validated_by_username}` : ""}
           </div>
         </div>

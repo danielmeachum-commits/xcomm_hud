@@ -18,6 +18,8 @@ export type ServiceReach = "local" | "external"
 
 export type GatewayKind = "isp" | "modem" | "satellite" | "other"
 
+export type GatewayPace = "primary" | "alternate" | "contingency" | "emergency"
+
 export type Fpcon = "normal" | "alpha" | "bravo" | "charlie" | "delta"
 
 export type Emcon = "a" | "b" | "c" | "d"
@@ -91,6 +93,7 @@ export interface Gateway {
   kind: GatewayKind
   provider: string | null
   status: StatusValue
+  pace: GatewayPace
   validated_at: string | null
   validated_by_user_id: number | null
   validated_by_username: string | null

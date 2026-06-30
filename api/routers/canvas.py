@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import case as sql_case
 from sqlalchemy.orm import Session
 
 from db import get_db
@@ -41,9 +42,16 @@ def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
         .order_by(Service.site_id, Service.display_order, Service.name)
         .all()
     )
+    pace_order = sql_case(
+        (Gateway.pace == "primary", 0),
+        (Gateway.pace == "alternate", 1),
+        (Gateway.pace == "contingency", 2),
+        (Gateway.pace == "emergency", 3),
+        else_=4,
+    )
     gateways = (
         db.query(Gateway)
-        .order_by(Gateway.site_id, Gateway.display_order, Gateway.name)
+        .order_by(Gateway.site_id, pace_order, Gateway.display_order, Gateway.name)
         .all()
     )
     positions = db.query(SiteCanvasPosition).all()

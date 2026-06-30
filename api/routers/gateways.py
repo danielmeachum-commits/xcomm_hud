@@ -5,12 +5,24 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from sqlalchemy import case as sql_case
+
 from db import get_db
 from deps import requires
 from models import Gateway, Site, User, Validation
 from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
 
 router = APIRouter(tags=["gateways"])
+
+
+def _pace_order():
+    return sql_case(
+        (Gateway.pace == "primary", 0),
+        (Gateway.pace == "alternate", 1),
+        (Gateway.pace == "contingency", 2),
+        (Gateway.pace == "emergency", 3),
+        else_=4,
+    )
 
 
 def _gateway_out(db: Session, gw: Gateway) -> GatewayOut:
@@ -33,7 +45,7 @@ def list_site_gateways(
     rows = (
         db.query(Gateway)
         .filter(Gateway.site_id == site_id)
-        .order_by(Gateway.display_order, Gateway.name)
+        .order_by(_pace_order(), Gateway.display_order, Gateway.name)
         .all()
     )
     return [_gateway_out(db, g) for g in rows]
@@ -72,7 +84,7 @@ def list_all_gateways(
 ):
     rows = (
         db.query(Gateway)
-        .order_by(Gateway.site_id, Gateway.display_order, Gateway.name)
+        .order_by(Gateway.site_id, _pace_order(), Gateway.display_order, Gateway.name)
         .all()
     )
     return [_gateway_out(db, g) for g in rows]
