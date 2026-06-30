@@ -1,6 +1,6 @@
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
-import { Breadcrumbs } from "@/components/breadcrumbs"
+import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { EventsTable } from "@/components/events/events-table"
 import type { Validation } from "@/lib/types"
 
@@ -15,7 +15,7 @@ export default async function EventsPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <Breadcrumbs items={[{ label: "Events" }]} />
+      <PageBreadcrumbs items={[{ label: "Events" }]} />
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Validation events</h1>
         <p className="text-xs text-muted-foreground">

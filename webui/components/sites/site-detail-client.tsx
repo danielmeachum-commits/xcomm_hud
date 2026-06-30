@@ -5,7 +5,7 @@ import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import TransportBadge from "@/components/8starlabs-ui/transport-badge"
-import { Breadcrumbs } from "@/components/breadcrumbs"
+import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceForm } from "@/components/services/service-form"
@@ -13,7 +13,8 @@ import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
 import { SiteForm } from "@/components/sites/site-form"
 import { LocalTime } from "@/components/time-display"
-import { Button } from "@/components/ui/button"
+import { ViewTabs } from "@/components/ui/view-tabs"
+import { LayoutGrid, Network } from "lucide-react"
 import {
   categoryAccentClass,
   categoryLabel,
@@ -55,7 +56,7 @@ export function SiteDetailClient({
   sites,
   templates,
 }: Props) {
-  const [view, setView] = useState<"canvas" | "list">("canvas")
+  const [view, setView] = useState<"list" | "graph">("graph")
 
   const byCategory = new Map<ServiceCategory, Service[]>()
   for (const s of services) {
@@ -66,7 +67,7 @@ export function SiteDetailClient({
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
-      <Breadcrumbs
+      <PageBreadcrumbs
         items={[
           { label: "Sites", href: "/sites" },
           { label: site.name },
@@ -103,24 +104,16 @@ export function SiteDetailClient({
         </div>
       </header>
 
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant={view === "canvas" ? "default" : "outline"}
-          onClick={() => setView("canvas")}
-        >
-          Canvas
-        </Button>
-        <Button
-          size="sm"
-          variant={view === "list" ? "default" : "outline"}
-          onClick={() => setView("list")}
-        >
-          List
-        </Button>
-      </div>
+      <ViewTabs<"list" | "graph">
+        value={view}
+        onChange={setView}
+        options={[
+          { value: "list", label: "List", icon: LayoutGrid },
+          { value: "graph", label: "Graph", icon: Network },
+        ]}
+      />
 
-      {view === "canvas" ? (
+      {view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />
       ) : (
         <div className="flex flex-col gap-6">

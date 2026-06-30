@@ -1,46 +1,84 @@
-import Link from "next/link"
-import { ChevronRight, Home } from "lucide-react"
+"use client"
 
-import { cn } from "@/lib/utils"
+import Link from "next/link"
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react"
+
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 
 export interface CrumbItem {
   label: string
   href?: string
 }
 
-interface Props {
-  items: CrumbItem[]
-  className?: string
+interface CtxValue {
+  crumbs: CrumbItem[]
+  setCrumbs: (items: CrumbItem[]) => void
 }
 
-export function Breadcrumbs({ items, className }: Props) {
+const Ctx = createContext<CtxValue | null>(null)
+
+export function BreadcrumbsProvider({ children }: { children: React.ReactNode }) {
+  const [crumbs, setCrumbs] = useState<CrumbItem[]>([])
+  const value = useMemo(() => ({ crumbs, setCrumbs }), [crumbs])
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
+function useBreadcrumbsContext(): CtxValue {
+  const v = useContext(Ctx)
+  if (!v) throw new Error("useBreadcrumbs must be inside BreadcrumbsProvider")
+  return v
+}
+
+/** Render in a page to register its breadcrumbs with the site header. */
+export function PageBreadcrumbs({ items }: { items: CrumbItem[] }) {
+  const { setCrumbs } = useBreadcrumbsContext()
+  const key = JSON.stringify(items)
+  useLayoutEffect(() => {
+    setCrumbs(items)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return null
+}
+
+/** Visual breadcrumbs trail (consumed by SiteHeader). */
+export function HeaderBreadcrumbs() {
+  const { crumbs } = useBreadcrumbsContext()
+  if (crumbs.length === 0) return null
+
   return (
-    <nav
-      aria-label="Breadcrumb"
-      className={cn(
-        "flex items-center gap-1 text-xs text-muted-foreground",
-        className,
-      )}
-    >
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1 hover:text-foreground"
-      >
-        <Home className="size-3" />
-        <span>Overview</span>
-      </Link>
-      {items.map((it, i) => (
-        <span key={i} className="inline-flex items-center gap-1">
-          <ChevronRight className="size-3" />
-          {it.href ? (
-            <Link href={it.href} className="hover:text-foreground">
-              {it.label}
-            </Link>
-          ) : (
-            <span className="text-foreground">{it.label}</span>
-          )}
-        </span>
-      ))}
-    </nav>
+    <Breadcrumb>
+      <BreadcrumbList>
+        {crumbs.map((c, i) => {
+          const isLast = i === crumbs.length - 1
+          return (
+            <span key={i} className="contents">
+              {i > 0 && <BreadcrumbSeparator />}
+              <BreadcrumbItem>
+                {isLast || !c.href ? (
+                  <BreadcrumbPage>{c.label}</BreadcrumbPage>
+                ) : (
+                  <BreadcrumbLink render={<Link href={c.href} />}>
+                    {c.label}
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
+            </span>
+          )
+        })}
+      </BreadcrumbList>
+    </Breadcrumb>
   )
 }

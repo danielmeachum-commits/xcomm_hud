@@ -2,7 +2,7 @@ import Link from "next/link"
 
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
-import { Breadcrumbs } from "@/components/breadcrumbs"
+import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { LocalTime } from "@/components/time-display"
@@ -38,7 +38,7 @@ export default async function ServicesPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <Breadcrumbs items={[{ label: "Services" }]} />
+      <PageBreadcrumbs items={[{ label: "Services" }]} />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Services</h1>

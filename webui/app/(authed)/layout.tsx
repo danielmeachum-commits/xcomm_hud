@@ -1,8 +1,10 @@
 import { requireSession } from "@/lib/auth"
+import { apiGet } from "@/lib/api"
 import { AppSidebar } from "@/components/app-sidebar"
-import { TopNav } from "@/components/top-nav"
-import { SidebarProvider } from "@/components/ui/sidebar"
-import { DashboardProvider } from "@/components/dashboard/dashboard-context"
+import { BreadcrumbsProvider } from "@/components/breadcrumbs"
+import { SiteHeader } from "@/components/site-header"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import type { Site } from "@/lib/types"
 
 export default async function AuthedLayout({
   children,
@@ -11,19 +13,26 @@ export default async function AuthedLayout({
 }) {
   const user = await requireSession()
 
+  let sites: Site[] = []
+  try {
+    sites = await apiGet<Site[]>("/sites")
+  } catch {
+    // API unavailable — sidebar shows Sites without submenu
+  }
+
   return (
     <div className="theme-class-U">
-      <DashboardProvider username={user.username}>
-        <SidebarProvider className="!min-h-svh !flex-col">
-          <TopNav user={user} />
-          <div className="flex min-h-0 flex-1">
-            <AppSidebar />
-            <main className="flex-1 overflow-auto bg-background">
+      <BreadcrumbsProvider>
+        <SidebarProvider>
+          <AppSidebar user={user} sites={sites} />
+          <SidebarInset>
+            <SiteHeader />
+            <div className="flex min-h-0 flex-1 flex-col overflow-auto">
               {children}
-            </main>
-          </div>
+            </div>
+          </SidebarInset>
         </SidebarProvider>
-      </DashboardProvider>
+      </BreadcrumbsProvider>
     </div>
   )
 }

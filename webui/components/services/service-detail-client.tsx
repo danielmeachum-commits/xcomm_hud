@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
-import { Breadcrumbs } from "@/components/breadcrumbs"
+import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { ValidationHistory } from "@/components/services/validation-history"
 import { LocalTime, TimeAgo } from "@/components/time-display"
@@ -101,7 +101,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
   const siteName = sites.find((s) => s.id === service.site_id)?.name
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
-      <Breadcrumbs
+      <PageBreadcrumbs
         items={[
           { label: "Sites", href: "/sites" },
           ...(siteName
