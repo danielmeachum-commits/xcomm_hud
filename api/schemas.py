@@ -7,15 +7,15 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Classification = Literal["U", "CUI", "S", "TS"]
 StatusValue = Literal["up", "degraded", "down", "unknown"]
 ServiceKind = Literal["voip", "data", "video", "crypto", "other"]
-ServiceHosting = Literal["self", "cloud", "hybrid"]
 ServiceCategory = Literal["core_critical_local", "sustainment", "other"]
-ServiceReach = Literal["local", "external", "both"]
+ServiceReach = Literal["local", "external"]
 GatewayKind = Literal["isp", "modem", "satellite", "other"]
 UserRole = Literal["viewer", "operator", "admin"]
 SubjectKind = Literal["service", "site", "gateway"]
+Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
+Emcon = Literal["a", "b", "c", "d"]
 
 
 class _ORM(BaseModel):
@@ -60,7 +60,8 @@ class MeOut(BaseModel):
 class SiteIn(BaseModel):
     name: str
     location_label: Optional[str] = None
-    classification: Classification = "U"
+    fpcon: Fpcon = "normal"
+    emcon: Emcon = "a"
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
@@ -69,7 +70,8 @@ class SiteIn(BaseModel):
 class SitePatch(BaseModel):
     name: Optional[str] = None
     location_label: Optional[str] = None
-    classification: Optional[Classification] = None
+    fpcon: Optional[Fpcon] = None
+    emcon: Optional[Emcon] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
@@ -79,14 +81,15 @@ class SiteOut(_ORM):
     id: int
     name: str
     location_label: Optional[str] = None
-    classification: Classification
+    fpcon: Fpcon
+    emcon: Emcon
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
-    status: StatusValue = "unknown"
+    status: StatusValue = "unknown"  # computed rollup (effective)
 
 
-# --- Service template (catalog) ---
+# --- Service template ---
 
 
 class ServiceTemplateOut(_ORM):
@@ -95,9 +98,8 @@ class ServiceTemplateOut(_ORM):
     kind: ServiceKind
     category: ServiceCategory
     reach: ServiceReach
-    default_hosting: ServiceHosting
     icon: Optional[str] = None
-    notes: Optional[str] = None
+    description: Optional[str] = None
 
 
 # --- Service ---
@@ -105,12 +107,12 @@ class ServiceTemplateOut(_ORM):
 
 class ServiceIn(BaseModel):
     name: str
-    site_id: Optional[int] = None
+    site_id: int
     kind: ServiceKind = "other"
-    hosting: ServiceHosting = "self"
     category: ServiceCategory = "other"
     reach: ServiceReach = "local"
     icon: Optional[str] = None
+    description: Optional[str] = None
     status: StatusValue = "unknown"
     notes: Optional[str] = None
 
@@ -119,25 +121,32 @@ class ServicePatch(BaseModel):
     name: Optional[str] = None
     site_id: Optional[int] = None
     kind: Optional[ServiceKind] = None
-    hosting: Optional[ServiceHosting] = None
     category: Optional[ServiceCategory] = None
     reach: Optional[ServiceReach] = None
     icon: Optional[str] = None
-    status: Optional[StatusValue] = None
+    description: Optional[str] = None
     notes: Optional[str] = None
+
+
+class ServiceValidateIn(BaseModel):
+    status: StatusValue
     note: Optional[str] = None
 
 
 class ServiceOut(_ORM):
     id: int
     name: str
-    site_id: Optional[int] = None
+    site_id: int
     kind: ServiceKind
-    hosting: ServiceHosting
     category: ServiceCategory
     reach: ServiceReach
     icon: Optional[str] = None
+    description: Optional[str] = None
     status: StatusValue
+    effective_status: StatusValue = "unknown"  # cascaded; same as status for local
+    validated_at: Optional[datetime.datetime] = None
+    validated_by_user_id: Optional[int] = None
+    validated_by_username: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -156,8 +165,12 @@ class GatewayPatch(BaseModel):
     name: Optional[str] = None
     kind: Optional[GatewayKind] = None
     provider: Optional[str] = None
-    status: Optional[StatusValue] = None
     notes: Optional[str] = None
+
+
+class GatewayValidateIn(BaseModel):
+    status: StatusValue
+    note: Optional[str] = None
 
 
 class GatewayOut(_ORM):
@@ -167,6 +180,9 @@ class GatewayOut(_ORM):
     kind: GatewayKind
     provider: Optional[str] = None
     status: StatusValue
+    validated_at: Optional[datetime.datetime] = None
+    validated_by_user_id: Optional[int] = None
+    validated_by_username: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -188,14 +204,12 @@ class CanvasAnnotationIn(BaseModel):
     text: str = ""
     x: float = 0.0
     y: float = 0.0
-    classification: Optional[Classification] = None
 
 
 class CanvasAnnotationPatch(BaseModel):
     text: Optional[str] = None
     x: Optional[float] = None
     y: Optional[float] = None
-    classification: Optional[Classification] = None
 
 
 class CanvasAnnotationOut(_ORM):
@@ -203,13 +217,9 @@ class CanvasAnnotationOut(_ORM):
     text: str
     x: float
     y: float
-    classification: Optional[Classification] = None
 
 
 class MapBundle(BaseModel):
-    """Single fetch for the /map canvas — sites + their positions + services
-    + gateways + annotations."""
-
     sites: list[SiteOut]
     positions: list[CanvasPositionOut]
     services: list[ServiceOut]
@@ -224,7 +234,10 @@ class SiteRollup(BaseModel):
     id: int
     name: str
     status: StatusValue
+    fpcon: Fpcon
+    emcon: Emcon
     service_count: int
+    gateway_count: int
 
 
 class ServiceRollup(BaseModel):
@@ -234,15 +247,35 @@ class ServiceRollup(BaseModel):
     category: ServiceCategory
     reach: ServiceReach
     icon: Optional[str] = None
-    hosting: ServiceHosting
     status: StatusValue
-    site_id: Optional[int] = None
-    site_name: Optional[str] = None
+    effective_status: StatusValue
+    site_id: int
+    site_name: str
+    validated_at: Optional[datetime.datetime] = None
 
 
 class StatusRollupOut(BaseModel):
     sites: list[SiteRollup]
     services: list[ServiceRollup]
+
+
+# --- Validation feed ---
+
+
+class ValidationOut(_ORM):
+    id: int
+    validated_at: datetime.datetime
+    subject_kind: SubjectKind
+    subject_id: int
+    subject_name: Optional[str] = None
+    site_id: Optional[int] = None
+    site_name: Optional[str] = None
+    prev_status: Optional[StatusValue] = None
+    status: StatusValue
+    source: Literal["manual", "ingest"]
+    validated_by_user_id: Optional[int] = None
+    validated_by_username: Optional[str] = None
+    note: Optional[str] = None
 
 
 # --- Enclave source / ingest ---
@@ -271,7 +304,6 @@ class EnclaveSourceCreated(BaseModel):
 class IngestService(BaseModel):
     name: str
     kind: ServiceKind = "other"
-    hosting: ServiceHosting = "self"
     status: StatusValue = "unknown"
     site_name: Optional[str] = None
 
@@ -285,18 +317,3 @@ class IngestPayload(BaseModel):
 class IngestAck(BaseModel):
     accepted: bool
     enclave_source_id: int
-
-
-# --- Status event ---
-
-
-class StatusEventOut(_ORM):
-    id: int
-    ts: datetime.datetime
-    subject_kind: SubjectKind
-    subject_id: int
-    old_state: Optional[StatusValue] = None
-    new_state: StatusValue
-    source: Literal["manual", "ingest"]
-    actor_user_id: Optional[int] = None
-    note: Optional[str] = None

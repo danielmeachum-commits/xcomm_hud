@@ -1,27 +1,22 @@
 // TypeScript types matching the xcomm_hud API contract.
 
-export type Classification = "U" | "CUI" | "S" | "TS"
-
-export const CLASSIFICATION_LABELS: Record<Classification, string> = {
-  U: "Unclassified",
-  CUI: "Controlled Unclassified",
-  S: "Secret",
-  TS: "Top Secret",
-}
-
 export type Role = "viewer" | "operator" | "admin"
 
 export type StatusValue = "up" | "degraded" | "down" | "unknown"
 
 export type ServiceKind = "voip" | "data" | "video" | "crypto" | "other"
 
-export type ServiceHosting = "self" | "cloud" | "hybrid"
-
 export type ServiceCategory = "core_critical_local" | "sustainment" | "other"
 
-export type ServiceReach = "local" | "external" | "both"
+export type ServiceReach = "local" | "external"
 
 export type GatewayKind = "isp" | "modem" | "satellite" | "other"
+
+export type Fpcon = "normal" | "alpha" | "bravo" | "charlie" | "delta"
+
+export type Emcon = "a" | "b" | "c" | "d"
+
+export type SubjectKind = "service" | "site" | "gateway"
 
 export interface Me {
   user_id: number
@@ -42,7 +37,8 @@ export interface Site {
   id: number
   name: string
   location_label: string | null
-  classification: Classification
+  fpcon: Fpcon
+  emcon: Emcon
   lat: number | null
   lon: number | null
   notes: string | null
@@ -52,13 +48,17 @@ export interface Site {
 export interface Service {
   id: number
   name: string
-  site_id: number | null
+  site_id: number
   kind: ServiceKind
-  hosting: ServiceHosting
   category: ServiceCategory
   reach: ServiceReach
   icon: string | null
+  description: string | null
   status: StatusValue
+  effective_status: StatusValue
+  validated_at: string | null
+  validated_by_user_id: number | null
+  validated_by_username: string | null
   notes: string | null
 }
 
@@ -68,9 +68,8 @@ export interface ServiceTemplate {
   kind: ServiceKind
   category: ServiceCategory
   reach: ServiceReach
-  default_hosting: ServiceHosting
   icon: string | null
-  notes: string | null
+  description: string | null
 }
 
 export interface Gateway {
@@ -80,6 +79,9 @@ export interface Gateway {
   kind: GatewayKind
   provider: string | null
   status: StatusValue
+  validated_at: string | null
+  validated_by_user_id: number | null
+  validated_by_username: string | null
   notes: string | null
 }
 
@@ -94,7 +96,6 @@ export interface CanvasAnnotation {
   text: string
   x: number
   y: number
-  classification: Classification | null
 }
 
 export interface MapBundle {
@@ -109,7 +110,10 @@ export interface SiteRollup {
   id: number
   name: string
   status: StatusValue
+  fpcon: Fpcon
+  emcon: Emcon
   service_count: number
+  gateway_count: number
 }
 
 export interface ServiceRollup {
@@ -119,15 +123,32 @@ export interface ServiceRollup {
   category: ServiceCategory
   reach: ServiceReach
   icon: string | null
-  hosting: ServiceHosting
   status: StatusValue
-  site_id: number | null
-  site_name: string | null
+  effective_status: StatusValue
+  site_id: number
+  site_name: string
+  validated_at: string | null
 }
 
 export interface StatusRollup {
   sites: SiteRollup[]
   services: ServiceRollup[]
+}
+
+export interface Validation {
+  id: number
+  validated_at: string
+  subject_kind: SubjectKind
+  subject_id: number
+  subject_name: string | null
+  site_id: number | null
+  site_name: string | null
+  prev_status: StatusValue | null
+  status: StatusValue
+  source: "manual" | "ingest"
+  validated_by_user_id: number | null
+  validated_by_username: string | null
+  note: string | null
 }
 
 export interface EnclaveSource {

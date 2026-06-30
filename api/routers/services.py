@@ -1,4 +1,4 @@
-"""Service CRUD. Status is a direct field; setting it emits a status_event."""
+"""Service CRUD + validation endpoint."""
 
 from __future__ import annotations
 
@@ -7,10 +7,24 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import Service, Site, StatusEvent, User
-from schemas import ServiceIn, ServiceOut, ServicePatch
+from effective import effective_service_status
+from models import Gateway, Service, Site, User, Validation
+from schemas import ServiceIn, ServiceOut, ServicePatch, ServiceValidateIn
 
 router = APIRouter(prefix="/services", tags=["services"])
+
+
+def _service_out(db: Session, service: Service) -> ServiceOut:
+    gateways = (
+        db.query(Gateway).filter(Gateway.site_id == service.site_id).all()
+    )
+    out = ServiceOut.model_validate(service)
+    out.effective_status = effective_service_status(service, gateways)
+    if service.validated_by_user_id is not None:
+        u = db.get(User, service.validated_by_user_id)
+        if u:
+            out.validated_by_username = u.username
+    return out
 
 
 @router.get("", response_model=list[ServiceOut])
@@ -18,7 +32,8 @@ def list_services(
     db: Session = Depends(get_db),
     _=Depends(requires("viewer")),
 ):
-    return db.query(Service).order_by(Service.name).all()
+    services = db.query(Service).order_by(Service.name).all()
+    return [_service_out(db, s) for s in services]
 
 
 @router.post("", response_model=ServiceOut, status_code=status.HTTP_201_CREATED)
@@ -27,12 +42,12 @@ def create_service(
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
-    if body.site_id is not None and db.get(Site, body.site_id) is None:
+    if db.get(Site, body.site_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     service = Service(**body.model_dump())
     db.add(service)
     db.flush()
-    return service
+    return _service_out(db, service)
 
 
 @router.get("/{service_id}", response_model=ServiceOut)
@@ -44,7 +59,7 @@ def get_service(
     service = db.get(Service, service_id)
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
-    return service
+    return _service_out(db, service)
 
 
 @router.patch("/{service_id}", response_model=ServiceOut)
@@ -52,40 +67,58 @@ def patch_service(
     service_id: int,
     body: ServicePatch,
     db: Session = Depends(get_db),
-    current_user: User = Depends(requires("operator")),
+    _=Depends(requires("operator")),
 ):
     service = db.get(Service, service_id)
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
 
     data = body.model_dump(exclude_unset=True)
-    new_status = data.pop("status", None)
-    note = data.pop("note", None)
-
-    if "site_id" in data and data["site_id"] is not None:
-        if db.get(Site, data["site_id"]) is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    if "site_id" in data and db.get(Site, data["site_id"]) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
 
     for k, v in data.items():
         setattr(service, k, v)
 
-    if new_status is not None and new_status != service.status:
-        db.add(
-            StatusEvent(
-                subject_kind="service",
-                subject_id=service.id,
-                old_state=service.status,
-                new_state=new_status,
-                source="manual",
-                actor_user_id=current_user.id,
-                note=note,
-            )
-        )
-        service.status = new_status
-
     db.flush()
     db.refresh(service)
-    return service
+    return _service_out(db, service)
+
+
+@router.post("/{service_id}/validate", response_model=ServiceOut)
+def validate_service(
+    service_id: int,
+    body: ServiceValidateIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(requires("operator")),
+):
+    """Record a validation: someone confirmed the service is in this state.
+
+    Always creates a `validation` row; updates the service's stored status,
+    validated_at, validated_by_user_id.
+    """
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+
+    prev = service.status
+    v = Validation(
+        subject_kind="service",
+        subject_id=service.id,
+        prev_status=prev,
+        status=body.status,
+        source="manual",
+        validated_by_user_id=current_user.id,
+        note=body.note,
+    )
+    db.add(v)
+    db.flush()
+    service.status = body.status
+    service.validated_at = v.validated_at
+    service.validated_by_user_id = current_user.id
+    db.flush()
+    db.refresh(service)
+    return _service_out(db, service)
 
 
 @router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)

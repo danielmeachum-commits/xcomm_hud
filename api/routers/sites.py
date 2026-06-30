@@ -1,4 +1,4 @@
-"""Site CRUD with status rollup from its services."""
+"""Site CRUD with status rollup using the effective status of its services."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import Service, Site
+from effective import effective_service_status
+from models import Gateway, Service, Site
 from rollup import site_status
 from schemas import SiteIn, SiteOut, SitePatch
 
@@ -16,8 +17,11 @@ router = APIRouter(prefix="/sites", tags=["sites"])
 
 def _site_with_status(db: Session, site: Site) -> SiteOut:
     services = db.query(Service).filter(Service.site_id == site.id).all()
+    gateways = db.query(Gateway).filter(Gateway.site_id == site.id).all()
     out = SiteOut.model_validate(site)
-    out.status = site_status([s.status for s in services])
+    out.status = site_status(
+        [effective_service_status(s, gateways) for s in services]
+    )
     return out
 
 

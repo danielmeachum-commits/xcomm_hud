@@ -1,8 +1,4 @@
-"""Canvas state for the React Flow map: site positions + annotations.
-
-`GET /canvas/map` returns a single bundle of everything the /map page needs
-so the client doesn't fan out to 4+ endpoints on every render.
-"""
+"""Canvas state for the React Flow map: site positions + annotations."""
 
 from __future__ import annotations
 
@@ -11,12 +7,14 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
+from effective import effective_service_status
 from models import (
     CanvasAnnotation,
     Gateway,
     Service,
     Site,
     SiteCanvasPosition,
+    User,
 )
 from rollup import site_status
 from schemas import (
@@ -44,24 +42,56 @@ def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
 
     services_by_site: dict[int, list[Service]] = {}
     for s in services:
-        if s.site_id is not None:
-            services_by_site.setdefault(s.site_id, []).append(s)
+        services_by_site.setdefault(s.site_id, []).append(s)
+    gateways_by_site: dict[int, list[Gateway]] = {}
+    for g in gateways:
+        gateways_by_site.setdefault(g.site_id, []).append(g)
 
+    # Site rollup uses effective_status of its services
     site_outs: list[SiteOut] = []
     for site in sites:
+        gws = gateways_by_site.get(site.id, [])
+        svcs = services_by_site.get(site.id, [])
         out = SiteOut.model_validate(site)
-        out.status = site_status(
-            [s.status for s in services_by_site.get(site.id, [])]
-        )
+        out.status = site_status([effective_service_status(s, gws) for s in svcs])
         site_outs.append(out)
+
+    service_outs: list[ServiceOut] = []
+    user_cache: dict[int, str] = {}
+    for s in services:
+        gws = gateways_by_site.get(s.site_id, [])
+        so = ServiceOut.model_validate(s)
+        so.effective_status = effective_service_status(s, gws)
+        if s.validated_by_user_id is not None:
+            uname = user_cache.get(s.validated_by_user_id)
+            if uname is None:
+                u = db.get(User, s.validated_by_user_id)
+                if u:
+                    uname = u.username
+                    user_cache[s.validated_by_user_id] = uname
+            so.validated_by_username = uname
+        service_outs.append(so)
+
+    gateway_outs: list[GatewayOut] = []
+    for g in gateways:
+        go = GatewayOut.model_validate(g)
+        if g.validated_by_user_id is not None:
+            uname = user_cache.get(g.validated_by_user_id)
+            if uname is None:
+                u = db.get(User, g.validated_by_user_id)
+                if u:
+                    uname = u.username
+                    user_cache[g.validated_by_user_id] = uname
+            go.validated_by_username = uname
+        gateway_outs.append(go)
 
     return MapBundle(
         sites=site_outs,
         positions=[
             CanvasPositionOut(site_id=p.site_id, x=p.x, y=p.y) for p in positions
         ],
-        services=[ServiceOut.model_validate(s) for s in services],
-        gateways=[GatewayOut.model_validate(g) for g in gateways],
+        services=service_outs,
+        gateways=gateway_outs,
         annotations=[CanvasAnnotationOut.model_validate(a) for a in annotations],
     )
 

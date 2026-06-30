@@ -3,6 +3,7 @@
 import Link from "next/link"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import TransportBadge from "@/components/8starlabs-ui/transport-badge"
 import type { WidgetProps } from "@/lib/dashboard/registry"
 import { statusBadgeClass, statusLabel, statusToIndicatorState } from "@/lib/status"
 
@@ -32,8 +33,10 @@ export function SiteStatusGridWidget({ data }: WidgetProps) {
               <span>{statusLabel(s.status)}</span>
             </div>
           </div>
+          <TransportBadge fpcon={s.fpcon} emcon={s.emcon} size="sm" />
           <div className="text-xs text-muted-foreground">
-            {s.service_count} {s.service_count === 1 ? "service" : "services"}
+            {s.service_count} {s.service_count === 1 ? "service" : "services"} ·{" "}
+            {s.gateway_count} {s.gateway_count === 1 ? "gateway" : "gateways"}
           </div>
         </Link>
       ))}

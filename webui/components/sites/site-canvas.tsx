@@ -16,11 +16,9 @@ import {
   ReactFlowProvider,
 } from "@xyflow/react"
 
-import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { gatewayIcon, gatewayKindLabel, serviceIcon } from "@/lib/service-meta"
-import { statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type { Gateway, Service } from "@/lib/types"
 
@@ -65,28 +63,31 @@ function LaneHeaderNode({ data }: NodeProps) {
 function ServiceCanvasNode({ data }: NodeProps) {
   const { service } = data as ServiceNodeData
   const Icon = serviceIcon(service.icon, service.kind)
-  const showLeft = service.reach !== "local"  // external/both anchor on left
-  const showRight = service.reach !== "external"  // local/both anchor on right
+  const isExternal = service.reach === "external"
   return (
     <div
       className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm"
       style={{ width: LANE_WIDTH }}
     >
-      {showLeft && (
+      {isExternal && (
         <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
-      )}
-      {showRight && (
-        <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
       )}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate text-sm font-medium">{service.name}</span>
         </div>
-        <ServiceStatusPill serviceId={service.id} status={service.status} />
+        <ServiceStatusPill
+          serviceId={service.id}
+          serviceName={service.name}
+          status={service.status}
+          effectiveStatus={service.effective_status}
+          lastValidatedAt={service.validated_at}
+          lastValidatedBy={service.validated_by_username}
+        />
       </div>
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        {service.kind} · {service.hosting}
+        {service.kind}
       </div>
     </div>
   )
@@ -107,7 +108,13 @@ function GatewayCanvasNode({ data }: NodeProps) {
           <Icon className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
           <span className="truncate text-sm font-medium">{gateway.name}</span>
         </div>
-        <GatewayStatusPill gatewayId={gateway.id} status={gateway.status} />
+        <GatewayStatusPill
+          gatewayId={gateway.id}
+          gatewayName={gateway.name}
+          status={gateway.status}
+          lastValidatedAt={gateway.validated_at}
+          lastValidatedBy={gateway.validated_by_username}
+        />
       </div>
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
         {gatewayKindLabel(gateway.kind)}
@@ -130,23 +137,15 @@ interface Props {
 
 function SiteCanvasInner({ services, gateways }: Props) {
   const { nodes, edges } = useMemo(() => {
-    const localServices = services.filter((s) => s.reach === "local")
-    const bothServices = services.filter((s) => s.reach === "both")
-    const externalServices = services.filter((s) => s.reach === "external")
-    // "Both" services live in the local lane (they have a local instance) and
-    // also receive an edge from gateways, so they appear connected on both sides.
-    const localLane = [...localServices, ...bothServices]
-    const externalLane = externalServices
+    const local = services.filter((s) => s.reach === "local")
+    const external = services.filter((s) => s.reach === "external")
 
-    const built: Node[] = []
-    const built_edges: Edge[] = []
-
-    built.push(
+    const built: Node[] = [
       {
         id: "header-local",
         type: "laneHeader",
         position: { x: LANE_X.local, y: 20 },
-        data: { label: "Local", count: localLane.length, accent: "border-emerald-500/40" },
+        data: { label: "Local", count: local.length, accent: "border-emerald-500/40" },
         draggable: false,
         selectable: false,
       },
@@ -162,13 +161,14 @@ function SiteCanvasInner({ services, gateways }: Props) {
         id: "header-external",
         type: "laneHeader",
         position: { x: LANE_X.external, y: 20 },
-        data: { label: "External", count: externalLane.length, accent: "border-sky-500/40" },
+        data: { label: "External", count: external.length, accent: "border-sky-500/40" },
         draggable: false,
         selectable: false,
       },
-    )
+    ]
+    const builtEdges: Edge[] = []
 
-    localLane.forEach((svc, i) => {
+    local.forEach((svc, i) => {
       built.push({
         id: `service-${svc.id}`,
         type: "service",
@@ -188,7 +188,7 @@ function SiteCanvasInner({ services, gateways }: Props) {
       })
     })
 
-    externalLane.forEach((svc, i) => {
+    external.forEach((svc, i) => {
       built.push({
         id: `service-${svc.id}`,
         type: "service",
@@ -198,30 +198,14 @@ function SiteCanvasInner({ services, gateways }: Props) {
       })
     })
 
-    // "both" services have local nodes but also need to connect through gateways
-    // → external view. Render virtual external copies for the connect edges only
-    // if you want. For MVP, just connect from gateway → "both" local node so the
-    // operator can see the dependency without duplication.
     if (gateways.length > 0) {
       for (const gw of gateways) {
-        for (const svc of externalLane) {
-          built_edges.push({
+        for (const svc of external) {
+          builtEdges.push({
             id: `e-gw${gw.id}-svc${svc.id}`,
             source: `gateway-${gw.id}`,
             target: `service-${svc.id}`,
-            animated: gw.status === "up" && svc.status === "up",
-            style: {
-              stroke: gw.status === "down" ? "rgb(239 68 68)" : "rgb(245 158 11)",
-              strokeDasharray: gw.status === "down" ? "4 4" : undefined,
-            },
-          })
-        }
-        for (const svc of bothServices) {
-          built_edges.push({
-            id: `e-svc${svc.id}-gw${gw.id}`,
-            source: `service-${svc.id}`,
-            target: `gateway-${gw.id}`,
-            animated: gw.status === "up" && svc.status === "up",
+            animated: gw.status === "up" && svc.effective_status === "up",
             style: {
               stroke: gw.status === "down" ? "rgb(239 68 68)" : "rgb(245 158 11)",
               strokeDasharray: gw.status === "down" ? "4 4" : undefined,
@@ -231,7 +215,7 @@ function SiteCanvasInner({ services, gateways }: Props) {
       }
     }
 
-    return { nodes: built, edges: built_edges }
+    return { nodes: built, edges: builtEdges }
   }, [services, gateways])
 
   return (

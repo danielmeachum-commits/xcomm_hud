@@ -4,21 +4,24 @@ import Link from "next/link"
 import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import TransportBadge from "@/components/8starlabs-ui/transport-badge"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
+import { SiteForm } from "@/components/sites/site-form"
 import { Button } from "@/components/ui/button"
 import {
   categoryAccentClass,
   categoryLabel,
   gatewayIcon,
   gatewayKindLabel,
-  reachShort,
+  reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
+import { formatLocal, formatZulu } from "@/lib/time"
 import type {
   Gateway,
   Service,
@@ -60,11 +63,12 @@ export function SiteDetailClient({
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
+        <div className="flex flex-col gap-1">
           <h1 className="text-lg font-semibold tracking-tight">{site.name}</h1>
           <p className="text-xs text-muted-foreground">
-            {site.location_label ?? "—"} · Classification {site.classification}
+            {site.location_label ?? "—"}
           </p>
+          <TransportBadge fpcon={site.fpcon} emcon={site.emcon} />
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider">
@@ -75,6 +79,7 @@ export function SiteDetailClient({
             <span>{statusLabel(site.status)}</span>
           </div>
           <div className="flex gap-2">
+            <SiteForm site={site} />
             <GatewayForm siteId={site.id} />
             <ServiceForm
               sites={sites}
@@ -127,9 +132,22 @@ export function SiteDetailClient({
                             {gatewayKindLabel(g.kind)}
                             {g.provider ? ` · ${g.provider}` : ""}
                           </div>
+                          {g.validated_at && (
+                            <div className="text-[10px] font-mono text-muted-foreground">
+                              {formatLocal(g.validated_at)} ·{" "}
+                              {formatZulu(g.validated_at)}
+                              {g.validated_by_username ? ` · ${g.validated_by_username}` : ""}
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <GatewayStatusPill gatewayId={g.id} status={g.status} />
+                      <GatewayStatusPill
+                        gatewayId={g.id}
+                        gatewayName={g.name}
+                        status={g.status}
+                        lastValidatedAt={g.validated_at}
+                        lastValidatedBy={g.validated_by_username}
+                      />
                     </li>
                   )
                 })}
@@ -161,11 +179,24 @@ export function SiteDetailClient({
                           <div className="min-w-0">
                             <div className="font-medium">{s.name}</div>
                             <div className="text-xs text-muted-foreground">
-                              {s.kind} · {s.hosting} · reach {reachShort(s.reach)}
+                              {s.kind} · {reachLabel(s.reach)}
                             </div>
+                            {s.validated_at && (
+                              <div className="text-[10px] font-mono text-muted-foreground">
+                                {formatLocal(s.validated_at)} ·{" "}
+                                {formatZulu(s.validated_at)}
+                              </div>
+                            )}
                           </div>
                         </Link>
-                        <ServiceStatusPill serviceId={s.id} status={s.status} />
+                        <ServiceStatusPill
+                          serviceId={s.id}
+                          serviceName={s.name}
+                          status={s.status}
+                          effectiveStatus={s.effective_status}
+                          lastValidatedAt={s.validated_at}
+                          lastValidatedBy={s.validated_by_username}
+                        />
                       </li>
                     )
                   })}
@@ -176,8 +207,8 @@ export function SiteDetailClient({
 
           {services.length === 0 && gateways.length === 0 && (
             <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-              No services or gateways yet. Add a gateway (your ISP/modem uplink)
-              and your standard services from the template catalog above.
+              No services or gateways yet. Add a gateway (your ISP/modem
+              uplink) and your standard services from the template catalog.
             </div>
           )}
         </div>

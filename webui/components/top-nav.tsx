@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { href: "/map", label: "Map" },
   { href: "/sites", label: "Sites" },
   { href: "/services", label: "Services" },
+  { href: "/events", label: "Events" },
 ]
 
 export function TopNav({ user, title = "xCOMM HUD" }: TopNavProps) {

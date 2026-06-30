@@ -3,6 +3,8 @@
 import Link from "next/link"
 
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
+import { serviceIcon } from "@/lib/service-meta"
+import { formatZulu } from "@/lib/time"
 import type { WidgetProps } from "@/lib/dashboard/registry"
 import type { ServiceRollup } from "@/lib/types"
 
@@ -37,24 +39,36 @@ export function ServiceHealthRollupWidget({ data }: WidgetProps) {
               {kind}
             </h3>
             <ul className="flex flex-col gap-1.5">
-              {items.map((s) => (
-                <li
-                  key={s.id}
-                  className="flex items-center justify-between gap-3 rounded-md border bg-background/50 px-3 py-2 text-sm"
-                >
-                  <Link
-                    href={`/services/${s.id}`}
-                    className="min-w-0 flex-1 truncate font-medium hover:underline"
+              {items.map((s) => {
+                const Icon = serviceIcon(s.icon, s.kind)
+                return (
+                  <li
+                    key={s.id}
+                    className="flex items-center justify-between gap-3 rounded-md border bg-background/50 px-3 py-2 text-sm"
                   >
-                    {s.name}
-                    <span className="ml-2 text-xs uppercase tracking-wider text-muted-foreground">
-                      {s.hosting}
-                      {s.site_name ? ` · ${s.site_name}` : " · cross-site"}
-                    </span>
-                  </Link>
-                  <ServiceStatusPill serviceId={s.id} status={s.status} />
-                </li>
-              ))}
+                    <Link
+                      href={`/services/${s.id}`}
+                      className="flex min-w-0 flex-1 items-center gap-2 hover:underline"
+                    >
+                      <Icon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">{s.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {s.site_name}
+                          {s.validated_at ? ` · ${formatZulu(s.validated_at)}` : ""}
+                        </div>
+                      </div>
+                    </Link>
+                    <ServiceStatusPill
+                      serviceId={s.id}
+                      serviceName={s.name}
+                      status={s.status}
+                      effectiveStatus={s.effective_status}
+                      lastValidatedAt={s.validated_at}
+                    />
+                  </li>
+                )
+              })}
             </ul>
           </section>
         ))}

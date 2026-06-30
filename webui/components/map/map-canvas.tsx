@@ -20,6 +20,7 @@ import {
 import { ExternalLink, Plus, StickyNote, Trash2 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import TransportBadge from "@/components/8starlabs-ui/transport-badge"
 import { Button } from "@/components/ui/button"
 import {
   categoryAccentClass,
@@ -27,6 +28,7 @@ import {
   serviceIcon,
 } from "@/lib/service-meta"
 import { statusToIndicatorState } from "@/lib/status"
+import { fpconClasses } from "@/lib/threat-level"
 import { cn } from "@/lib/utils"
 import type {
   CanvasAnnotation,
@@ -48,12 +50,12 @@ interface AnnotationNodeData extends Record<string, unknown> {
   onDelete: (id: number) => void
 }
 
-const SITE_NODE_WIDTH = 280
+const SITE_NODE_WIDTH = 300
 
 function SiteMapNode({ data }: NodeProps) {
   const { site, services, gateways } = data as SiteNodeData
+  const fpconRing = fpconClasses(site.fpcon).ring
 
-  // Group services by category for visual clustering inside the site card
   const byCategory = new Map<string, Service[]>()
   for (const s of services) {
     const list = byCategory.get(s.category) ?? []
@@ -63,7 +65,10 @@ function SiteMapNode({ data }: NodeProps) {
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-xl border bg-background p-3 shadow-md"
+      className={cn(
+        "flex flex-col gap-2 rounded-xl border bg-background p-3 shadow-md ring-4",
+        fpconRing,
+      )}
       style={{ width: SITE_NODE_WIDTH }}
     >
       <div className="flex items-center justify-between gap-2">
@@ -83,13 +88,16 @@ function SiteMapNode({ data }: NodeProps) {
         </div>
         <a
           href={`/sites/${site.id}`}
-          className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="nodrag rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Open site"
           onClick={(e) => e.stopPropagation()}
+          onPointerDownCapture={(e) => e.stopPropagation()}
         >
           <ExternalLink className="size-3.5" />
         </a>
       </div>
+
+      <TransportBadge fpcon={site.fpcon} emcon={site.emcon} size="sm" />
 
       {gateways.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -112,18 +120,26 @@ function SiteMapNode({ data }: NodeProps) {
 
       <div className="flex flex-col gap-1.5">
         {Array.from(byCategory.entries()).map(([cat, items]) => (
-          <div key={cat} className={cn("rounded-md border p-1.5", categoryAccentClass(cat as Service["category"]))}>
+          <div
+            key={cat}
+            className={cn("rounded-md border p-1.5", categoryAccentClass(cat as Service["category"]))}
+          >
             <div className="flex flex-wrap gap-1">
               {items.map((s) => {
                 const Icon = serviceIcon(s.icon, s.kind)
                 return (
                   <span
                     key={s.id}
-                    title={`${s.name} · ${s.status}`}
+                    title={`${s.name} · ${s.effective_status}${
+                      s.effective_status !== s.status ? " (stored: " + s.status + ")" : ""
+                    }`}
                     className="inline-flex items-center gap-1 rounded-full bg-background/70 px-1.5 py-0.5 text-[10px]"
                   >
                     <Icon className="size-3 text-muted-foreground" />
-                    <StatusIndicator state={statusToIndicatorState(s.status)} size="sm" />
+                    <StatusIndicator
+                      state={statusToIndicatorState(s.effective_status)}
+                      size="sm"
+                    />
                     <span className="truncate max-w-[68px]">{s.name}</span>
                   </span>
                 )
@@ -163,7 +179,8 @@ function AnnotationNode({ data }: NodeProps) {
           onBlur={commit}
           autoFocus
           rows={Math.max(1, text.split("\n").length)}
-          className="w-full resize-none bg-transparent outline-none"
+          className="nodrag w-full resize-none bg-transparent outline-none"
+          onPointerDownCapture={(e) => e.stopPropagation()}
         />
       ) : (
         <div
@@ -176,8 +193,12 @@ function AnnotationNode({ data }: NodeProps) {
         </div>
       )}
       <button
-        onClick={() => d.onDelete(d.annotation.id)}
-        className="invisible self-end text-muted-foreground hover:text-destructive group-hover:visible"
+        onClick={(e) => {
+          e.stopPropagation()
+          d.onDelete(d.annotation.id)
+        }}
+        onPointerDownCapture={(e) => e.stopPropagation()}
+        className="nodrag invisible self-end text-muted-foreground hover:text-destructive group-hover:visible"
         aria-label="Delete annotation"
       >
         <Trash2 className="size-3" />
@@ -206,11 +227,9 @@ function MapCanvasInner({ bundle }: Props) {
     return m
   }, [bundle.positions])
 
-  // Bin services + gateways by site for each node's data prop
   const servicesBySite = useMemo(() => {
     const m = new Map<number, Service[]>()
     for (const s of bundle.services) {
-      if (s.site_id == null) continue
       const list = m.get(s.site_id) ?? []
       list.push(s)
       m.set(s.site_id, list)
@@ -254,7 +273,7 @@ function MapCanvasInner({ bundle }: Props) {
   const initialNodes = useMemo<Node[]>(() => {
     const built: Node[] = []
     bundle.sites.forEach((site, i) => {
-      const pos = positionMap.get(site.id) ?? { x: 60 + i * 320, y: 80 }
+      const pos = positionMap.get(site.id) ?? { x: 60 + i * 340, y: 80 }
       built.push({
         id: `site-${site.id}`,
         type: "site",
@@ -313,7 +332,6 @@ function MapCanvasInner({ bundle }: Props) {
     (changes: NodeChange[]) => {
       setNodes((current) => {
         const next = applyNodeChanges(changes, current)
-        // After applying, schedule saves for any dragged node whose position changed
         for (const ch of changes) {
           if (ch.type === "position" && ch.dragging === false) {
             const moved = next.find((n) => n.id === ch.id)

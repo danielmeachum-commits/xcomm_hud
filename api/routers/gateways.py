@@ -1,4 +1,4 @@
-"""Gateway CRUD — per-site uplink equipment (ISP, modem, satellite)."""
+"""Gateway CRUD + validation endpoint."""
 
 from __future__ import annotations
 
@@ -7,10 +7,19 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import Gateway, Site, StatusEvent, User
-from schemas import GatewayIn, GatewayOut, GatewayPatch
+from models import Gateway, Site, User, Validation
+from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
 
 router = APIRouter(tags=["gateways"])
+
+
+def _gateway_out(db: Session, gw: Gateway) -> GatewayOut:
+    out = GatewayOut.model_validate(gw)
+    if gw.validated_by_user_id is not None:
+        u = db.get(User, gw.validated_by_user_id)
+        if u:
+            out.validated_by_username = u.username
+    return out
 
 
 @router.get("/sites/{site_id}/gateways", response_model=list[GatewayOut])
@@ -21,12 +30,13 @@ def list_site_gateways(
 ):
     if db.get(Site, site_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
-    return (
+    rows = (
         db.query(Gateway)
         .filter(Gateway.site_id == site_id)
         .order_by(Gateway.name)
         .all()
     )
+    return [_gateway_out(db, g) for g in rows]
 
 
 @router.post(
@@ -45,7 +55,7 @@ def create_gateway(
     gw = Gateway(site_id=site_id, **body.model_dump())
     db.add(gw)
     db.flush()
-    return gw
+    return _gateway_out(db, gw)
 
 
 @router.get("/gateways", response_model=list[GatewayOut])
@@ -53,7 +63,8 @@ def list_all_gateways(
     db: Session = Depends(get_db),
     _=Depends(requires("viewer")),
 ):
-    return db.query(Gateway).order_by(Gateway.site_id, Gateway.name).all()
+    rows = db.query(Gateway).order_by(Gateway.site_id, Gateway.name).all()
+    return [_gateway_out(db, g) for g in rows]
 
 
 @router.patch("/gateways/{gateway_id}", response_model=GatewayOut)
@@ -61,34 +72,46 @@ def patch_gateway(
     gateway_id: int,
     body: GatewayPatch,
     db: Session = Depends(get_db),
+    _=Depends(requires("operator")),
+):
+    gw = db.get(Gateway, gateway_id)
+    if gw is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(gw, k, v)
+    db.flush()
+    db.refresh(gw)
+    return _gateway_out(db, gw)
+
+
+@router.post("/gateways/{gateway_id}/validate", response_model=GatewayOut)
+def validate_gateway(
+    gateway_id: int,
+    body: GatewayValidateIn,
+    db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
     gw = db.get(Gateway, gateway_id)
     if gw is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
-
-    data = body.model_dump(exclude_unset=True)
-    new_status = data.pop("status", None)
-
-    for k, v in data.items():
-        setattr(gw, k, v)
-
-    if new_status is not None and new_status != gw.status:
-        db.add(
-            StatusEvent(
-                subject_kind="gateway",
-                subject_id=gw.id,
-                old_state=gw.status,
-                new_state=new_status,
-                source="manual",
-                actor_user_id=current_user.id,
-            )
-        )
-        gw.status = new_status
-
+    prev = gw.status
+    v = Validation(
+        subject_kind="gateway",
+        subject_id=gw.id,
+        prev_status=prev,
+        status=body.status,
+        source="manual",
+        validated_by_user_id=current_user.id,
+        note=body.note,
+    )
+    db.add(v)
+    db.flush()
+    gw.status = body.status
+    gw.validated_at = v.validated_at
+    gw.validated_by_user_id = current_user.id
     db.flush()
     db.refresh(gw)
-    return gw
+    return _gateway_out(db, gw)
 
 
 @router.delete("/gateways/{gateway_id}", status_code=status.HTTP_204_NO_CONTENT)

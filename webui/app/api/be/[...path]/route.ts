@@ -59,6 +59,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
   return proxy(req, path.join("/"))
 }
 
+export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  const { path } = await ctx.params
+  return proxy(req, path.join("/"))
+}
+
 export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
   const { path } = await ctx.params
   return proxy(req, path.join("/"))

@@ -3,6 +3,7 @@ import Link from "next/link"
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import TransportBadge from "@/components/8starlabs-ui/transport-badge"
 import { SiteForm } from "@/components/sites/site-form"
 import { statusBadgeClass, statusLabel, statusToIndicatorState } from "@/lib/status"
 import type { Site } from "@/lib/types"
@@ -51,14 +52,12 @@ export default async function SitesPage() {
                   <span>{statusLabel(s.status)}</span>
                 </div>
               </div>
+              <TransportBadge fpcon={s.fpcon} emcon={s.emcon} size="sm" />
               {s.location_label && (
                 <p className="text-xs text-muted-foreground">
                   {s.location_label}
                 </p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Classification: {s.classification}
-              </p>
             </Link>
           ))}
         </div>

@@ -105,7 +105,7 @@ export function categoryAccentClass(c: ServiceCategory): string {
   }
 }
 
-export const SERVICE_REACH_VALUES: ServiceReach[] = ["local", "external", "both"]
+export const SERVICE_REACH_VALUES: ServiceReach[] = ["local", "external"]
 
 export function reachLabel(r: ServiceReach): string {
   switch (r) {
@@ -113,8 +113,6 @@ export function reachLabel(r: ServiceReach): string {
       return "Local"
     case "external":
       return "External"
-    case "both":
-      return "Local + External"
   }
 }
 
@@ -124,8 +122,6 @@ export function reachShort(r: ServiceReach): string {
       return "L"
     case "external":
       return "E"
-    case "both":
-      return "L+E"
   }
 }
 

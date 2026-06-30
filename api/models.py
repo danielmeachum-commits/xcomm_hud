@@ -27,13 +27,14 @@ def _now() -> datetime.datetime:
 
 STATUS_VALUES = ("up", "degraded", "down", "unknown")
 SERVICE_KINDS = ("voip", "data", "video", "crypto", "other")
-SERVICE_HOSTING = ("self", "cloud", "hybrid")
 SERVICE_CATEGORIES = ("core_critical_local", "sustainment", "other")
-SERVICE_REACH = ("local", "external", "both")
+SERVICE_REACH = ("local", "external")
 GATEWAY_KINDS = ("isp", "modem", "satellite", "other")
 USER_ROLES = ("viewer", "operator", "admin")
-STATUS_EVENT_SOURCES = ("manual", "ingest")
+VALIDATION_SOURCES = ("manual", "ingest")
 SUBJECT_KINDS = ("service", "site", "gateway")
+FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
+EMCON_LEVELS = ("a", "b", "c", "d")
 
 
 class User(Base):
@@ -58,7 +59,8 @@ class Site(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     location_label: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    classification: Mapped[str] = mapped_column(String(8), nullable=False, default="U")
+    fpcon: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
+    emcon: Mapped[str] = mapped_column(String(8), nullable=False, default="a")
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -74,7 +76,9 @@ class Site(Base):
         "Gateway", back_populates="site", cascade="all, delete-orphan"
     )
     canvas_position: Mapped[Optional["SiteCanvasPosition"]] = relationship(
-        "SiteCanvasPosition", back_populates="site", uselist=False,
+        "SiteCanvasPosition",
+        back_populates="site",
+        uselist=False,
         cascade="all, delete-orphan",
     )
 
@@ -97,12 +101,6 @@ class EnclaveSource(Base):
 
 
 class ServiceTemplate(Base):
-    """Seeded catalog of standardized services (NIPR Web, VoIP, etc.).
-
-    Used by the "Add service" picker so common services have consistent
-    naming, kind, category, reach, and icon across sites.
-    """
-
     __tablename__ = "service_template"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -110,25 +108,30 @@ class ServiceTemplate(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
     category: Mapped[str] = mapped_column(String(24), nullable=False, default="other")
     reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
-    default_hosting: Mapped[str] = mapped_column(String(16), nullable=False, default="self")
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class Service(Base):
     __tablename__ = "service"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    site_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("site.id", ondelete="SET NULL"), nullable=True
+    site_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
-    hosting: Mapped[str] = mapped_column(String(16), nullable=False, default="self")
     category: Mapped[str] = mapped_column(String(24), nullable=False, default="other")
     reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -137,14 +140,10 @@ class Service(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
-    site: Mapped[Optional["Site"]] = relationship("Site", back_populates="services")
+    site: Mapped["Site"] = relationship("Site", back_populates="services")
 
 
 class Gateway(Base):
-    """Per-site uplink equipment (ISP, modem, satellite). Status is manually
-    set; external services depend on at least one gateway being up.
-    """
-
     __tablename__ = "gateway"
     __table_args__ = (
         UniqueConstraint("site_id", "name", name="uq_gateway_site_name"),
@@ -158,6 +157,12 @@ class Gateway(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
     provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -170,8 +175,6 @@ class Gateway(Base):
 
 
 class SiteCanvasPosition(Base):
-    """Site position on the top-level /map React Flow canvas."""
-
     __tablename__ = "site_canvas_position"
 
     site_id: Mapped[int] = mapped_column(
@@ -187,15 +190,12 @@ class SiteCanvasPosition(Base):
 
 
 class CanvasAnnotation(Base):
-    """Free-form text labels placed on the top-level /map canvas."""
-
     __tablename__ = "canvas_annotation"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    classification: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
@@ -204,19 +204,25 @@ class CanvasAnnotation(Base):
     )
 
 
-class StatusEvent(Base):
-    __tablename__ = "status_event"
+class Validation(Base):
+    """Append-only audit of every status change.
+
+    One row per validation event: who said *this* subject is in *this* state at
+    *this* time, with optional notes. Drives the reporting feed and history view.
+    """
+
+    __tablename__ = "validation"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ts: Mapped[datetime.datetime] = mapped_column(
+    validated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, index=True
     )
     subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     subject_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    old_state: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    new_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    prev_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
-    actor_user_id: Mapped[Optional[int]] = mapped_column(
+    validated_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

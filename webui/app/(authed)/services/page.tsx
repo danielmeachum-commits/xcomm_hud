@@ -7,9 +7,10 @@ import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import {
   categoryAccentClass,
   categoryLabel,
-  reachShort,
+  reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
+import { formatLocal, formatZulu } from "@/lib/time"
 import type { Service, ServiceTemplate, Site } from "@/lib/types"
 
 export default async function ServicesPage() {
@@ -25,7 +26,6 @@ export default async function ServicesPage() {
 
   const siteName = new Map(sites.map((s) => [s.id, s.name]))
 
-  // Group services by category for visual separation
   const byCategory = new Map<string, Service[]>()
   for (const s of services) {
     const list = byCategory.get(s.category) ?? []
@@ -40,8 +40,7 @@ export default async function ServicesPage() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Services</h1>
           <p className="text-xs text-muted-foreground">
-            Click the status pill to update. Group your standard services from
-            the template catalog when adding new ones.
+            Tap a status pill to record a validation.
           </p>
         </div>
         <ServiceForm sites={sites} templates={templates} />
@@ -77,14 +76,26 @@ export default async function ServicesPage() {
                           <div className="min-w-0">
                             <div className="font-medium">{s.name}</div>
                             <div className="text-xs text-muted-foreground">
-                              {s.kind} · {s.hosting} · reach {reachShort(s.reach)}
-                              {s.site_id
-                                ? ` · ${siteName.get(s.site_id) ?? "site " + s.site_id}`
-                                : " · cross-site"}
+                              {s.kind} · {reachLabel(s.reach)} ·{" "}
+                              {siteName.get(s.site_id) ?? `site ${s.site_id}`}
                             </div>
+                            {s.validated_at && (
+                              <div className="text-[10px] font-mono text-muted-foreground">
+                                Validated {formatLocal(s.validated_at)} /{" "}
+                                {formatZulu(s.validated_at)}
+                                {s.validated_by_username ? ` · ${s.validated_by_username}` : ""}
+                              </div>
+                            )}
                           </div>
                         </Link>
-                        <ServiceStatusPill serviceId={s.id} status={s.status} />
+                        <ServiceStatusPill
+                          serviceId={s.id}
+                          serviceName={s.name}
+                          status={s.status}
+                          effectiveStatus={s.effective_status}
+                          lastValidatedAt={s.validated_at}
+                          lastValidatedBy={s.validated_by_username}
+                        />
                       </li>
                     )
                   })}

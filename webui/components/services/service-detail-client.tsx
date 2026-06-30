@@ -15,17 +15,16 @@ import {
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
+import { formatLocal, formatZulu, timeAgo } from "@/lib/time"
 import type {
   Service,
   ServiceCategory,
-  ServiceHosting,
   ServiceKind,
   ServiceReach,
   Site,
 } from "@/lib/types"
 
 const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
-const HOSTING: ServiceHosting[] = ["self", "cloud", "hybrid"]
 
 interface Props {
   service: Service
@@ -40,10 +39,10 @@ export function ServiceDetailClient({ service, sites }: Props) {
   const [draft, setDraft] = useState({
     name: service.name,
     kind: service.kind,
-    hosting: service.hosting,
     category: service.category,
     reach: service.reach,
     site_id: service.site_id,
+    description: service.description ?? "",
     notes: service.notes ?? "",
   })
 
@@ -59,10 +58,10 @@ export function ServiceDetailClient({ service, sites }: Props) {
         body: JSON.stringify({
           name: draft.name,
           kind: draft.kind,
-          hosting: draft.hosting,
           category: draft.category,
           reach: draft.reach,
           site_id: draft.site_id,
+          description: draft.description || null,
           notes: draft.notes || null,
         }),
       })
@@ -93,15 +92,46 @@ export function ServiceDetailClient({ service, sites }: Props) {
             <h1 className="text-lg font-semibold tracking-tight">{service.name}</h1>
             <p className="text-xs text-muted-foreground">
               {categoryLabel(service.category)} · {reachLabel(service.reach)} ·{" "}
-              {service.hosting}
-              {service.site_id
-                ? ` · ${siteById.get(service.site_id)?.name ?? `site ${service.site_id}`}`
-                : " · cross-site"}
+              {siteById.get(service.site_id)?.name ?? `site ${service.site_id}`}
             </p>
+            {service.description && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {service.description}
+              </p>
+            )}
           </div>
         </div>
-        <ServiceStatusPill serviceId={service.id} status={service.status} size="lg" />
+        <ServiceStatusPill
+          serviceId={service.id}
+          serviceName={service.name}
+          status={service.status}
+          effectiveStatus={service.effective_status}
+          lastValidatedAt={service.validated_at}
+          lastValidatedBy={service.validated_by_username}
+        />
       </header>
+
+      {service.validated_at && (
+        <section className="rounded-md border bg-muted/30 p-3 text-xs">
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+            Last validation
+          </div>
+          <div className="mt-1 grid grid-cols-2 gap-3 sm:max-w-md">
+            <div>
+              <div className="text-[10px] uppercase text-muted-foreground">Local</div>
+              <div className="font-mono">{formatLocal(service.validated_at)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-muted-foreground">Zulu</div>
+              <div className="font-mono">{formatZulu(service.validated_at)}</div>
+            </div>
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            {timeAgo(service.validated_at)}
+            {service.validated_by_username ? ` · ${service.validated_by_username}` : ""}
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-4 sm:max-w-xl">
         <div className="space-y-1.5">
@@ -111,6 +141,16 @@ export function ServiceDetailClient({ service, sites }: Props) {
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             disabled={pending}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="description">Description</Label>
+          <Textarea
+            id="description"
+            value={draft.description}
+            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+            disabled={pending}
+            rows={2}
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -133,22 +173,19 @@ export function ServiceDetailClient({ service, sites }: Props) {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="hosting">Hosting</Label>
+            <Label htmlFor="reach">Reach</Label>
             <select
-              id="hosting"
-              value={draft.hosting}
+              id="reach"
+              value={draft.reach}
               onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  hosting: e.target.value as ServiceHosting,
-                })
+                setDraft({ ...draft, reach: e.target.value as ServiceReach })
               }
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               disabled={pending}
             >
-              {HOSTING.map((h) => (
-                <option key={h} value={h}>
-                  {h}
+              {SERVICE_REACH_VALUES.map((r) => (
+                <option key={r} value={r}>
+                  {reachLabel(r)}
                 </option>
               ))}
             </select>
@@ -177,45 +214,23 @@ export function ServiceDetailClient({ service, sites }: Props) {
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="reach">Reach</Label>
+            <Label htmlFor="site_id">Site</Label>
             <select
-              id="reach"
-              value={draft.reach}
+              id="site_id"
+              value={draft.site_id}
               onChange={(e) =>
-                setDraft({ ...draft, reach: e.target.value as ServiceReach })
+                setDraft({ ...draft, site_id: Number(e.target.value) })
               }
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               disabled={pending}
             >
-              {SERVICE_REACH_VALUES.map((r) => (
-                <option key={r} value={r}>
-                  {reachLabel(r)}
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
                 </option>
               ))}
             </select>
           </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="site_id">Site</Label>
-          <select
-            id="site_id"
-            value={draft.site_id ?? ""}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                site_id: e.target.value ? Number(e.target.value) : null,
-              })
-            }
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            disabled={pending}
-          >
-            <option value="">(none / cross-site)</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="notes">Notes</Label>

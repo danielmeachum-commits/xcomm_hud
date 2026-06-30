@@ -1,87 +1,73 @@
 "use client"
 
-import { useRouter } from "next/navigation"
-import { useState, useTransition } from "react"
+import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { ValidationDialog } from "@/components/validation-dialog"
+import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
-import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
 import type { StatusValue } from "@/lib/types"
 
 interface Props {
   serviceId: number
+  serviceName: string
+  /** Stored status — what the operator last validated. */
   status: StatusValue
-  size?: "sm" | "md" | "lg"
+  /** Effective status — same as status for local; for external it may be
+   * forced to "down" by gateway cascade. Shown if different from status. */
+  effectiveStatus?: StatusValue
+  lastValidatedAt?: string | null
+  lastValidatedBy?: string | null
   className?: string
 }
 
 export function ServiceStatusPill({
   serviceId,
+  serviceName,
   status,
-  size = "md",
+  effectiveStatus,
+  lastValidatedAt = null,
+  lastValidatedBy = null,
   className,
 }: Props) {
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
-  const [optimistic, setOptimistic] = useState<StatusValue | null>(null)
-  const current = optimistic ?? status
-
-  function setStatus(next: StatusValue) {
-    if (next === current) return
-    setOptimistic(next)
-    startTransition(async () => {
-      const res = await fetch(`/api/be/services/${serviceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: next }),
-      })
-      if (!res.ok) {
-        setOptimistic(null)
-        return
-      }
-      router.refresh()
-      setOptimistic(null)
-    })
-  }
+  const [open, setOpen] = useState(false)
+  const shown = effectiveStatus ?? status
+  const cascaded = effectiveStatus !== undefined && effectiveStatus !== status
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        onClick={(e) => e.stopPropagation()}
+    <>
+      <button
+        onPointerDownCapture={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          setOpen(true)
+        }}
+        title={
+          cascaded
+            ? `Stored: ${statusLabel(status)} — overridden by gateways down`
+            : `Tap to validate`
+        }
         className={cn(
-          "inline-flex items-center gap-2 rounded-full border bg-background/60 px-2 py-1 text-xs uppercase tracking-wider transition-colors hover:bg-accent disabled:opacity-60",
-          pending && "opacity-70",
+          "nodrag nowheel inline-flex items-center gap-2 rounded-full border bg-background/60 px-2 py-1 text-xs uppercase tracking-wider transition-colors hover:bg-accent",
+          cascaded && "border-red-500/60",
           className,
         )}
-        disabled={pending}
       >
-        <StatusIndicator
-          state={statusToIndicatorState(current)}
-          size={size === "lg" ? "md" : "sm"}
-        />
-        <span>{statusLabel(current)}</span>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6}>
-        {STATUS_VALUES.map((s) => (
-          <DropdownMenuItem
-            key={s}
-            onClick={(e) => {
-              e.stopPropagation()
-              setStatus(s)
-            }}
-            className="flex items-center gap-2"
-          >
-            <StatusIndicator state={statusToIndicatorState(s)} size="sm" />
-            <span>{statusLabel(s)}</span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <StatusIndicator state={statusToIndicatorState(shown)} size="sm" />
+        <span>{statusLabel(shown)}</span>
+        {cascaded && <span className="text-[10px] text-muted-foreground">(ISP)</span>}
+      </button>
+      <ValidationDialog
+        open={open}
+        onOpenChange={setOpen}
+        kind="service"
+        subjectId={serviceId}
+        subjectName={serviceName}
+        currentStatus={status}
+        lastValidatedAt={lastValidatedAt}
+        lastValidatedBy={lastValidatedBy}
+      />
+    </>
   )
 }
