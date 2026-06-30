@@ -12,14 +12,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  GATEWAY_PACE_VALUES,
   SERVICE_CATEGORIES,
   SERVICE_REACH_VALUES,
   categoryLabel,
+  paceLabel,
+  paceShort,
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
+import { cn } from "@/lib/utils"
 import type {
+  GatewayPace,
   Service,
   ServiceCategory,
   ServiceKind,
@@ -49,6 +54,10 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
     site_id: service.site_id,
     description: service.description ?? "",
     notes: service.notes ?? "",
+    enabled_pace:
+      service.enabled_pace && service.enabled_pace.length > 0
+        ? [...service.enabled_pace]
+        : [...GATEWAY_PACE_VALUES],
   })
 
   const Icon = serviceIcon(service.icon, service.kind)
@@ -68,6 +77,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
           site_id: draft.site_id,
           description: draft.description || null,
           notes: draft.notes || null,
+          enabled_pace: draft.reach === "external" ? draft.enabled_pace : [],
         }),
       })
       if (!res.ok) {
@@ -248,6 +258,43 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
             </select>
           </div>
         </div>
+        {draft.reach === "external" && (
+          <div className="space-y-1.5">
+            <Label>PACE tiers this service rides</Label>
+            <div className="grid grid-cols-4 gap-2">
+              {GATEWAY_PACE_VALUES.map((p) => {
+                const on = draft.enabled_pace.includes(p)
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        enabled_pace: on
+                          ? draft.enabled_pace.filter((x: GatewayPace) => x !== p)
+                          : [...draft.enabled_pace, p],
+                      })
+                    }
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 rounded-md border px-2 py-1.5 text-xs transition-colors",
+                      on
+                        ? "border-foreground bg-accent"
+                        : "border-input text-muted-foreground hover:bg-accent/50",
+                    )}
+                    disabled={pending}
+                  >
+                    <span className="text-sm font-semibold">{paceShort(p)}</span>
+                    <span className="text-[10px]">{paceLabel(p)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Canvas edges only render for gateways at an enabled PACE tier.
+            </p>
+          </div>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="notes">Notes</Label>
           <Textarea

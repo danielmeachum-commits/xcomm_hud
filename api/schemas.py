@@ -8,6 +8,11 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
+ServiceStatusValue = StatusValue
+GatewayStatusValue = Literal["active", "ready", "degraded", "down", "offline", "setup"]
+AnyStatusValue = Literal[
+    "up", "active", "ready", "degraded", "down", "unknown", "offline", "setup"
+]
 ServiceKind = Literal["voice", "data", "other"]
 ServiceCategory = Literal["critical", "sustainment", "other"]
 ServiceReach = Literal["local", "external"]
@@ -133,6 +138,9 @@ class ServiceTemplateOut(_ORM):
 # --- Service ---
 
 
+_DEFAULT_PACE: list[GatewayPace] = ["primary", "alternate", "contingency", "emergency"]
+
+
 class ServiceIn(BaseModel):
     name: str
     site_id: int
@@ -144,6 +152,7 @@ class ServiceIn(BaseModel):
     description: Optional[str] = None
     status: StatusValue = "unknown"
     notes: Optional[str] = None
+    enabled_pace: list[GatewayPace] = Field(default_factory=lambda: list(_DEFAULT_PACE))
 
 
 class ServicePatch(BaseModel):
@@ -157,6 +166,7 @@ class ServicePatch(BaseModel):
     description: Optional[str] = None
     notes: Optional[str] = None
     display_order: Optional[int] = None
+    enabled_pace: Optional[list[GatewayPace]] = None
 
 
 class ServiceValidateIn(BaseModel):
@@ -178,6 +188,9 @@ class ServiceOut(_ORM):
     status: StatusValue
     effective_status: StatusValue = "unknown"  # cascaded; same as status for local
     allowed_statuses: Optional[list[StatusValue]] = None  # from template if has one
+    enabled_pace: list[GatewayPace] = Field(
+        default_factory=lambda: list(_DEFAULT_PACE)
+    )
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
@@ -192,7 +205,7 @@ class GatewayIn(BaseModel):
     name: str
     kind: GatewayKind = "other"
     provider: Optional[str] = None
-    status: StatusValue = "unknown"
+    status: GatewayStatusValue = "ready"
     pace: GatewayPace = "primary"
     notes: Optional[str] = None
 
@@ -207,7 +220,7 @@ class GatewayPatch(BaseModel):
 
 
 class GatewayValidateIn(BaseModel):
-    status: StatusValue
+    status: GatewayStatusValue
     note: Optional[str] = None
     validated_at: Optional[datetime.datetime] = None  # override; defaults to now
 
@@ -218,7 +231,7 @@ class GatewayOut(_ORM):
     name: str
     kind: GatewayKind
     provider: Optional[str] = None
-    status: StatusValue
+    status: GatewayStatusValue
     pace: GatewayPace = "primary"
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
@@ -314,8 +327,8 @@ class ValidationOut(_ORM):
     subject_name: Optional[str] = None
     site_id: Optional[int] = None
     site_name: Optional[str] = None
-    prev_status: Optional[StatusValue] = None
-    status: StatusValue
+    prev_status: Optional[AnyStatusValue] = None
+    status: AnyStatusValue
     source: Literal["manual", "ingest"]
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None

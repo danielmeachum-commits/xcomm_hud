@@ -21,8 +21,8 @@ import {
   gatewayKindLabel,
   paceLabel,
 } from "@/lib/service-meta"
-import { STATUS_VALUES, statusLabel } from "@/lib/status"
-import type { Gateway, GatewayKind, GatewayPace, StatusValue } from "@/lib/types"
+import { GATEWAY_STATUS_VALUES, statusLabel } from "@/lib/status"
+import type { Gateway, GatewayKind, GatewayPace, GatewayStatus } from "@/lib/types"
 
 interface Props {
   siteId: number
@@ -42,7 +42,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
     name: gateway?.name ?? "",
     kind: (gateway?.kind ?? "commercial") as GatewayKind,
     provider: gateway?.provider ?? "",
-    status: (gateway?.status ?? "unknown") as StatusValue,
+    status: (gateway?.status ?? "ready") as GatewayStatus,
     pace: (gateway?.pace ?? "primary") as GatewayPace,
     notes: gateway?.notes ?? "",
   })
@@ -80,7 +80,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
           name: "",
           kind: "commercial",
           provider: "",
-          status: "unknown",
+          status: "ready",
           pace: "primary",
           notes: "",
         })
@@ -141,11 +141,11 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
                 <select
                   id="status"
                   value={draft.status}
-                  onChange={(e) => setDraft({ ...draft, status: e.target.value as StatusValue })}
+                  onChange={(e) => setDraft({ ...draft, status: e.target.value as GatewayStatus })}
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   disabled={pending}
                 >
-                  {STATUS_VALUES.map((v) => (
+                  {GATEWAY_STATUS_VALUES.map((v) => (
                     <option key={v} value={v}>
                       {statusLabel(v)}
                     </option>

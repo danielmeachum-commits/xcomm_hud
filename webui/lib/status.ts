@@ -1,4 +1,9 @@
-import type { StatusValue } from "./types"
+import type {
+  AnyStatus,
+  GatewayStatus,
+  ServiceStatus,
+  StatusValue,
+} from "./types"
 
 export const STATUS_VALUES: StatusValue[] = [
   "up",
@@ -9,17 +14,33 @@ export const STATUS_VALUES: StatusValue[] = [
   "setup",
 ]
 
+export const SERVICE_STATUS_VALUES: ServiceStatus[] = STATUS_VALUES
+
+export const GATEWAY_STATUS_VALUES: GatewayStatus[] = [
+  "active",
+  "ready",
+  "degraded",
+  "down",
+  "offline",
+  "setup",
+]
+
 export type StatusCategory = "operational" | "issue" | "transitional" | "unknown"
 
-/** Stroke color used on canvas edges keyed on a service's status. */
-export function statusEdgeStroke(s: StatusValue): string {
+/** Stroke color used on canvas edges keyed on a service's status. The three
+ *  "lane" colors (green/orange/red) also match the handles on the gateway so a
+ *  service edge naturally lands on the matching colored dock. */
+export function statusEdgeStroke(s: AnyStatus): string {
   switch (s) {
     case "up":
+    case "active":
       return "rgb(34 197 94)" // green-500
     case "degraded":
       return "rgb(245 158 11)" // amber-500
     case "down":
       return "rgb(239 68 68)" // red-500
+    case "ready":
+      return "rgb(14 165 233)" // sky-500
     case "setup":
       return "rgb(14 165 233)" // sky-500
     case "offline":
@@ -31,23 +52,60 @@ export function statusEdgeStroke(s: StatusValue): string {
 }
 
 /** Whether an edge should animate (data appears to flow) for this status. */
-export function statusEdgeAnimates(s: StatusValue): boolean {
-  // Animate when traffic is plausibly flowing: up, degraded (still passing
-  // but slow), and setup (transitioning into service).
-  return s === "up" || s === "degraded" || s === "setup"
+export function statusEdgeAnimates(s: AnyStatus): boolean {
+  return s === "up" || s === "degraded" || s === "setup" || s === "active"
 }
 
-export const STATUS_CATEGORIES: { key: StatusCategory; label: string; values: StatusValue[] }[] = [
+/** Which colored handle on a gateway a service edge should attach to,
+ *  based on the *service's* effective status. Three handles per side mirror
+ *  the operational/issue/issue split so the canvas reads at a glance. */
+export type EdgeHandle = "ok" | "degraded" | "down"
+
+export function statusEdgeHandle(s: AnyStatus): EdgeHandle {
+  switch (s) {
+    case "down":
+    case "offline":
+      return "down"
+    case "degraded":
+      return "degraded"
+    default:
+      return "ok"
+  }
+}
+
+export const SERVICE_STATUS_CATEGORIES: {
+  key: StatusCategory
+  label: string
+  values: ServiceStatus[]
+}[] = [
   { key: "operational", label: "Operational", values: ["up"] },
   { key: "issue", label: "Issue", values: ["degraded", "down", "offline"] },
   { key: "transitional", label: "Transitional", values: ["setup"] },
   { key: "unknown", label: "Unknown", values: ["unknown"] },
 ]
 
-export function statusLabel(s: StatusValue): string {
+export const GATEWAY_STATUS_CATEGORIES: {
+  key: StatusCategory
+  label: string
+  values: GatewayStatus[]
+}[] = [
+  { key: "operational", label: "Operational", values: ["active", "ready"] },
+  { key: "issue", label: "Issue", values: ["degraded", "down", "offline"] },
+  { key: "transitional", label: "Transitional", values: ["setup"] },
+]
+
+/** Legacy alias — the validation dialog used `STATUS_CATEGORIES` before the
+ *  gateway/service split. Defaults to service categories. */
+export const STATUS_CATEGORIES = SERVICE_STATUS_CATEGORIES
+
+export function statusLabel(s: AnyStatus): string {
   switch (s) {
     case "up":
       return "Up"
+    case "active":
+      return "Active"
+    case "ready":
+      return "Ready"
     case "degraded":
       return "Degraded"
     case "down":
@@ -62,9 +120,10 @@ export function statusLabel(s: StatusValue): string {
   }
 }
 
-export function statusBadgeClass(s: StatusValue): string {
+export function statusBadgeClass(s: AnyStatus): string {
   switch (s) {
     case "up":
+    case "active":
       return "border-emerald-500/40 bg-emerald-500/5"
     case "degraded":
       return "border-amber-500/50 bg-amber-500/10"
@@ -72,6 +131,8 @@ export function statusBadgeClass(s: StatusValue): string {
       return "border-red-500/60 bg-red-500/10"
     case "offline":
       return "border-slate-700/50 bg-slate-700/10"
+    case "ready":
+      return "border-sky-500/50 bg-sky-500/10"
     case "setup":
       return "border-sky-500/50 bg-sky-500/10"
     case "unknown":
@@ -81,10 +142,11 @@ export function statusBadgeClass(s: StatusValue): string {
 }
 
 export function statusToIndicatorState(
-  s: StatusValue,
-): "active" | "down" | "fixing" | "idle" | "offline" | "setup" {
+  s: AnyStatus,
+): "active" | "down" | "fixing" | "idle" | "offline" | "setup" | "ready" {
   switch (s) {
     case "up":
+    case "active":
       return "active"
     case "down":
       return "down"
@@ -94,6 +156,8 @@ export function statusToIndicatorState(
       return "offline"
     case "setup":
       return "setup"
+    case "ready":
+      return "ready"
     case "unknown":
     default:
       return "idle"

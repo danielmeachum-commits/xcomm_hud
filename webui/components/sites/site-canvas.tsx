@@ -20,6 +20,7 @@ import { MoreHorizontal } from "lucide-react"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { NodeActionPanel } from "@/components/sites/node-action-sheet"
+import { TimeAgo } from "@/components/time-display"
 import {
   gatewayIcon,
   gatewayKindLabel,
@@ -27,14 +28,23 @@ import {
   paceShort,
   serviceIcon,
 } from "@/lib/service-meta"
-import { statusEdgeAnimates, statusEdgeStroke } from "@/lib/status"
+import {
+  statusEdgeAnimates,
+  statusEdgeHandle,
+  statusEdgeStroke,
+} from "@/lib/status"
 import { cn } from "@/lib/utils"
-import type { Gateway, Service } from "@/lib/types"
+import type {
+  Gateway,
+  GatewayStatus,
+  Service,
+  ServiceStatus,
+} from "@/lib/types"
 
 const LANE_WIDTH = 240
 const LANE_X = { local: 40, gateways: 360, external: 680 }
-const NODE_HEIGHT = 76
-const NODE_GAP = 12
+const NODE_HEIGHT = 84
+const NODE_GAP = 16
 const LANE_TOP = 80
 
 interface ServiceNodeData extends Record<string, unknown> {
@@ -71,6 +81,29 @@ function LaneHeaderNode({ data }: NodeProps) {
   )
 }
 
+function ServiceFooter({
+  kind,
+  validatedAt,
+}: {
+  kind: string
+  validatedAt: string | null
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span>{kind}</span>
+      <span className="normal-case">
+        {validatedAt ? (
+          <>
+            validated <TimeAgo iso={validatedAt} />
+          </>
+        ) : (
+          <span className="italic">never validated</span>
+        )}
+      </span>
+    </div>
+  )
+}
+
 function ServiceCanvasNode({ data }: NodeProps) {
   const { service, onOpen } = data as ServiceNodeData
   const Icon = serviceIcon(service.icon, service.kind)
@@ -81,7 +114,9 @@ function ServiceCanvasNode({ data }: NodeProps) {
       style={{ width: LANE_WIDTH }}
     >
       {/* Both local and external services emit edges toward the gateway —
-       *  the visual "service → ISP" direction the operator expects. */}
+       *  the visual "service → ISP" direction the operator expects. Local
+       *  services with reach=local don't have edges, so the handle is a
+       *  no-op but harmless. */}
       {isExternal ? (
         <Handle type="source" position={Position.Left} className="!bg-muted-foreground" />
       ) : (
@@ -108,10 +143,8 @@ function ServiceCanvasNode({ data }: NodeProps) {
           allowedStatuses={service.allowed_statuses}
         />
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          {service.kind} {isExternal ? "· external" : "· local"}
-        </div>
+      <ServiceFooter kind={service.kind} validatedAt={service.validated_at} />
+      <div className="flex items-center justify-end">
         <button
           type="button"
           onClick={(e) => {
@@ -129,20 +162,47 @@ function ServiceCanvasNode({ data }: NodeProps) {
   )
 }
 
+/** Three colored handles per side (green/orange/red) mapped to service status
+ *  categories — `ok` (up/active/unknown), `degraded`, `down`. Operators read
+ *  the dock color at a glance to see "this service is fine going through this
+ *  gateway" or "this service is broken on this gateway". */
+function GatewayDocks({ side }: { side: "left" | "right" }) {
+  const pos = side === "left" ? Position.Left : Position.Right
+  return (
+    <>
+      <Handle
+        id={`${side}-ok`}
+        type="target"
+        position={pos}
+        style={{ top: "30%", background: "rgb(34 197 94)" }}
+      />
+      <Handle
+        id={`${side}-degraded`}
+        type="target"
+        position={pos}
+        style={{ top: "50%", background: "rgb(245 158 11)" }}
+      />
+      <Handle
+        id={`${side}-down`}
+        type="target"
+        position={pos}
+        style={{ top: "70%", background: "rgb(239 68 68)" }}
+      />
+    </>
+  )
+}
+
 function GatewayCanvasNode({ data }: NodeProps) {
   const { gateway, onOpen } = data as GatewayNodeData
   const Icon = gatewayIcon(gateway.kind)
   const pace = paceClasses(gateway.pace)
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 p-3 shadow-sm"
-      style={{ width: LANE_WIDTH }}
+      className="relative flex flex-col gap-1 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 p-3 shadow-sm"
+      style={{ width: LANE_WIDTH, minHeight: NODE_HEIGHT }}
     >
-      {/* Targets on BOTH sides — local services connect from the left,
-       *  external services connect from the right. Handle IDs make sure
-       *  React Flow doesn't auto-pick the wrong side. */}
-      <Handle id="left" type="target" position={Position.Left} className="!bg-amber-500" />
-      <Handle id="right" type="target" position={Position.Right} className="!bg-amber-500" />
+      <GatewayDocks side="left" />
+      <GatewayDocks side="right" />
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-amber-700 dark:text-amber-400" />
@@ -186,6 +246,15 @@ function GatewayCanvasNode({ data }: NodeProps) {
           <MoreHorizontal className="size-3.5" />
         </button>
       </div>
+      <div className="text-[10px] normal-case text-muted-foreground">
+        {gateway.validated_at ? (
+          <>
+            validated <TimeAgo iso={gateway.validated_at} />
+          </>
+        ) : (
+          <span className="italic">never validated</span>
+        )}
+      </div>
     </div>
   )
 }
@@ -199,6 +268,31 @@ const NODE_TYPES = {
 interface Props {
   services: Service[]
   gateways: Gateway[]
+}
+
+/** Pick a dash pattern based on the gateway's status. Active = solid (live
+ *  traffic), ready = dashed (warm standby), degraded = solid (still passing),
+ *  down/offline/setup = dotted (no usable path). */
+function dashForGateway(status: GatewayStatus): string | undefined {
+  switch (status) {
+    case "active":
+    case "degraded":
+      return undefined
+    case "ready":
+      return "8 4"
+    case "down":
+    case "offline":
+    case "setup":
+      return "2 4"
+  }
+}
+
+/** Whether the service is plausibly using this gateway in a way the operator
+ *  would expect to see *animated*. Down/offline service → never; otherwise
+ *  defer to whether the gateway itself is passing traffic. */
+function shouldAnimate(serviceStatus: ServiceStatus, gatewayStatus: GatewayStatus): boolean {
+  if (!statusEdgeAnimates(serviceStatus)) return false
+  return gatewayStatus === "active" || gatewayStatus === "degraded"
 }
 
 function SiteCanvasInner({
@@ -272,42 +366,42 @@ function SiteCanvasInner({
       })
     })
 
-    // Every edge: source = service, target = gateway, so the animation flows
-    // service → ISP for both local (left side) and external (right side).
-    // Color follows the service's effective status; animates for up/degraded.
-    for (const gw of gateways) {
-      for (const svc of local) {
+    function pushEdges(
+      svcs: Service[],
+      side: "left" | "right",
+      lineWidth: number,
+    ) {
+      for (const svc of svcs) {
+        // reach=external opts the service into the gateway lanes. reach=local
+        // is intentionally edge-free — the service sits internally.
+        if (svc.reach !== "external") continue
+        const enabled = new Set(svc.enabled_pace ?? [])
+        if (enabled.size === 0) continue
         const status = svc.effective_status
-        builtEdges.push({
-          id: `e-svc${svc.id}-gw${gw.id}`,
-          source: `service-${svc.id}`,
-          target: `gateway-${gw.id}`,
-          targetHandle: "left",
-          animated: statusEdgeAnimates(status),
-          style: {
-            stroke: statusEdgeStroke(status),
-            strokeWidth: 1.6,
-            strokeDasharray: status === "down" ? "4 4" : undefined,
-            opacity: 0.85,
-          },
-        })
-      }
-      for (const svc of external) {
-        const status = svc.effective_status
-        builtEdges.push({
-          id: `e-svc${svc.id}-gw${gw.id}`,
-          source: `service-${svc.id}`,
-          target: `gateway-${gw.id}`,
-          targetHandle: "right",
-          animated: statusEdgeAnimates(status),
-          style: {
-            stroke: statusEdgeStroke(status),
-            strokeWidth: 1.8,
-            strokeDasharray: status === "down" ? "4 4" : undefined,
-          },
-        })
+        const dock = statusEdgeHandle(status)
+        const stroke = statusEdgeStroke(status)
+        for (const gw of gateways) {
+          if (!enabled.has(gw.pace)) continue
+          const dash = dashForGateway(gw.status)
+          builtEdges.push({
+            id: `e-svc${svc.id}-gw${gw.id}-${side}`,
+            source: `service-${svc.id}`,
+            target: `gateway-${gw.id}`,
+            targetHandle: `${side}-${dock}`,
+            animated: shouldAnimate(svc.status, gw.status),
+            style: {
+              stroke,
+              strokeWidth: lineWidth,
+              strokeDasharray: dash,
+              opacity: 0.9,
+            },
+          })
+        }
       }
     }
+
+    pushEdges(local, "left", 1.6)
+    pushEdges(external, "right", 1.8)
 
     return { nodes: built, edges: builtEdges }
   }, [services, gateways, onOpenService, onOpenGateway])

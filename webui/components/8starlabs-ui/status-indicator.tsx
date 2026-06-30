@@ -2,7 +2,7 @@ import React from "react"
 import { cn } from "@/lib/utils"
 
 interface StatusIndicatorProps {
-  state: "active" | "down" | "fixing" | "idle" | "offline" | "setup"
+  state: "active" | "down" | "fixing" | "idle" | "offline" | "setup" | "ready"
   color?: string
   label?: string
   className?: string
@@ -14,6 +14,9 @@ const getStateColors = (state: StatusIndicatorProps["state"]) => {
   switch (state) {
     case "active":
       return { dot: "bg-green-500", ping: "bg-green-300" }
+    case "ready":
+      // PACE standby: available but not currently primary. Sky blue, static.
+      return { dot: "bg-sky-500 ring-2 ring-sky-300/40", ping: "bg-sky-300" }
     case "down":
       return { dot: "bg-red-500", ping: "bg-red-300" }
     case "fixing":

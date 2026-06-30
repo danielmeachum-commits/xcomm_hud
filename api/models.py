@@ -27,7 +27,9 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-STATUS_VALUES = ("up", "degraded", "down", "unknown", "offline", "setup")
+SERVICE_STATUS_VALUES = ("up", "degraded", "down", "unknown", "offline", "setup")
+GATEWAY_STATUS_VALUES = ("active", "ready", "degraded", "down", "offline", "setup")
+STATUS_VALUES = SERVICE_STATUS_VALUES  # legacy alias
 SERVICE_KINDS = ("voice", "data", "other")
 SERVICE_CATEGORIES = ("critical", "sustainment", "other")
 SERVICE_REACH = ("local", "external")
@@ -146,6 +148,13 @@ class Service(Base):
     )
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Which PACE tiers this service uses. Defaults to all four (full fan-out =
+    # previous behavior). Operators clear PACE letters a service can't use.
+    enabled_pace: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: ["primary", "alternate", "contingency", "emergency"],
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )

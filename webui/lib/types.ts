@@ -2,13 +2,27 @@
 
 export type Role = "viewer" | "operator" | "admin"
 
-export type StatusValue =
+export type ServiceStatus =
   | "up"
   | "degraded"
   | "down"
   | "unknown"
   | "offline"
   | "setup"
+
+export type GatewayStatus =
+  | "active"
+  | "ready"
+  | "degraded"
+  | "down"
+  | "offline"
+  | "setup"
+
+/** Service-shaped status value (legacy name). Keeps existing imports working. */
+export type StatusValue = ServiceStatus
+
+/** Either a service or gateway status — used by shared helpers. */
+export type AnyStatus = ServiceStatus | GatewayStatus
 
 export type ServiceKind = "voice" | "data" | "other"
 
@@ -65,9 +79,10 @@ export interface Service {
   reach: ServiceReach
   icon: string | null
   description: string | null
-  status: StatusValue
-  effective_status: StatusValue
-  allowed_statuses: StatusValue[] | null
+  status: ServiceStatus
+  effective_status: ServiceStatus
+  allowed_statuses: ServiceStatus[] | null
+  enabled_pace: GatewayPace[]
   validated_at: string | null
   validated_by_user_id: number | null
   validated_by_username: string | null
@@ -92,7 +107,7 @@ export interface Gateway {
   name: string
   kind: GatewayKind
   provider: string | null
-  status: StatusValue
+  status: GatewayStatus
   pace: GatewayPace
   validated_at: string | null
   validated_by_user_id: number | null
@@ -162,8 +177,8 @@ export interface Validation {
   subject_name: string | null
   site_id: number | null
   site_name: string | null
-  prev_status: StatusValue | null
-  status: StatusValue
+  prev_status: AnyStatus | null
+  status: AnyStatus
   source: "manual" | "ingest"
   validated_by_user_id: number | null
   validated_by_username: string | null

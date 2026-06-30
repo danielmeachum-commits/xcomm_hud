@@ -6,10 +6,19 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react"
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { LocalTime } from "@/components/time-display"
 import { Input } from "@/components/ui/input"
-import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
+import {
+  GATEWAY_STATUS_VALUES,
+  SERVICE_STATUS_VALUES,
+  statusLabel,
+  statusToIndicatorState,
+} from "@/lib/status"
 import { formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import type { StatusValue, SubjectKind, Validation } from "@/lib/types"
+import type { AnyStatus, SubjectKind, Validation } from "@/lib/types"
+
+const ALL_STATUS_VALUES: AnyStatus[] = Array.from(
+  new Set<AnyStatus>([...SERVICE_STATUS_VALUES, ...GATEWAY_STATUS_VALUES]),
+)
 
 type SortKey = "validated_at" | "subject_kind" | "subject_name" | "site_name" | "status" | "validator"
 type SortDir = "asc" | "desc"
@@ -26,7 +35,7 @@ export function EventsTable({ validations }: Props) {
   const [search, setSearch] = useState("")
   const [siteFilter, setSiteFilter] = useState<string>("all")
   const [kindFilter, setKindFilter] = useState<"all" | SubjectKind>("all")
-  const [statusFilter, setStatusFilter] = useState<"all" | StatusValue>("all")
+  const [statusFilter, setStatusFilter] = useState<"all" | AnyStatus>("all")
   const [sortKey, setSortKey] = useState<SortKey>("validated_at")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
@@ -158,11 +167,11 @@ export function EventsTable({ validations }: Props) {
         </select>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as "all" | StatusValue)}
+          onChange={(e) => setStatusFilter(e.target.value as "all" | AnyStatus)}
           className="h-9 rounded-md border border-input bg-background px-3 text-sm"
         >
           <option value="all">All statuses</option>
-          {STATUS_VALUES.map((s) => (
+          {ALL_STATUS_VALUES.map((s) => (
             <option key={s} value={s}>
               {statusLabel(s)}
             </option>

@@ -17,13 +17,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  STATUS_CATEGORIES,
+  GATEWAY_STATUS_CATEGORIES,
+  SERVICE_STATUS_CATEGORIES,
   statusLabel,
   statusToIndicatorState,
 } from "@/lib/status"
 import { formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import type { StatusValue } from "@/lib/types"
+import type { AnyStatus } from "@/lib/types"
 
 interface Props {
   open: boolean
@@ -32,11 +33,11 @@ interface Props {
   subjectId: number
   subjectName: string
   /** Stored status — this is what was last validated. */
-  currentStatus: StatusValue
+  currentStatus: AnyStatus
   lastValidatedAt: string | null
   lastValidatedBy: string | null
   /** Optional whitelist from the service template; if omitted, all are allowed. */
-  allowedStatuses?: StatusValue[] | null
+  allowedStatuses?: AnyStatus[] | null
 }
 
 /** "YYYY-MM-DDTHH:mm" — value format for <input type="datetime-local">. */
@@ -59,8 +60,10 @@ export function ValidationDialog({
   allowedStatuses,
 }: Props) {
   const router = useRouter()
-  const [status, setStatus] = useState<StatusValue>(currentStatus)
+  const [status, setStatus] = useState<AnyStatus>(currentStatus)
   const [note, setNote] = useState("")
+  const categories =
+    kind === "gateway" ? GATEWAY_STATUS_CATEGORIES : SERVICE_STATUS_CATEGORIES
   const [whenLocal, setWhenLocal] = useState<string>(() => toLocalInput(new Date()))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -192,7 +195,7 @@ export function ValidationDialog({
           <div className="space-y-1.5">
             <Label>Status</Label>
             <div className="flex flex-col gap-3">
-              {STATUS_CATEGORIES.map((cat) => {
+              {categories.map((cat) => {
                 const options = cat.values.filter(
                   (s) => !allowedStatuses || allowedStatuses.includes(s),
                 )

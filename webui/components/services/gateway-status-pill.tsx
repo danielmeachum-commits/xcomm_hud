@@ -6,12 +6,12 @@ import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { ValidationDialog } from "@/components/validation-dialog"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
-import type { StatusValue } from "@/lib/types"
+import type { GatewayStatus } from "@/lib/types"
 
 interface Props {
   gatewayId: number
   gatewayName: string
-  status: StatusValue
+  status: GatewayStatus
   lastValidatedAt?: string | null
   lastValidatedBy?: string | null
   className?: string
