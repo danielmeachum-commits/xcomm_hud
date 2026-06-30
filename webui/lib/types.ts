@@ -2,7 +2,13 @@
 
 export type Role = "viewer" | "operator" | "admin"
 
-export type StatusValue = "up" | "degraded" | "down" | "unknown"
+export type StatusValue =
+  | "up"
+  | "degraded"
+  | "down"
+  | "unknown"
+  | "offline"
+  | "setup"
 
 export type ServiceKind = "voip" | "data" | "video" | "crypto" | "other"
 
@@ -39,6 +45,8 @@ export interface Site {
   location_label: string | null
   fpcon: Fpcon
   emcon: Emcon
+  show_fpcon: boolean
+  show_emcon: boolean
   lat: number | null
   lon: number | null
   notes: string | null
@@ -112,6 +120,8 @@ export interface SiteRollup {
   status: StatusValue
   fpcon: Fpcon
   emcon: Emcon
+  show_fpcon: boolean
+  show_emcon: boolean
   service_count: number
   gateway_count: number
 }

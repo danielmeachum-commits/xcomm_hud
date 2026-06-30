@@ -7,7 +7,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-StatusValue = Literal["up", "degraded", "down", "unknown"]
+StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
 ServiceKind = Literal["voip", "data", "video", "crypto", "other"]
 ServiceCategory = Literal["core_critical_local", "sustainment", "other"]
 ServiceReach = Literal["local", "external"]
@@ -62,6 +62,8 @@ class SiteIn(BaseModel):
     location_label: Optional[str] = None
     fpcon: Fpcon = "normal"
     emcon: Emcon = "a"
+    show_fpcon: bool = True
+    show_emcon: bool = True
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
@@ -72,6 +74,8 @@ class SitePatch(BaseModel):
     location_label: Optional[str] = None
     fpcon: Optional[Fpcon] = None
     emcon: Optional[Emcon] = None
+    show_fpcon: Optional[bool] = None
+    show_emcon: Optional[bool] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
@@ -83,6 +87,8 @@ class SiteOut(_ORM):
     location_label: Optional[str] = None
     fpcon: Fpcon
     emcon: Emcon
+    show_fpcon: bool = True
+    show_emcon: bool = True
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
@@ -131,6 +137,7 @@ class ServicePatch(BaseModel):
 class ServiceValidateIn(BaseModel):
     status: StatusValue
     note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None  # override; defaults to now
 
 
 class ServiceOut(_ORM):
@@ -171,6 +178,7 @@ class GatewayPatch(BaseModel):
 class GatewayValidateIn(BaseModel):
     status: StatusValue
     note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None  # override; defaults to now
 
 
 class GatewayOut(_ORM):
@@ -236,6 +244,8 @@ class SiteRollup(BaseModel):
     status: StatusValue
     fpcon: Fpcon
     emcon: Emcon
+    show_fpcon: bool = True
+    show_emcon: bool = True
     service_count: int
     gateway_count: int
 

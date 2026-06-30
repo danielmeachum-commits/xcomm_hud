@@ -42,6 +42,8 @@ export function SiteForm({ site, triggerLabel }: Props) {
     location_label: site?.location_label ?? "",
     fpcon: (site?.fpcon ?? "normal") as Fpcon,
     emcon: (site?.emcon ?? "a") as Emcon,
+    show_fpcon: site?.show_fpcon ?? true,
+    show_emcon: site?.show_emcon ?? true,
     lat: site?.lat?.toString() ?? "",
     lon: site?.lon?.toString() ?? "",
     notes: site?.notes ?? "",
@@ -56,6 +58,8 @@ export function SiteForm({ site, triggerLabel }: Props) {
         location_label: draft.location_label || null,
         fpcon: draft.fpcon,
         emcon: draft.emcon,
+        show_fpcon: draft.show_fpcon,
+        show_emcon: draft.show_emcon,
         lat: draft.lat ? Number(draft.lat) : null,
         lon: draft.lon ? Number(draft.lon) : null,
         notes: draft.notes || null,
@@ -153,8 +157,33 @@ export function SiteForm({ site, triggerLabel }: Props) {
               </select>
             </div>
           </div>
-          <div>
-            <TransportBadge fpcon={draft.fpcon} emcon={draft.emcon} />
+          <div className="flex flex-wrap items-center gap-3">
+            <TransportBadge
+              fpcon={draft.show_fpcon ? draft.fpcon : undefined}
+              emcon={draft.show_emcon ? draft.emcon : undefined}
+            />
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                checked={draft.show_fpcon}
+                onChange={(e) =>
+                  setDraft({ ...draft, show_fpcon: e.target.checked })
+                }
+                disabled={pending}
+              />
+              Show FPCON
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                checked={draft.show_emcon}
+                onChange={(e) =>
+                  setDraft({ ...draft, show_emcon: e.target.checked })
+                }
+                disabled={pending}
+              />
+              Show EMCON
+            </label>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

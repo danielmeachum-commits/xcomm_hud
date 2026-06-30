@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
+import { ValidationHistory } from "@/components/services/validation-history"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,6 +23,7 @@ import type {
   ServiceKind,
   ServiceReach,
   Site,
+  Validation,
 } from "@/lib/types"
 
 const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
@@ -29,9 +31,10 @@ const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
 interface Props {
   service: Service
   sites: Site[]
+  validations: Validation[]
 }
 
-export function ServiceDetailClient({ service, sites }: Props) {
+export function ServiceDetailClient({ service, sites, validations }: Props) {
   const router = useRouter()
   const siteById = new Map(sites.map((s) => [s.id, s]))
   const [pending, setPending] = useState(false)
@@ -255,6 +258,11 @@ export function ServiceDetailClient({ service, sites }: Props) {
             Delete
           </Button>
         </div>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold">Validation history</h2>
+        <ValidationHistory validations={validations} />
       </section>
     </div>
   )

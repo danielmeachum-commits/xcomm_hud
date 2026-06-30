@@ -95,7 +95,7 @@ def validate_gateway(
     if gw is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
     prev = gw.status
-    v = Validation(
+    kwargs = dict(
         subject_kind="gateway",
         subject_id=gw.id,
         prev_status=prev,
@@ -104,6 +104,9 @@ def validate_gateway(
         validated_by_user_id=current_user.id,
         note=body.note,
     )
+    if body.validated_at is not None:
+        kwargs["validated_at"] = body.validated_at
+    v = Validation(**kwargs)
     db.add(v)
     db.flush()
     gw.status = body.status

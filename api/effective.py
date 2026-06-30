@@ -19,6 +19,11 @@ def all_gateways_down(gateways: list[Gateway]) -> bool:
 
 
 def effective_service_status(service: Service, site_gateways: list[Gateway]) -> str:
+    # `offline` (intentionally off) and `setup` (being brought online) are
+    # operator-controlled states that shouldn't be overridden by gateway state.
+    if service.status in ("offline", "setup"):
+        return service.status
     if service.reach == "external" and all_gateways_down(site_gateways):
-        return "down"
+        if service.status in ("up", "degraded"):
+            return "down"
     return service.status

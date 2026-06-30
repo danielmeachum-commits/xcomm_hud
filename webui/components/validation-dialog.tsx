@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
@@ -22,13 +23,21 @@ import type { StatusValue } from "@/lib/types"
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** "service" | "gateway" — sets the endpoint path. */
   kind: "service" | "gateway"
   subjectId: number
   subjectName: string
+  /** Stored status — this is what was last validated. */
   currentStatus: StatusValue
   lastValidatedAt: string | null
   lastValidatedBy: string | null
+}
+
+/** "YYYY-MM-DDTHH:mm" — value format for <input type="datetime-local">. */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`
 }
 
 export function ValidationDialog({
@@ -44,9 +53,29 @@ export function ValidationDialog({
   const router = useRouter()
   const [status, setStatus] = useState<StatusValue>(currentStatus)
   const [note, setNote] = useState("")
+  const [whenLocal, setWhenLocal] = useState<string>(() => toLocalInput(new Date()))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const now = new Date().toISOString()
+
+  // Reset when the dialog opens so the previewed time is current and any
+  // prior selection doesn't bleed across sessions.
+  useEffect(() => {
+    if (open) {
+      setStatus(currentStatus)
+      setNote("")
+      setWhenLocal(toLocalInput(new Date()))
+      setError(null)
+    }
+  }, [open, currentStatus])
+
+  // For the live preview boxes — show what the user is about to record.
+  const whenIso = (() => {
+    try {
+      return new Date(whenLocal).toISOString()
+    } catch {
+      return new Date().toISOString()
+    }
+  })()
 
   async function submit() {
     setPending(true)
@@ -56,17 +85,27 @@ export function ValidationDialog({
         kind === "service"
           ? `/api/be/services/${subjectId}/validate`
           : `/api/be/gateways/${subjectId}/validate`
+      const body: Record<string, unknown> = {
+        status,
+        note: note || null,
+      }
+      // Send the override only if it actually differs from "now" by more
+      // than a minute, so the typical case doesn't pin to an old timestamp.
+      const enteredMs = new Date(whenLocal).getTime()
+      const nowMs = Date.now()
+      if (Math.abs(enteredMs - nowMs) > 60 * 1000) {
+        body.validated_at = new Date(whenLocal).toISOString()
+      }
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, note: note || null }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
         throw new Error(j.detail ?? "Validation failed")
       }
       onOpenChange(false)
-      setNote("")
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error")
@@ -82,29 +121,69 @@ export function ValidationDialog({
           <DialogTitle>Validate {subjectName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="rounded-md border bg-muted/30 p-3 text-xs">
-            <div className="text-muted-foreground">Recording validation at</div>
-            <div className="mt-1 grid grid-cols-2 gap-2">
+          {/* Last validation snapshot */}
+          {lastValidatedAt ? (
+            <div className="rounded-md border bg-muted/30 p-3 text-xs">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                Last validation
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <StatusIndicator
+                  state={statusToIndicatorState(currentStatus)}
+                  size="sm"
+                />
+                <span className="font-medium uppercase tracking-wider">
+                  {statusLabel(currentStatus)}
+                </span>
+              </div>
+              <div className="mt-1.5 grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Local</div>
+                  <div className="font-mono">{formatLocal(lastValidatedAt)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Zulu</div>
+                  <div className="font-mono">{formatZulu(lastValidatedAt)}</div>
+                </div>
+              </div>
+              {lastValidatedBy && (
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  by {lastValidatedBy}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+              No prior validation on record.
+            </div>
+          )}
+
+          {/* When did this happen */}
+          <div className="space-y-1.5">
+            <Label htmlFor="when">When (local time)</Label>
+            <Input
+              id="when"
+              type="datetime-local"
+              value={whenLocal}
+              onChange={(e) => setWhenLocal(e.target.value)}
+              disabled={pending}
+            />
+            <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/20 p-2 text-[11px]">
               <div>
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Local</div>
-                <div className="font-mono">{formatLocal(now)}</div>
+                <div className="text-[10px] uppercase text-muted-foreground">Local</div>
+                <div className="font-mono">{formatLocal(whenIso)}</div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Zulu</div>
-                <div className="font-mono">{formatZulu(now)}</div>
+                <div className="text-[10px] uppercase text-muted-foreground">Zulu</div>
+                <div className="font-mono">{formatZulu(whenIso)}</div>
               </div>
             </div>
-            {lastValidatedAt && (
-              <div className="mt-2 border-t border-border pt-2 text-[10px] text-muted-foreground">
-                Last validation: {formatZulu(lastValidatedAt)}{" "}
-                {lastValidatedBy ? `by ${lastValidatedBy}` : ""}
-              </div>
-            )}
           </div>
 
+          {/* Status picker */}
           <div className="space-y-1.5">
             <Label>Status</Label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {STATUS_VALUES.map((s) => (
                 <button
                   key={s}
@@ -125,6 +204,7 @@ export function ValidationDialog({
             </div>
           </div>
 
+          {/* Notes */}
           <div className="space-y-1.5">
             <Label htmlFor="note">Notes</Label>
             <Textarea

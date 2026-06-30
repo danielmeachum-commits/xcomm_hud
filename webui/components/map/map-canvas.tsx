@@ -54,7 +54,9 @@ const SITE_NODE_WIDTH = 300
 
 function SiteMapNode({ data }: NodeProps) {
   const { site, services, gateways } = data as SiteNodeData
-  const fpconRing = fpconClasses(site.fpcon).ring
+  const fpconRing = site.show_fpcon
+    ? fpconClasses(site.fpcon).ring
+    : "ring-border"
 
   const byCategory = new Map<string, Service[]>()
   for (const s of services) {
@@ -97,7 +99,11 @@ function SiteMapNode({ data }: NodeProps) {
         </a>
       </div>
 
-      <TransportBadge fpcon={site.fpcon} emcon={site.emcon} size="sm" />
+      <TransportBadge
+        fpcon={site.show_fpcon ? site.fpcon : undefined}
+        emcon={site.show_emcon ? site.emcon : undefined}
+        size="sm"
+      />
 
       {gateways.length > 0 && (
         <div className="flex flex-wrap gap-1">

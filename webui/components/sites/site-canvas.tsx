@@ -66,17 +66,23 @@ function ServiceCanvasNode({ data }: NodeProps) {
   const isExternal = service.reach === "external"
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm"
+      className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm transition-colors hover:bg-accent/40"
       style={{ width: LANE_WIDTH }}
     >
       {isExternal && (
         <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
       )}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+        <a
+          href={`/services/${service.id}`}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDownCapture={(e) => e.stopPropagation()}
+          className="nodrag flex min-w-0 flex-1 items-center gap-2 hover:underline"
+          title="Open service detail"
+        >
           <Icon className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate text-sm font-medium">{service.name}</span>
-        </div>
+        </a>
         <ServiceStatusPill
           serviceId={service.id}
           serviceName={service.name}

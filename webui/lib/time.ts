@@ -12,7 +12,8 @@ export function formatLocal(iso: string | null | undefined): string {
   })
 }
 
-/** Zulu format: DDHHMMZ MMM YY (compact military-style). */
+/** Zulu format: DDHHMMZ MMM YYYY (standard DTG with full year so the
+ *  year can't be confused with the day-of-month). */
 export function formatZulu(iso: string | null | undefined): string {
   if (!iso) return "—"
   const d = new Date(iso)
@@ -22,8 +23,8 @@ export function formatZulu(iso: string | null | undefined): string {
   const mm = pad(d.getUTCMinutes())
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
   const mon = months[d.getUTCMonth()]
-  const yy = String(d.getUTCFullYear()).slice(-2)
-  return `${day}${hh}${mm}Z ${mon} ${yy}`
+  const year = d.getUTCFullYear()
+  return `${day}${hh}${mm}Z ${mon} ${year}`
 }
 
 /** Short relative-ago, e.g. "3m ago", "2h ago", "yesterday". */

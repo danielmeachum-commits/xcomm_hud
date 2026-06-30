@@ -68,7 +68,10 @@ export function SiteDetailClient({
           <p className="text-xs text-muted-foreground">
             {site.location_label ?? "—"}
           </p>
-          <TransportBadge fpcon={site.fpcon} emcon={site.emcon} />
+          <TransportBadge
+            fpcon={site.show_fpcon ? site.fpcon : undefined}
+            emcon={site.show_emcon ? site.emcon : undefined}
+          />
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider">

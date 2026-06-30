@@ -33,7 +33,11 @@ export function SiteStatusGridWidget({ data }: WidgetProps) {
               <span>{statusLabel(s.status)}</span>
             </div>
           </div>
-          <TransportBadge fpcon={s.fpcon} emcon={s.emcon} size="sm" />
+          <TransportBadge
+            fpcon={s.show_fpcon ? s.fpcon : undefined}
+            emcon={s.show_emcon ? s.emcon : undefined}
+            size="sm"
+          />
           <div className="text-xs text-muted-foreground">
             {s.service_count} {s.service_count === 1 ? "service" : "services"} ·{" "}
             {s.gateway_count} {s.gateway_count === 1 ? "gateway" : "gateways"}

@@ -102,7 +102,7 @@ def validate_service(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
 
     prev = service.status
-    v = Validation(
+    kwargs = dict(
         subject_kind="service",
         subject_id=service.id,
         prev_status=prev,
@@ -111,6 +111,9 @@ def validate_service(
         validated_by_user_id=current_user.id,
         note=body.note,
     )
+    if body.validated_at is not None:
+        kwargs["validated_at"] = body.validated_at
+    v = Validation(**kwargs)
     db.add(v)
     db.flush()
     service.status = body.status

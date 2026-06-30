@@ -26,7 +26,16 @@ export function fpconLabel(f: Fpcon): string {
 }
 
 export function emconLabel(e: Emcon): string {
-  return `EMCON ${e.toUpperCase()}`
+  switch (e) {
+    case "a":
+      return "EMCON ALPHA"
+    case "b":
+      return "EMCON BRAVO"
+    case "c":
+      return "EMCON CHARLIE"
+    case "d":
+      return "EMCON DELTA"
+  }
 }
 
 /** Tailwind classes for the badge background + text. */

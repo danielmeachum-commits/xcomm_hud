@@ -42,6 +42,8 @@ def rollup(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
                 ),
                 fpcon=site.fpcon,
                 emcon=site.emcon,
+                show_fpcon=site.show_fpcon,
+                show_emcon=site.show_emcon,
                 service_count=len(site_svcs),
                 gateway_count=len(site_gws),
             )

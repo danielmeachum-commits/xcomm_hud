@@ -52,7 +52,11 @@ export default async function SitesPage() {
                   <span>{statusLabel(s.status)}</span>
                 </div>
               </div>
-              <TransportBadge fpcon={s.fpcon} emcon={s.emcon} size="sm" />
+              <TransportBadge
+                fpcon={s.show_fpcon ? s.fpcon : undefined}
+                emcon={s.show_emcon ? s.emcon : undefined}
+                size="sm"
+              />
               {s.location_label && (
                 <p className="text-xs text-muted-foreground">
                   {s.location_label}

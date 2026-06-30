@@ -25,7 +25,7 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-STATUS_VALUES = ("up", "degraded", "down", "unknown")
+STATUS_VALUES = ("up", "degraded", "down", "unknown", "offline", "setup")
 SERVICE_KINDS = ("voip", "data", "video", "crypto", "other")
 SERVICE_CATEGORIES = ("core_critical_local", "sustainment", "other")
 SERVICE_REACH = ("local", "external")
@@ -61,6 +61,8 @@ class Site(Base):
     location_label: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     fpcon: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
     emcon: Mapped[str] = mapped_column(String(8), nullable=False, default="a")
+    show_fpcon: Mapped[bool] = mapped_column(default=True, nullable=False)
+    show_emcon: Mapped[bool] = mapped_column(default=True, nullable=False)
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
