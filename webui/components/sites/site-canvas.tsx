@@ -73,7 +73,13 @@ function ServiceCanvasNode({ data }: NodeProps) {
       className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm transition-colors hover:bg-accent/40"
       style={{ width: LANE_WIDTH }}
     >
-      <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
+      {/* Local services sit left of gateways → emit from the right.
+       *  External services sit right of gateways → receive on the left. */}
+      {isExternal ? (
+        <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
+      ) : (
+        <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
+      )}
       <div className="flex items-center justify-between gap-2">
         <a
           href={`/services/${service.id}`}
