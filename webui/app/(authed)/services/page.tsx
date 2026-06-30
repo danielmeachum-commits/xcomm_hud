@@ -4,25 +4,35 @@ import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
-import type { Service, Site } from "@/lib/types"
+import {
+  categoryAccentClass,
+  categoryLabel,
+  reachShort,
+  serviceIcon,
+} from "@/lib/service-meta"
+import type { Service, ServiceTemplate, Site } from "@/lib/types"
 
 export default async function ServicesPage() {
   await requireSession()
 
-  let services: Service[] = []
-  let sites: Site[] = []
-  try {
-    services = await apiGet<Service[]>("/services")
-  } catch {
-    // ignore
-  }
-  try {
-    sites = await apiGet<Site[]>("/sites")
-  } catch {
-    // ignore
-  }
+  const [services, sites, templates] = await Promise.all([
+    apiGet<Service[]>("/services").catch(() => [] as Service[]),
+    apiGet<Site[]>("/sites").catch(() => [] as Site[]),
+    apiGet<ServiceTemplate[]>("/service-templates").catch(
+      () => [] as ServiceTemplate[],
+    ),
+  ])
 
   const siteName = new Map(sites.map((s) => [s.id, s.name]))
+
+  // Group services by category for visual separation
+  const byCategory = new Map<string, Service[]>()
+  for (const s of services) {
+    const list = byCategory.get(s.category) ?? []
+    list.push(s)
+    byCategory.set(s.category, list)
+  }
+  const categoryOrder = ["core_critical_local", "sustainment", "other"] as const
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
@@ -30,10 +40,11 @@ export default async function ServicesPage() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Services</h1>
           <p className="text-xs text-muted-foreground">
-            Leadership-facing service health. Click the status pill to update.
+            Click the status pill to update. Group your standard services from
+            the template catalog when adding new ones.
           </p>
         </div>
-        <ServiceForm sites={sites} />
+        <ServiceForm sites={sites} templates={templates} />
       </div>
 
       {services.length === 0 ? (
@@ -41,28 +52,47 @@ export default async function ServicesPage() {
           No services yet — add your first service.
         </div>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {services.map((s) => (
-            <li
-              key={s.id}
-              className="flex items-center justify-between gap-3 rounded-lg border bg-background/50 p-3"
-            >
-              <Link
-                href={`/services/${s.id}`}
-                className="min-w-0 flex-1 hover:underline"
-              >
-                <div className="font-medium">{s.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {s.kind} · {s.hosting}
-                  {s.site_id
-                    ? ` · ${siteName.get(s.site_id) ?? "site " + s.site_id}`
-                    : " · cross-site"}
-                </div>
-              </Link>
-              <ServiceStatusPill serviceId={s.id} status={s.status} />
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-col gap-5">
+          {categoryOrder.map((cat) => {
+            const items = byCategory.get(cat) ?? []
+            if (items.length === 0) return null
+            return (
+              <section key={cat}>
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  {categoryLabel(cat)}
+                </h2>
+                <ul className="flex flex-col gap-2">
+                  {items.map((s) => {
+                    const Icon = serviceIcon(s.icon, s.kind)
+                    return (
+                      <li
+                        key={s.id}
+                        className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${categoryAccentClass(s.category)}`}
+                      >
+                        <Link
+                          href={`/services/${s.id}`}
+                          className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                        >
+                          <Icon className="size-5 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0">
+                            <div className="font-medium">{s.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {s.kind} · {s.hosting} · reach {reachShort(s.reach)}
+                              {s.site_id
+                                ? ` · ${siteName.get(s.site_id) ?? "site " + s.site_id}`
+                                : " · cross-site"}
+                            </div>
+                          </div>
+                        </Link>
+                        <ServiceStatusPill serviceId={s.id} status={s.status} />
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
+            )
+          })}
+        </div>
       )}
     </div>
   )

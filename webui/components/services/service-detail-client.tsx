@@ -8,7 +8,21 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import type { Service, ServiceHosting, ServiceKind, Site } from "@/lib/types"
+import {
+  SERVICE_CATEGORIES,
+  SERVICE_REACH_VALUES,
+  categoryLabel,
+  reachLabel,
+  serviceIcon,
+} from "@/lib/service-meta"
+import type {
+  Service,
+  ServiceCategory,
+  ServiceHosting,
+  ServiceKind,
+  ServiceReach,
+  Site,
+} from "@/lib/types"
 
 const KINDS: ServiceKind[] = ["voip", "data", "video", "crypto", "other"]
 const HOSTING: ServiceHosting[] = ["self", "cloud", "hybrid"]
@@ -27,9 +41,13 @@ export function ServiceDetailClient({ service, sites }: Props) {
     name: service.name,
     kind: service.kind,
     hosting: service.hosting,
+    category: service.category,
+    reach: service.reach,
     site_id: service.site_id,
     notes: service.notes ?? "",
   })
+
+  const Icon = serviceIcon(service.icon, service.kind)
 
   async function save() {
     setPending(true)
@@ -42,6 +60,8 @@ export function ServiceDetailClient({ service, sites }: Props) {
           name: draft.name,
           kind: draft.kind,
           hosting: draft.hosting,
+          category: draft.category,
+          reach: draft.reach,
           site_id: draft.site_id,
           notes: draft.notes || null,
         }),
@@ -67,20 +87,20 @@ export function ServiceDetailClient({ service, sites }: Props) {
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">{service.name}</h1>
-          <p className="text-xs text-muted-foreground">
-            {service.kind} · {service.hosting} ·{" "}
-            {service.site_id
-              ? siteById.get(service.site_id)?.name ?? `site ${service.site_id}`
-              : "cross-site"}
-          </p>
+        <div className="flex items-center gap-3">
+          <Icon className="size-7 text-muted-foreground" />
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">{service.name}</h1>
+            <p className="text-xs text-muted-foreground">
+              {categoryLabel(service.category)} · {reachLabel(service.reach)} ·{" "}
+              {service.hosting}
+              {service.site_id
+                ? ` · ${siteById.get(service.site_id)?.name ?? `site ${service.site_id}`}`
+                : " · cross-site"}
+            </p>
+          </div>
         </div>
-        <ServiceStatusPill
-          serviceId={service.id}
-          status={service.status}
-          size="lg"
-        />
+        <ServiceStatusPill serviceId={service.id} status={service.status} size="lg" />
       </header>
 
       <section className="grid gap-4 sm:max-w-xl">
@@ -118,7 +138,10 @@ export function ServiceDetailClient({ service, sites }: Props) {
               id="hosting"
               value={draft.hosting}
               onChange={(e) =>
-                setDraft({ ...draft, hosting: e.target.value as ServiceHosting })
+                setDraft({
+                  ...draft,
+                  hosting: e.target.value as ServiceHosting,
+                })
               }
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               disabled={pending}
@@ -126,6 +149,47 @@ export function ServiceDetailClient({ service, sites }: Props) {
               {HOSTING.map((h) => (
                 <option key={h} value={h}>
                   {h}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="category">Category</Label>
+            <select
+              id="category"
+              value={draft.category}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  category: e.target.value as ServiceCategory,
+                })
+              }
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              disabled={pending}
+            >
+              {SERVICE_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {categoryLabel(c)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reach">Reach</Label>
+            <select
+              id="reach"
+              value={draft.reach}
+              onChange={(e) =>
+                setDraft({ ...draft, reach: e.target.value as ServiceReach })
+              }
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              disabled={pending}
+            >
+              {SERVICE_REACH_VALUES.map((r) => (
+                <option key={r} value={r}>
+                  {reachLabel(r)}
                 </option>
               ))}
             </select>

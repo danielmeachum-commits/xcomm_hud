@@ -11,8 +11,11 @@ Classification = Literal["U", "CUI", "S", "TS"]
 StatusValue = Literal["up", "degraded", "down", "unknown"]
 ServiceKind = Literal["voip", "data", "video", "crypto", "other"]
 ServiceHosting = Literal["self", "cloud", "hybrid"]
+ServiceCategory = Literal["core_critical_local", "sustainment", "other"]
+ServiceReach = Literal["local", "external", "both"]
+GatewayKind = Literal["isp", "modem", "satellite", "other"]
 UserRole = Literal["viewer", "operator", "admin"]
-SubjectKind = Literal["service", "site"]
+SubjectKind = Literal["service", "site", "gateway"]
 
 
 class _ORM(BaseModel):
@@ -80,7 +83,21 @@ class SiteOut(_ORM):
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
-    status: StatusValue = "unknown"  # computed rollup of services
+    status: StatusValue = "unknown"
+
+
+# --- Service template (catalog) ---
+
+
+class ServiceTemplateOut(_ORM):
+    id: int
+    name: str
+    kind: ServiceKind
+    category: ServiceCategory
+    reach: ServiceReach
+    default_hosting: ServiceHosting
+    icon: Optional[str] = None
+    notes: Optional[str] = None
 
 
 # --- Service ---
@@ -91,6 +108,9 @@ class ServiceIn(BaseModel):
     site_id: Optional[int] = None
     kind: ServiceKind = "other"
     hosting: ServiceHosting = "self"
+    category: ServiceCategory = "other"
+    reach: ServiceReach = "local"
+    icon: Optional[str] = None
     status: StatusValue = "unknown"
     notes: Optional[str] = None
 
@@ -100,9 +120,12 @@ class ServicePatch(BaseModel):
     site_id: Optional[int] = None
     kind: Optional[ServiceKind] = None
     hosting: Optional[ServiceHosting] = None
+    category: Optional[ServiceCategory] = None
+    reach: Optional[ServiceReach] = None
+    icon: Optional[str] = None
     status: Optional[StatusValue] = None
     notes: Optional[str] = None
-    note: Optional[str] = None  # optional event note when status changes
+    note: Optional[str] = None
 
 
 class ServiceOut(_ORM):
@@ -111,8 +134,87 @@ class ServiceOut(_ORM):
     site_id: Optional[int] = None
     kind: ServiceKind
     hosting: ServiceHosting
+    category: ServiceCategory
+    reach: ServiceReach
+    icon: Optional[str] = None
     status: StatusValue
     notes: Optional[str] = None
+
+
+# --- Gateway ---
+
+
+class GatewayIn(BaseModel):
+    name: str
+    kind: GatewayKind = "other"
+    provider: Optional[str] = None
+    status: StatusValue = "unknown"
+    notes: Optional[str] = None
+
+
+class GatewayPatch(BaseModel):
+    name: Optional[str] = None
+    kind: Optional[GatewayKind] = None
+    provider: Optional[str] = None
+    status: Optional[StatusValue] = None
+    notes: Optional[str] = None
+
+
+class GatewayOut(_ORM):
+    id: int
+    site_id: int
+    name: str
+    kind: GatewayKind
+    provider: Optional[str] = None
+    status: StatusValue
+    notes: Optional[str] = None
+
+
+# --- Canvas ---
+
+
+class CanvasPositionIn(BaseModel):
+    x: float
+    y: float
+
+
+class CanvasPositionOut(BaseModel):
+    site_id: int
+    x: float
+    y: float
+
+
+class CanvasAnnotationIn(BaseModel):
+    text: str = ""
+    x: float = 0.0
+    y: float = 0.0
+    classification: Optional[Classification] = None
+
+
+class CanvasAnnotationPatch(BaseModel):
+    text: Optional[str] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    classification: Optional[Classification] = None
+
+
+class CanvasAnnotationOut(_ORM):
+    id: int
+    text: str
+    x: float
+    y: float
+    classification: Optional[Classification] = None
+
+
+class MapBundle(BaseModel):
+    """Single fetch for the /map canvas — sites + their positions + services
+    + gateways + annotations."""
+
+    sites: list[SiteOut]
+    positions: list[CanvasPositionOut]
+    services: list[ServiceOut]
+    gateways: list[GatewayOut]
+    annotations: list[CanvasAnnotationOut]
 
 
 # --- Status / rollup ---
@@ -129,6 +231,9 @@ class ServiceRollup(BaseModel):
     id: int
     name: str
     kind: ServiceKind
+    category: ServiceCategory
+    reach: ServiceReach
+    icon: Optional[str] = None
     hosting: ServiceHosting
     status: StatusValue
     site_id: Optional[int] = None
@@ -160,7 +265,7 @@ class EnclaveSourceOut(_ORM):
 
 class EnclaveSourceCreated(BaseModel):
     enclave_source: EnclaveSourceOut
-    ingest_token: str  # plaintext, shown once
+    ingest_token: str
 
 
 class IngestService(BaseModel):

@@ -15,8 +15,11 @@ from db import SessionLocal, get_db
 from models import User
 from routers import (
     auth,
+    canvas,
     enclave_sources,
+    gateways,
     ingest,
+    service_templates,
     services,
     sites,
     status as status_router,
@@ -79,6 +82,9 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(sites.router)
 app.include_router(services.router)
+app.include_router(service_templates.router)
+app.include_router(gateways.router)
+app.include_router(canvas.router)
 app.include_router(status_router.router)
 app.include_router(ingest.router)
 app.include_router(users.router)

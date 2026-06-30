@@ -1,8 +1,4 @@
-"""SQLAlchemy 2.x declarative models for xcomm_hud.
-
-The hub model is intentionally lean: Site + Service are the only domain
-objects leadership sees. Equipment-level detail lives in scoi.
-"""
+"""SQLAlchemy 2.x declarative models for xcomm_hud."""
 
 from __future__ import annotations
 
@@ -16,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -31,9 +28,12 @@ def _now() -> datetime.datetime:
 STATUS_VALUES = ("up", "degraded", "down", "unknown")
 SERVICE_KINDS = ("voip", "data", "video", "crypto", "other")
 SERVICE_HOSTING = ("self", "cloud", "hybrid")
+SERVICE_CATEGORIES = ("core_critical_local", "sustainment", "other")
+SERVICE_REACH = ("local", "external", "both")
+GATEWAY_KINDS = ("isp", "modem", "satellite", "other")
 USER_ROLES = ("viewer", "operator", "admin")
 STATUS_EVENT_SOURCES = ("manual", "ingest")
-SUBJECT_KINDS = ("service", "site")
+SUBJECT_KINDS = ("service", "site", "gateway")
 
 
 class User(Base):
@@ -69,8 +69,13 @@ class Site(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
-    services: Mapped[list["Service"]] = relationship(
-        "Service", back_populates="site"
+    services: Mapped[list["Service"]] = relationship("Service", back_populates="site")
+    gateways: Mapped[list["Gateway"]] = relationship(
+        "Gateway", back_populates="site", cascade="all, delete-orphan"
+    )
+    canvas_position: Mapped[Optional["SiteCanvasPosition"]] = relationship(
+        "SiteCanvasPosition", back_populates="site", uselist=False,
+        cascade="all, delete-orphan",
     )
 
 
@@ -91,6 +96,25 @@ class EnclaveSource(Base):
     )
 
 
+class ServiceTemplate(Base):
+    """Seeded catalog of standardized services (NIPR Web, VoIP, etc.).
+
+    Used by the "Add service" picker so common services have consistent
+    naming, kind, category, reach, and icon across sites.
+    """
+
+    __tablename__ = "service_template"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
+    category: Mapped[str] = mapped_column(String(24), nullable=False, default="other")
+    reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
+    default_hosting: Mapped[str] = mapped_column(String(16), nullable=False, default="self")
+    icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class Service(Base):
     __tablename__ = "service"
 
@@ -101,6 +125,9 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
     hosting: Mapped[str] = mapped_column(String(16), nullable=False, default="self")
+    category: Mapped[str] = mapped_column(String(24), nullable=False, default="other")
+    reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
+    icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
@@ -111,6 +138,70 @@ class Service(Base):
     )
 
     site: Mapped[Optional["Site"]] = relationship("Site", back_populates="services")
+
+
+class Gateway(Base):
+    """Per-site uplink equipment (ISP, modem, satellite). Status is manually
+    set; external services depend on at least one gateway being up.
+    """
+
+    __tablename__ = "gateway"
+    __table_args__ = (
+        UniqueConstraint("site_id", "name", name="uq_gateway_site_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    site_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
+    provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    site: Mapped["Site"] = relationship("Site", back_populates="gateways")
+
+
+class SiteCanvasPosition(Base):
+    """Site position on the top-level /map React Flow canvas."""
+
+    __tablename__ = "site_canvas_position"
+
+    site_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), primary_key=True
+    )
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    site: Mapped["Site"] = relationship("Site", back_populates="canvas_position")
+
+
+class CanvasAnnotation(Base):
+    """Free-form text labels placed on the top-level /map canvas."""
+
+    __tablename__ = "canvas_annotation"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    classification: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
 
 
 class StatusEvent(Base):

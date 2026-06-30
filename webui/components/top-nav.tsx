@@ -25,6 +25,7 @@ interface TopNavProps {
 
 const NAV_ITEMS = [
   { href: "/", label: "Overview" },
+  { href: "/map", label: "Map" },
   { href: "/sites", label: "Sites" },
   { href: "/services", label: "Services" },
 ]

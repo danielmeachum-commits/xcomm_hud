@@ -17,6 +17,12 @@ export type ServiceKind = "voip" | "data" | "video" | "crypto" | "other"
 
 export type ServiceHosting = "self" | "cloud" | "hybrid"
 
+export type ServiceCategory = "core_critical_local" | "sustainment" | "other"
+
+export type ServiceReach = "local" | "external" | "both"
+
+export type GatewayKind = "isp" | "modem" | "satellite" | "other"
+
 export interface Me {
   user_id: number
   username: string
@@ -49,8 +55,54 @@ export interface Service {
   site_id: number | null
   kind: ServiceKind
   hosting: ServiceHosting
+  category: ServiceCategory
+  reach: ServiceReach
+  icon: string | null
   status: StatusValue
   notes: string | null
+}
+
+export interface ServiceTemplate {
+  id: number
+  name: string
+  kind: ServiceKind
+  category: ServiceCategory
+  reach: ServiceReach
+  default_hosting: ServiceHosting
+  icon: string | null
+  notes: string | null
+}
+
+export interface Gateway {
+  id: number
+  site_id: number
+  name: string
+  kind: GatewayKind
+  provider: string | null
+  status: StatusValue
+  notes: string | null
+}
+
+export interface CanvasPosition {
+  site_id: number
+  x: number
+  y: number
+}
+
+export interface CanvasAnnotation {
+  id: number
+  text: string
+  x: number
+  y: number
+  classification: Classification | null
+}
+
+export interface MapBundle {
+  sites: Site[]
+  positions: CanvasPosition[]
+  services: Service[]
+  gateways: Gateway[]
+  annotations: CanvasAnnotation[]
 }
 
 export interface SiteRollup {
@@ -64,6 +116,9 @@ export interface ServiceRollup {
   id: number
   name: string
   kind: ServiceKind
+  category: ServiceCategory
+  reach: ServiceReach
+  icon: string | null
   hosting: ServiceHosting
   status: StatusValue
   site_id: number | null
