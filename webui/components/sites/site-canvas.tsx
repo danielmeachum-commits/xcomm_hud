@@ -29,7 +29,7 @@ import {
   serviceIcon,
 } from "@/lib/service-meta"
 import {
-  statusEdgeAnimates,
+  statusBadgeClass,
   statusEdgeHandle,
   statusEdgeStroke,
 } from "@/lib/status"
@@ -38,7 +38,6 @@ import type {
   Gateway,
   GatewayStatus,
   Service,
-  ServiceStatus,
 } from "@/lib/types"
 
 const LANE_WIDTH = 240
@@ -110,13 +109,14 @@ function ServiceCanvasNode({ data }: NodeProps) {
   const isExternal = service.reach === "external"
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border bg-background p-3 shadow-sm transition-colors hover:bg-accent/40"
+      className={cn(
+        "flex flex-col gap-1 rounded-lg border p-3 shadow-sm transition-colors hover:brightness-110",
+        statusBadgeClass(service.effective_status),
+      )}
       style={{ width: LANE_WIDTH }}
     >
-      {/* Both local and external services emit edges toward the gateway —
-       *  the visual "service → ISP" direction the operator expects. Local
-       *  services with reach=local don't have edges, so the handle is a
-       *  no-op but harmless. */}
+      {/* Both local and external services emit edges toward the gateway lane
+       *  in the middle — local from its right edge, external from its left. */}
       {isExternal ? (
         <Handle type="source" position={Position.Left} className="!bg-muted-foreground" />
       ) : (
@@ -198,7 +198,10 @@ function GatewayCanvasNode({ data }: NodeProps) {
   const pace = paceClasses(gateway.pace)
   return (
     <div
-      className="relative flex flex-col gap-1 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 p-3 shadow-sm"
+      className={cn(
+        "relative flex flex-col gap-1 rounded-lg border-2 p-3 shadow-sm",
+        statusBadgeClass(gateway.status),
+      )}
       style={{ width: LANE_WIDTH, minHeight: NODE_HEIGHT }}
     >
       <GatewayDocks side="left" />
@@ -270,29 +273,10 @@ interface Props {
   gateways: Gateway[]
 }
 
-/** Pick a dash pattern based on the gateway's status. Active = solid (live
- *  traffic), ready = dashed (warm standby), degraded = solid (still passing),
- *  down/offline/setup = dotted (no usable path). */
+/** Solid line only when the gateway is actively passing traffic. Any other
+ *  status (ready/degraded/down/offline/setup) dashes to signal "not live". */
 function dashForGateway(status: GatewayStatus): string | undefined {
-  switch (status) {
-    case "active":
-    case "degraded":
-      return undefined
-    case "ready":
-      return "8 4"
-    case "down":
-    case "offline":
-    case "setup":
-      return "2 4"
-  }
-}
-
-/** Whether the service is plausibly using this gateway in a way the operator
- *  would expect to see *animated*. Down/offline service → never; otherwise
- *  defer to whether the gateway itself is passing traffic. */
-function shouldAnimate(serviceStatus: ServiceStatus, gatewayStatus: GatewayStatus): boolean {
-  if (!statusEdgeAnimates(serviceStatus)) return false
-  return gatewayStatus === "active" || gatewayStatus === "degraded"
+  return status === "active" ? undefined : "6 4"
 }
 
 function SiteCanvasInner({
@@ -372,9 +356,6 @@ function SiteCanvasInner({
       lineWidth: number,
     ) {
       for (const svc of svcs) {
-        // reach=external opts the service into the gateway lanes. reach=local
-        // is intentionally edge-free — the service sits internally.
-        if (svc.reach !== "external") continue
         const enabled = new Set(svc.enabled_pace ?? [])
         if (enabled.size === 0) continue
         const status = svc.effective_status
@@ -383,17 +364,19 @@ function SiteCanvasInner({
         for (const gw of gateways) {
           if (!enabled.has(gw.pace)) continue
           const dash = dashForGateway(gw.status)
+          // Healthy path = service up + gateway active. Those edges get
+          // bolder + full opacity; everything else fades to recede visually.
+          const isLive = svc.effective_status === "up" && gw.status === "active"
           builtEdges.push({
             id: `e-svc${svc.id}-gw${gw.id}-${side}`,
             source: `service-${svc.id}`,
             target: `gateway-${gw.id}`,
             targetHandle: `${side}-${dock}`,
-            animated: shouldAnimate(svc.status, gw.status),
             style: {
               stroke,
-              strokeWidth: lineWidth,
+              strokeWidth: isLive ? lineWidth + 1 : lineWidth,
               strokeDasharray: dash,
-              opacity: 0.9,
+              opacity: isLive ? 1 : 0.55,
             },
           })
         }
