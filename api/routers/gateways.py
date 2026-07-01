@@ -9,7 +9,7 @@ from sqlalchemy import case as sql_case
 
 from db import get_db
 from deps import requires
-from models import Gateway, Site, User, Validation
+from models import Event, Gateway, Site, User
 from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
 
 router = APIRouter(tags=["gateways"])
@@ -129,7 +129,7 @@ def validate_gateway(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    v = Validation(**kwargs)
+    v = Event(**kwargs)
     db.add(v)
     db.flush()
     gw.status = body.status

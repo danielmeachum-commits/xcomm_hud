@@ -46,6 +46,25 @@ export type SubjectKind =
   | "gateway"
   | "site_fpcon"
   | "site_emcon"
+  | "system"
+  | "mission"
+  | "exercise"
+
+export type EventType = "validation" | "general"
+
+export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
+  "service",
+  "site",
+  "gateway",
+  "site_fpcon",
+  "site_emcon",
+]
+
+export const GENERAL_SUBJECT_KINDS: readonly SubjectKind[] = [
+  "system",
+  "mission",
+  "exercise",
+]
 
 export interface Me {
   user_id: number
@@ -176,20 +195,25 @@ export interface StatusRollup {
   services: ServiceRollup[]
 }
 
-export interface Validation {
+export interface Event {
   id: number
+  event_type: EventType
   validated_at: string
   subject_kind: SubjectKind
-  subject_id: number
+  subject_id: number | null
   subject_name: string | null
+  subject_label: string | null
   site_id: number | null
   site_name: string | null
   prev_status: AnyStatus | null
-  status: AnyStatus
+  status: AnyStatus | null
   source: "manual" | "ingest"
   validated_by_user_id: number | null
   validated_by_username: string | null
   note: string | null
+  edited_at: string | null
+  hidden_at: string | null
+  hidden_by_user_id: number | null
 }
 
 export interface EnclaveSource {

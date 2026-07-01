@@ -17,6 +17,7 @@ from routers import (
     auth,
     canvas,
     enclave_sources,
+    events,
     gateways,
     ingest,
     service_templates,
@@ -24,7 +25,6 @@ from routers import (
     sites,
     status as status_router,
     users,
-    validations,
 )
 from schemas import MeOut
 
@@ -87,7 +87,7 @@ app.include_router(service_templates.router)
 app.include_router(gateways.router)
 app.include_router(canvas.router)
 app.include_router(status_router.router)
-app.include_router(validations.router)
+app.include_router(events.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
 app.include_router(enclave_sources.router)

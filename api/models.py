@@ -37,7 +37,17 @@ GATEWAY_KINDS = ("milsat", "commercial", "other")
 GATEWAY_PACE = ("primary", "alternate", "contingency", "emergency")
 USER_ROLES = ("viewer", "operator", "admin")
 VALIDATION_SOURCES = ("manual", "ingest")
-SUBJECT_KINDS = ("service", "site", "gateway", "site_fpcon", "site_emcon")
+SUBJECT_KINDS = (
+    "service",
+    "site",
+    "gateway",
+    "site_fpcon",
+    "site_emcon",
+    "system",
+    "mission",
+    "exercise",
+)
+EVENT_TYPES = ("validation", "general")
 FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
 EMCON_LEVELS = ("a", "b", "c", "d")
 
@@ -228,25 +238,40 @@ class CanvasAnnotation(Base):
     )
 
 
-class Validation(Base):
+class Event(Base):
     """Append-only audit of every status change.
 
-    One row per validation event: who said *this* subject is in *this* state at
+    One row per event: who said *this* subject is in *this* state at
     *this* time, with optional notes. Drives the reporting feed and history view.
+    Table name stays `validation` for compatibility with other API instances
+    running against the same shared postgres.
     """
 
     __tablename__ = "validation"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="validation"
+    )
     validated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, index=True
     )
     subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    subject_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    subject_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    subject_label: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     prev_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     validated_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    edited_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    hidden_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    hidden_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
