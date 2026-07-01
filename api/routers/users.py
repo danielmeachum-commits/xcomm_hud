@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 import datetime as _dt
@@ -11,6 +11,7 @@ from auth import hash_password
 from db import get_db
 from deps import requires
 from models import User
+from pubsub import notify
 from schemas import UserIn, UserOut, UserPatch
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -24,6 +25,7 @@ def list_users(db: Session = Depends(get_db), _=Depends(requires("admin"))):
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
     body: UserIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -37,6 +39,7 @@ def create_user(
     )
     db.add(user)
     db.flush()
+    notify(background_tasks, "users")
     return user
 
 
@@ -44,6 +47,7 @@ def create_user(
 def patch_user(
     user_id: int,
     body: UserPatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -60,4 +64,5 @@ def patch_user(
     for k, v in data.items():
         setattr(user, k, v)
     db.flush()
+    notify(background_tasks, "users")
     return user

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from effective import effective_service_status
 from models import Gateway, Service, Site, User, Validation
+from pubsub import notify
 from rollup import site_status
 from schemas import SiteEmconIn, SiteFpconIn, SiteIn, SiteOut, SitePatch
 
@@ -34,6 +35,7 @@ def list_sites(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
 @router.post("", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
 def create_site(
     body: SiteIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -42,6 +44,7 @@ def create_site(
     site = Site(**body.model_dump())
     db.add(site)
     db.flush()
+    notify(background_tasks)
     return _site_with_status(db, site)
 
 
@@ -57,6 +60,7 @@ def get_site(site_id: int, db: Session = Depends(get_db), _=Depends(requires("vi
 def patch_site(
     site_id: int,
     body: SitePatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -66,6 +70,7 @@ def patch_site(
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(site, k, v)
     db.flush()
+    notify(background_tasks)
     return _site_with_status(db, site)
 
 
@@ -73,6 +78,7 @@ def patch_site(
 def set_site_fpcon(
     site_id: int,
     body: SiteFpconIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
@@ -94,6 +100,7 @@ def set_site_fpcon(
     db.add(Validation(**kwargs))
     site.fpcon = body.level
     db.flush()
+    notify(background_tasks)
     return _site_with_status(db, site)
 
 
@@ -101,6 +108,7 @@ def set_site_fpcon(
 def set_site_emcon(
     site_id: int,
     body: SiteEmconIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
@@ -122,12 +130,14 @@ def set_site_emcon(
     db.add(Validation(**kwargs))
     site.emcon = body.level
     db.flush()
+    notify(background_tasks)
     return _site_with_status(db, site)
 
 
 @router.delete("/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_site(
     site_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -135,3 +145,4 @@ def delete_site(
     if site is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     db.delete(site)
+    notify(background_tasks)

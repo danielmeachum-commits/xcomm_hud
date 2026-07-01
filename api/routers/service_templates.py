@@ -8,12 +8,13 @@ across sites.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from models import ServiceTemplate
+from pubsub import notify
 from schemas import ServiceTemplateIn, ServiceTemplateOut, ServiceTemplatePatch
 
 router = APIRouter(prefix="/service-templates", tags=["service-templates"])
@@ -34,6 +35,7 @@ def list_templates(
 @router.post("", response_model=ServiceTemplateOut, status_code=status.HTTP_201_CREATED)
 def create_template(
     body: ServiceTemplateIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -42,6 +44,7 @@ def create_template(
     t = ServiceTemplate(**body.model_dump())
     db.add(t)
     db.flush()
+    notify(background_tasks, "service_templates")
     return t
 
 
@@ -61,6 +64,7 @@ def get_template(
 def patch_template(
     template_id: int,
     body: ServiceTemplatePatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -70,12 +74,14 @@ def patch_template(
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(t, k, v)
     db.flush()
+    notify(background_tasks, "service_templates")
     return t
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_template(
     template_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -83,3 +89,4 @@ def delete_template(
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
     db.delete(t)
+    notify(background_tasks, "service_templates")

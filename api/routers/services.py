@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from effective import effective_service_status
 from models import Gateway, Service, ServiceTemplate, Site, User, Validation
+from pubsub import notify
 from schemas import ServiceIn, ServiceOut, ServicePatch, ServiceValidateIn
 
 router = APIRouter(prefix="/services", tags=["services"])
@@ -47,6 +48,7 @@ def list_services(
 @router.post("", response_model=ServiceOut, status_code=status.HTTP_201_CREATED)
 def create_service(
     body: ServiceIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -69,6 +71,7 @@ def create_service(
     service = Service(**body.model_dump(), display_order=next_order)
     db.add(service)
     db.flush()
+    notify(background_tasks)
     return _service_out(db, service)
 
 
@@ -88,6 +91,7 @@ def get_service(
 def patch_service(
     service_id: int,
     body: ServicePatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -109,6 +113,7 @@ def patch_service(
 
     db.flush()
     db.refresh(service)
+    notify(background_tasks)
     return _service_out(db, service)
 
 
@@ -116,6 +121,7 @@ def patch_service(
 def validate_service(
     service_id: int,
     body: ServiceValidateIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
@@ -143,12 +149,14 @@ def validate_service(
     service.validated_by_user_id = current_user.id
     db.flush()
     db.refresh(service)
+    notify(background_tasks)
     return _service_out(db, service)
 
 
 @router.post("/{service_id}/move", response_model=ServiceOut)
 def move_service(
     service_id: int,
+    background_tasks: BackgroundTasks,
     direction: str = Query(..., pattern="^(up|down)$"),
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
@@ -184,12 +192,14 @@ def move_service(
     service.display_order, other.display_order = other.display_order, service.display_order
     db.flush()
     db.refresh(service)
+    notify(background_tasks)
     return _service_out(db, service)
 
 
 @router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_service(
     service_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -197,3 +207,4 @@ def delete_service(
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
     db.delete(service)
+    notify(background_tasks)
