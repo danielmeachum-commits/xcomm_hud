@@ -9,10 +9,13 @@ export interface ViewTabOption<T extends string> {
   icon?: React.ComponentType<{ className?: string }>
 }
 
+export type ViewTabsVariant = "pill" | "line"
+
 interface Props<T extends string> {
   value: T
   onChange: (value: T) => void
   options: ViewTabOption<T>[]
+  variant?: ViewTabsVariant
   className?: string
 }
 
@@ -20,8 +23,44 @@ export function ViewTabs<T extends string>({
   value,
   onChange,
   options,
+  variant = "pill",
   className,
 }: Props<T>) {
+  if (variant === "line") {
+    return (
+      <div
+        role="tablist"
+        className={cn(
+          "inline-flex w-full items-center gap-4 border-b border-border text-sm",
+          className,
+        )}
+      >
+        {options.map((opt) => {
+          const active = opt.value === value
+          const Icon = opt.icon
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                "-mb-px inline-flex items-center gap-1.5 border-b-2 px-1 py-2 transition-colors",
+                active
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {Icon && <Icon className="size-4" />}
+              {opt.label}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div
       role="tablist"

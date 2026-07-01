@@ -102,22 +102,13 @@ export function SiteDetailClient({
         </div>
         <div className="flex flex-wrap gap-2">
           <SiteForm site={site} />
-          {tab === "services" && (
-            <>
-              <GatewayForm siteId={site.id} />
-              <ServiceForm
-                sites={sites}
-                templates={templates}
-                defaultSiteId={site.id}
-              />
-            </>
-          )}
         </div>
       </header>
 
       <ViewTabs<Tab>
         value={tab}
         onChange={setTab}
+        variant="line"
         options={[
           { value: "services", label: "Services", icon: Waypoints },
           { value: "personnel", label: "Personnel", icon: Users },
@@ -129,8 +120,11 @@ export function SiteDetailClient({
 
       {tab === "services" ? (
         <ServicesTab
+          site={site}
+          sites={sites}
           services={services}
           gateways={gateways}
+          templates={templates}
         />
       ) : tab === "personnel" ? (
         <PlaceholderTab title="Personnel" description="Assigned personnel and roles will live here." />
@@ -146,11 +140,17 @@ export function SiteDetailClient({
 }
 
 function ServicesTab({
+  site,
+  sites,
   services,
   gateways,
+  templates,
 }: {
+  site: Site
+  sites: Site[]
   services: Service[]
   gateways: Gateway[]
+  templates: ServiceTemplate[]
 }) {
   const [view, setView] = useState<"list" | "graph">("graph")
 
@@ -163,14 +163,24 @@ function ServicesTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <ViewTabs<"list" | "graph">
-        value={view}
-        onChange={setView}
-        options={[
-          { value: "list", label: "List", icon: LayoutGrid },
-          { value: "graph", label: "Graph", icon: Network },
-        ]}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ViewTabs<"list" | "graph">
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "list", label: "List", icon: LayoutGrid },
+            { value: "graph", label: "Graph", icon: Network },
+          ]}
+        />
+        <div className="flex flex-wrap gap-2">
+          <GatewayForm siteId={site.id} />
+          <ServiceForm
+            sites={sites}
+            templates={templates}
+            defaultSiteId={site.id}
+          />
+        </div>
+      </div>
 
       {view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />
