@@ -29,7 +29,7 @@ interface Props {
   /** When provided, the form edits this gateway (PATCH) instead of creating. */
   gateway?: Gateway
   triggerLabel?: string
-  triggerSize?: "sm" | "md"
+  triggerSize?: "sm" | "lg"
 }
 
 export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" }: Props) {
