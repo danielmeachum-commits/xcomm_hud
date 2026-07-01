@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import case as sql_case
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from models import (
     SiteCanvasPosition,
     User,
 )
+from pubsub import notify
 from rollup import site_status
 from schemas import (
     CanvasAnnotationIn,
@@ -126,6 +127,7 @@ def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
 def upsert_position(
     site_id: int,
     body: CanvasPositionIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -139,6 +141,7 @@ def upsert_position(
         pos.x = body.x
         pos.y = body.y
     db.flush()
+    notify(background_tasks)
     return CanvasPositionOut(site_id=site_id, x=pos.x, y=pos.y)
 
 
@@ -154,12 +157,14 @@ def list_annotations(db: Session = Depends(get_db), _=Depends(requires("viewer")
 )
 def create_annotation(
     body: CanvasAnnotationIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
     ann = CanvasAnnotation(**body.model_dump())
     db.add(ann)
     db.flush()
+    notify(background_tasks)
     return ann
 
 
@@ -167,6 +172,7 @@ def create_annotation(
 def patch_annotation(
     ann_id: int,
     body: CanvasAnnotationPatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -176,12 +182,14 @@ def patch_annotation(
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(ann, k, v)
     db.flush()
+    notify(background_tasks)
     return ann
 
 
 @router.delete("/annotations/{ann_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_annotation(
     ann_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -189,3 +197,4 @@ def delete_annotation(
     if ann is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Annotation not found")
     db.delete(ann)
+    notify(background_tasks)

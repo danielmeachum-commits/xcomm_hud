@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from sqlalchemy import case as sql_case
@@ -10,6 +10,7 @@ from sqlalchemy import case as sql_case
 from db import get_db
 from deps import requires
 from models import Event, Gateway, Site, User
+from pubsub import notify
 from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
 
 router = APIRouter(tags=["gateways"])
@@ -59,6 +60,7 @@ def list_site_gateways(
 def create_gateway(
     site_id: int,
     body: GatewayIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -74,6 +76,7 @@ def create_gateway(
     gw = Gateway(site_id=site_id, display_order=next_order, **body.model_dump())
     db.add(gw)
     db.flush()
+    notify(background_tasks)
     return _gateway_out(db, gw)
 
 
@@ -94,6 +97,7 @@ def list_all_gateways(
 def patch_gateway(
     gateway_id: int,
     body: GatewayPatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -104,6 +108,7 @@ def patch_gateway(
         setattr(gw, k, v)
     db.flush()
     db.refresh(gw)
+    notify(background_tasks)
     return _gateway_out(db, gw)
 
 
@@ -111,6 +116,7 @@ def patch_gateway(
 def validate_gateway(
     gateway_id: int,
     body: GatewayValidateIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
@@ -137,12 +143,14 @@ def validate_gateway(
     gw.validated_by_user_id = current_user.id
     db.flush()
     db.refresh(gw)
+    notify(background_tasks)
     return _gateway_out(db, gw)
 
 
 @router.post("/gateways/{gateway_id}/move", response_model=GatewayOut)
 def move_gateway(
     gateway_id: int,
+    background_tasks: BackgroundTasks,
     direction: str = Query(..., pattern="^(up|down)$"),
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
@@ -169,12 +177,14 @@ def move_gateway(
     gw.display_order, other.display_order = other.display_order, gw.display_order
     db.flush()
     db.refresh(gw)
+    notify(background_tasks)
     return _gateway_out(db, gw)
 
 
 @router.delete("/gateways/{gateway_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_gateway(
     gateway_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("operator")),
 ):
@@ -182,3 +192,4 @@ def delete_gateway(
     if gw is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
     db.delete(gw)
+    notify(background_tasks)

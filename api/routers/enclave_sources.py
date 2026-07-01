@@ -9,12 +9,13 @@ from __future__ import annotations
 import secrets
 
 from argon2 import PasswordHasher
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from models import EnclaveSource
+from pubsub import notify
 from schemas import EnclaveSourceCreated, EnclaveSourceIn, EnclaveSourceOut
 
 router = APIRouter(prefix="/enclave-sources", tags=["enclave-sources"])
@@ -30,6 +31,7 @@ def list_sources(db: Session = Depends(get_db), _=Depends(requires("admin"))):
 @router.post("", response_model=EnclaveSourceCreated, status_code=status.HTTP_201_CREATED)
 def create_source(
     body: EnclaveSourceIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -45,6 +47,7 @@ def create_source(
     )
     db.add(src)
     db.flush()
+    notify(background_tasks, "enclave_sources")
     return EnclaveSourceCreated(
         enclave_source=EnclaveSourceOut.model_validate(src),
         ingest_token=token,
@@ -54,6 +57,7 @@ def create_source(
 @router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_source(
     source_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _=Depends(requires("admin")),
 ):
@@ -61,3 +65,4 @@ def delete_source(
     if src is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
     db.delete(src)
+    notify(background_tasks, "enclave_sources")

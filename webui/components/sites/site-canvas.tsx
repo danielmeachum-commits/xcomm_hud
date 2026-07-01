@@ -27,6 +27,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -489,13 +490,15 @@ function SiteCanvasInner({
             }
           />
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>Graph options</DropdownMenuLabel>
-            <DropdownMenuCheckboxItem
-              checked={showAlternate}
-              onCheckedChange={setShowAlternate}
-            >
-              Show alternate paths
-            </DropdownMenuCheckboxItem>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Graph options</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={showAlternate}
+                onCheckedChange={setShowAlternate}
+              >
+                Show alternate paths
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </Panel>

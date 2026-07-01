@@ -1,21 +1,31 @@
-"""Event feed — append-only history with edit-note + admin soft-delete.
+"""Event feed — CRUD + SSE stream.
 
-Rows are never physically deleted and status fields are never mutated after
-insert; only `note` may be edited (audit trail preserved via `edited_at`) and
-admins may set `hidden_at` to remove a row from the default feed.
+Two responsibilities on this router because they share the `/events` prefix:
+
+- Append-only history of validation and general events (list / create /
+  edit-note / admin soft-delete). Rows are never physically deleted and
+  status fields are never mutated after insert; only `note` may be edited
+  (audit trail preserved via `edited_at`) and admins may set `hidden_at`
+  to remove a row from the default feed.
+- Server-Sent Events stream at `/events/stream` for live UI updates.
+  Clients subscribe once; mutations elsewhere in the API publish topic
+  frames through the pubsub broadcaster.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime
-from typing import Optional
+from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
 from models import Event, Gateway, Service, Site, User
+from pubsub import broadcaster
 from schemas import (
     EventBulkIds,
     EventCreateIn,
@@ -28,6 +38,8 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+KEEPALIVE_INTERVAL = 20.0
 
 
 def _now() -> datetime.datetime:
@@ -236,3 +248,36 @@ def unhide_event(
     row.hidden_by_user_id = None
     db.flush()
     return _enrich(db, row)
+
+
+# --- Live-update stream ---
+
+
+async def _event_stream(request: Request) -> AsyncIterator[bytes]:
+    queue = broadcaster.subscribe()
+    try:
+        yield b"retry: 3000\n\n"
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                topic = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
+            except asyncio.TimeoutError:
+                yield b": keepalive\n\n"
+                continue
+            yield f"data: {topic}\n\n".encode("utf-8")
+    finally:
+        broadcaster.unsubscribe(queue)
+
+
+@router.get("/stream")
+async def stream(request: Request, _=Depends(requires("viewer"))) -> StreamingResponse:
+    return StreamingResponse(
+        _event_stream(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

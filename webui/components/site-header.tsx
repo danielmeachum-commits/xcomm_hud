@@ -1,6 +1,7 @@
 "use client"
 
 import { HeaderBreadcrumbs } from "@/components/breadcrumbs"
+import { LiveToggle } from "@/components/live-toggle"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -12,6 +13,7 @@ export function SiteHeader() {
       <Separator orientation="vertical" className="mx-1 h-4" />
       <HeaderBreadcrumbs />
       <div className="ml-auto flex items-center gap-2">
+        <LiveToggle />
         <ThemeToggle />
       </div>
     </header>

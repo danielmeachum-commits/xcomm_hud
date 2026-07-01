@@ -91,6 +91,7 @@ app.include_router(events.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
 app.include_router(enclave_sources.router)
+app.include_router(events.router)
 
 
 @app.get("/health")
