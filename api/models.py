@@ -29,6 +29,15 @@ def _now() -> datetime.datetime:
 
 SERVICE_STATUS_VALUES = ("up", "degraded", "down", "unknown", "offline", "setup")
 GATEWAY_STATUS_VALUES = ("active", "ready", "degraded", "down", "offline", "setup")
+SITE_STATUS_VALUES = (
+    "operational",
+    "limited",
+    "degraded",
+    "maintenance",
+    "standby",
+    "offline",
+    "setup",
+)
 STATUS_VALUES = SERVICE_STATUS_VALUES  # legacy alias
 SERVICE_KINDS = ("voice", "data", "other")
 SERVICE_CATEGORIES = ("critical", "sustainment", "other")
@@ -37,7 +46,7 @@ GATEWAY_KINDS = ("milsat", "commercial", "other")
 GATEWAY_PACE = ("primary", "alternate", "contingency", "emergency")
 USER_ROLES = ("viewer", "operator", "admin")
 VALIDATION_SOURCES = ("manual", "ingest")
-SUBJECT_KINDS = ("service", "site", "gateway", "site_fpcon", "site_emcon")
+SUBJECT_KINDS = ("service", "site", "gateway", "site_fpcon", "site_emcon", "site_status")
 FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
 EMCON_LEVELS = ("a", "b", "c", "d")
 
@@ -64,6 +73,9 @@ class Site(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     location_label: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="operational"
+    )
     fpcon: Mapped[str] = mapped_column(String(16), nullable=False, default="normal")
     emcon: Mapped[str] = mapped_column(String(8), nullable=False, default="a")
     show_fpcon: Mapped[bool] = mapped_column(default=True, nullable=False)

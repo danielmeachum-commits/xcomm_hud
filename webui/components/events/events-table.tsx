@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import {
   GATEWAY_STATUS_VALUES,
   SERVICE_STATUS_VALUES,
+  SITE_STATUS_VALUES,
   statusLabel,
   statusToIndicatorState,
 } from "@/lib/status"
@@ -65,7 +66,11 @@ function renderLevelBadge(kind: "fpcon" | "emcon", value: string) {
 }
 
 const ALL_STATUS_VALUES: AnyStatus[] = Array.from(
-  new Set<AnyStatus>([...SERVICE_STATUS_VALUES, ...GATEWAY_STATUS_VALUES]),
+  new Set<AnyStatus>([
+    ...SERVICE_STATUS_VALUES,
+    ...GATEWAY_STATUS_VALUES,
+    ...SITE_STATUS_VALUES,
+  ]),
 )
 
 type SortKey = "validated_at" | "subject_kind" | "subject_name" | "site_name" | "status" | "validator"
@@ -212,6 +217,7 @@ export function EventsTable({ validations }: Props) {
           <option value="service">Service</option>
           <option value="gateway">Gateway</option>
           <option value="site">Site</option>
+          <option value="site_status">Site status</option>
           <option value="site_fpcon">Site FPCON</option>
           <option value="site_emcon">Site EMCON</option>
         </select>

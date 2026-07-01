@@ -1,4 +1,8 @@
-"""Rollup status endpoint."""
+"""Rollup status endpoint.
+
+Site status is manually set (not rolled up from services). Service effective
+status still cascades from gateways so operators can see the propagated view.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,6 @@ from db import get_db
 from deps import requires
 from effective import effective_service_status
 from models import Gateway, Service, ServiceTemplate, Site
-from rollup import site_status
 from schemas import ServiceRollup, SiteRollup, StatusRollupOut
 
 router = APIRouter(prefix="/status", tags=["status"])
@@ -43,9 +46,7 @@ def rollup(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
             SiteRollup(
                 id=site.id,
                 name=site.name,
-                status=site_status(
-                    [effective_service_status(s, site_gws) for s in site_svcs]
-                ),
+                status=site.status,
                 fpcon=site.fpcon,
                 emcon=site.emcon,
                 show_fpcon=site.show_fpcon,
