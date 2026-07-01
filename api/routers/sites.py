@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from deps import requires
 from effective import effective_service_status
-from models import Gateway, Service, Site, User, Validation
+from models import Event, Gateway, Service, Site, User
 from pubsub import notify
 from rollup import site_status
 from schemas import SiteEmconIn, SiteFpconIn, SiteIn, SiteOut, SitePatch
@@ -97,7 +97,7 @@ def set_site_fpcon(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    db.add(Validation(**kwargs))
+    db.add(Event(**kwargs))
     site.fpcon = body.level
     db.flush()
     notify(background_tasks)
@@ -127,7 +127,7 @@ def set_site_emcon(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    db.add(Validation(**kwargs))
+    db.add(Event(**kwargs))
     site.emcon = body.level
     db.flush()
     notify(background_tasks)

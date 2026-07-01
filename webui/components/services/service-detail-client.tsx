@@ -24,13 +24,13 @@ import {
 import { formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type {
+  Event,
   GatewayPace,
   Service,
   ServiceCategory,
   ServiceKind,
   ServiceReach,
   Site,
-  Validation,
 } from "@/lib/types"
 
 const KINDS: ServiceKind[] = ["voice", "data", "other"]
@@ -38,7 +38,7 @@ const KINDS: ServiceKind[] = ["voice", "data", "other"]
 interface Props {
   service: Service
   sites: Site[]
-  validations: Validation[]
+  validations: Event[]
 }
 
 export function ServiceDetailClient({ service, sites, validations }: Props) {

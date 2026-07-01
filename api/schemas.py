@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
 ServiceStatusValue = StatusValue
 GatewayStatusValue = Literal["active", "ready", "degraded", "down", "offline", "setup"]
-# Validation rows for FPCON/EMCON changes reuse the `status` column to record
+# Event rows for FPCON/EMCON changes reuse the `status` column to record
 # the new level — keep this union in sync with FPCON_LEVELS + EMCON_LEVELS.
 AnyStatusValue = Literal[
     "up", "active", "ready", "degraded", "down", "unknown", "offline", "setup",
@@ -23,7 +23,22 @@ ServiceReach = Literal["local", "external"]
 GatewayKind = Literal["milsat", "commercial", "other"]
 GatewayPace = Literal["primary", "alternate", "contingency", "emergency"]
 UserRole = Literal["viewer", "operator", "admin"]
-SubjectKind = Literal["service", "site", "gateway", "site_fpcon", "site_emcon"]
+SubjectKind = Literal[
+    "service",
+    "site",
+    "gateway",
+    "site_fpcon",
+    "site_emcon",
+    "system",
+    "mission",
+    "exercise",
+]
+EventType = Literal["validation", "general"]
+
+# Which subject_kinds belong to which event_type. Used for validation on both
+# create and list endpoints.
+VALIDATION_SUBJECT_KINDS = {"service", "site", "gateway", "site_fpcon", "site_emcon"}
+GENERAL_SUBJECT_KINDS = {"system", "mission", "exercise"}
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]
 
@@ -332,23 +347,46 @@ class StatusRollupOut(BaseModel):
     services: list[ServiceRollup]
 
 
-# --- Validation feed ---
+# --- Event feed ---
 
 
-class ValidationOut(_ORM):
+class EventOut(_ORM):
     id: int
+    event_type: EventType = "validation"
     validated_at: datetime.datetime
     subject_kind: SubjectKind
-    subject_id: int
+    subject_id: Optional[int] = None
     subject_name: Optional[str] = None
+    subject_label: Optional[str] = None
     site_id: Optional[int] = None
     site_name: Optional[str] = None
     prev_status: Optional[AnyStatusValue] = None
-    status: AnyStatusValue
+    status: Optional[AnyStatusValue] = None
     source: Literal["manual", "ingest"]
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
     note: Optional[str] = None
+    edited_at: Optional[datetime.datetime] = None
+    hidden_at: Optional[datetime.datetime] = None
+    hidden_by_user_id: Optional[int] = None
+
+
+class EventCreateIn(BaseModel):
+    event_type: EventType = "validation"
+    subject_kind: SubjectKind
+    subject_id: Optional[int] = None
+    subject_label: Optional[str] = None
+    status: Optional[AnyStatusValue] = None
+    prev_status: Optional[AnyStatusValue] = None
+    note: Optional[str] = None
+
+
+class EventNotePatch(BaseModel):
+    note: Optional[str] = None
+
+
+class EventBulkIds(BaseModel):
+    ids: list[int]
 
 
 # --- Enclave source / ingest ---

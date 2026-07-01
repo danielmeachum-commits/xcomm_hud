@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from deps import requires
 from effective import effective_service_status
-from models import Gateway, Service, ServiceTemplate, Site, User, Validation
+from models import Event, Gateway, Service, ServiceTemplate, Site, User
 from pubsub import notify
 from schemas import ServiceIn, ServiceOut, ServicePatch, ServiceValidateIn
 
@@ -141,7 +141,7 @@ def validate_service(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    v = Validation(**kwargs)
+    v = Event(**kwargs)
     db.add(v)
     db.flush()
     service.status = body.status
