@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   GATEWAY_STATUS_VALUES,
   SERVICE_STATUS_VALUES,
+  SITE_STATUS_VALUES,
   statusLabel,
 } from "@/lib/status"
 import {
@@ -54,6 +55,8 @@ function statusOptionsFor(kind: SubjectKind): AnyStatus[] {
       return SERVICE_STATUS_VALUES
     case "gateway":
       return GATEWAY_STATUS_VALUES
+    case "site_status":
+      return SITE_STATUS_VALUES
     case "site_fpcon":
       return FPCON_LEVELS
     case "site_emcon":
@@ -104,6 +107,7 @@ export function EventCreateDialog({
           label: `${g.name} — ${siteName(sites, g.site_id)}`,
         }))
       case "site":
+      case "site_status":
       case "site_fpcon":
       case "site_emcon":
         return sites.map((s) => ({ id: s.id, label: s.name }))

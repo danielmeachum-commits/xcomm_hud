@@ -3,7 +3,6 @@
 import Link from "next/link"
 import { useState } from "react"
 
-import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
@@ -11,10 +10,19 @@ import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
 import { SiteForm } from "@/components/sites/site-form"
+import { SiteStatusPill } from "@/components/sites/site-status-pill"
 import { SiteThreatPill } from "@/components/sites/site-threat-pill"
 import { LocalTime } from "@/components/time-display"
 import { ViewTabs } from "@/components/ui/view-tabs"
-import { LayoutGrid, Network } from "lucide-react"
+import {
+  ClipboardList,
+  Info,
+  LayoutGrid,
+  Network,
+  Package,
+  Users,
+  Waypoints,
+} from "lucide-react"
 import {
   categoryAccentClass,
   categoryLabel,
@@ -25,7 +33,6 @@ import {
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
-import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { formatZulu } from "@/lib/time"
 import type {
   Gateway,
@@ -43,11 +50,9 @@ interface Props {
   templates: ServiceTemplate[]
 }
 
-const CATEGORY_ORDER: ServiceCategory[] = [
-  "critical",
-  "sustainment",
-  "other",
-]
+type Tab = "services" | "personnel" | "equipment" | "details" | "events"
+
+const CATEGORY_ORDER: ServiceCategory[] = ["critical", "sustainment", "other"]
 
 export function SiteDetailClient({
   site,
@@ -56,22 +61,12 @@ export function SiteDetailClient({
   sites,
   templates,
 }: Props) {
-  const [view, setView] = useState<"list" | "graph">("graph")
-
-  const byCategory = new Map<ServiceCategory, Service[]>()
-  for (const s of services) {
-    const list = byCategory.get(s.category) ?? []
-    list.push(s)
-    byCategory.set(s.category, list)
-  }
+  const [tab, setTab] = useState<Tab>("services")
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       <PageBreadcrumbs
-        items={[
-          { label: "Sites", href: "/sites" },
-          { label: site.name },
-        ]}
+        items={[{ label: "Sites", href: "/sites" }, { label: site.name }]}
       />
       <header className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
@@ -81,6 +76,11 @@ export function SiteDetailClient({
           <p className="truncate text-xs text-muted-foreground">
             {site.location_label ?? "—"}
           </p>
+          <SiteStatusPill
+            siteId={site.id}
+            siteName={site.name}
+            status={site.status}
+          />
           <div className="inline-flex items-center gap-1">
             {site.show_fpcon && (
               <SiteThreatPill
@@ -99,16 +99,80 @@ export function SiteDetailClient({
               />
             )}
           </div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wider">
-            <StatusIndicator
-              state={statusToIndicatorState(site.status)}
-              size="md"
-            />
-            <span>{statusLabel(site.status)}</span>
-          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <SiteForm site={site} />
+        </div>
+      </header>
+
+      <ViewTabs<Tab>
+        value={tab}
+        onChange={setTab}
+        variant="line"
+        options={[
+          { value: "services", label: "Services", icon: Waypoints },
+          { value: "personnel", label: "Personnel", icon: Users },
+          { value: "equipment", label: "Equipment", icon: Package },
+          { value: "details", label: "Details", icon: Info },
+          { value: "events", label: "Events", icon: ClipboardList },
+        ]}
+      />
+
+      {tab === "services" ? (
+        <ServicesTab
+          site={site}
+          sites={sites}
+          services={services}
+          gateways={gateways}
+          templates={templates}
+        />
+      ) : tab === "personnel" ? (
+        <PlaceholderTab title="Personnel" description="Assigned personnel and roles will live here." />
+      ) : tab === "equipment" ? (
+        <PlaceholderTab title="Equipment" description="Site equipment inventory will live here." />
+      ) : tab === "details" ? (
+        <PlaceholderTab title="Details" description="Additional site properties will live here." />
+      ) : (
+        <PlaceholderTab title="Events" description="A site-scoped event log with select and CRUD will live here." />
+      )}
+    </div>
+  )
+}
+
+function ServicesTab({
+  site,
+  sites,
+  services,
+  gateways,
+  templates,
+}: {
+  site: Site
+  sites: Site[]
+  services: Service[]
+  gateways: Gateway[]
+  templates: ServiceTemplate[]
+}) {
+  const [view, setView] = useState<"list" | "graph">("graph")
+
+  const byCategory = new Map<ServiceCategory, Service[]>()
+  for (const s of services) {
+    const list = byCategory.get(s.category) ?? []
+    list.push(s)
+    byCategory.set(s.category, list)
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ViewTabs<"list" | "graph">
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "list", label: "List", icon: LayoutGrid },
+            { value: "graph", label: "Graph", icon: Network },
+          ]}
+        />
+        <div className="flex flex-wrap gap-2">
           <GatewayForm siteId={site.id} />
           <ServiceForm
             sites={sites}
@@ -116,16 +180,7 @@ export function SiteDetailClient({
             defaultSiteId={site.id}
           />
         </div>
-      </header>
-
-      <ViewTabs<"list" | "graph">
-        value={view}
-        onChange={setView}
-        options={[
-          { value: "list", label: "List", icon: LayoutGrid },
-          { value: "graph", label: "Graph", icon: Network },
-        ]}
-      />
+      </div>
 
       {view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />
@@ -243,6 +298,21 @@ export function SiteDetailClient({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function PlaceholderTab({
+  title,
+  description,
+}: {
+  title: string
+  description: string
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-center">
+      <p className="text-sm font-medium">{title}</p>
+      <p className="text-xs text-muted-foreground">{description}</p>
     </div>
   )
 }

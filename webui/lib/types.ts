@@ -18,13 +18,28 @@ export type GatewayStatus =
   | "offline"
   | "setup"
 
+/** Manually set posture describing the site itself — not a rollup of its
+ *  services. Distinct from ServiceStatus on purpose. */
+export type SiteStatus =
+  | "operational"
+  | "limited"
+  | "degraded"
+  | "maintenance"
+  | "standby"
+  | "offline"
+  | "setup"
+
 /** Service-shaped status value (legacy name). Keeps existing imports working. */
 export type StatusValue = ServiceStatus
 
-/** Either a service or gateway status — used by shared helpers. Also
- *  includes FPCON/EMCON levels since site_fpcon/site_emcon validation rows
- *  reuse the same `status` column. */
-export type AnyStatus = ServiceStatus | GatewayStatus | Fpcon | Emcon
+/** Union across every status kind that shares the validation `status` column:
+ *  service/gateway/site statuses plus FPCON and EMCON levels. */
+export type AnyStatus =
+  | ServiceStatus
+  | GatewayStatus
+  | SiteStatus
+  | Fpcon
+  | Emcon
 
 export type ServiceKind = "voice" | "data" | "other"
 
@@ -46,6 +61,7 @@ export type SubjectKind =
   | "gateway"
   | "site_fpcon"
   | "site_emcon"
+  | "site_status"
   | "system"
   | "mission"
   | "exercise"
@@ -58,6 +74,7 @@ export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
   "gateway",
   "site_fpcon",
   "site_emcon",
+  "site_status",
 ]
 
 export const GENERAL_SUBJECT_KINDS: readonly SubjectKind[] = [
@@ -85,6 +102,7 @@ export interface Site {
   id: number
   name: string
   location_label: string | null
+  status: SiteStatus
   fpcon: Fpcon
   emcon: Emcon
   show_fpcon: boolean
@@ -92,7 +110,6 @@ export interface Site {
   lat: number | null
   lon: number | null
   notes: string | null
-  status: StatusValue
 }
 
 export interface Service {
@@ -166,7 +183,7 @@ export interface MapBundle {
 export interface SiteRollup {
   id: number
   name: string
-  status: StatusValue
+  status: SiteStatus
   fpcon: Fpcon
   emcon: Emcon
   show_fpcon: boolean

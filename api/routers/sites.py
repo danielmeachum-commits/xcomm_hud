@@ -1,4 +1,4 @@
-"""Site CRUD with status rollup using the effective status of its services."""
+"""Site CRUD. Status is a manually-set posture — no automatic rollup."""
 
 from __future__ import annotations
 
@@ -7,29 +7,23 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from effective import effective_service_status
-from models import Event, Gateway, Service, Site, User
+from models import Event, Site, User
 from pubsub import notify
-from rollup import site_status
-from schemas import SiteEmconIn, SiteFpconIn, SiteIn, SiteOut, SitePatch
+from schemas import (
+    SiteEmconIn,
+    SiteFpconIn,
+    SiteIn,
+    SiteOut,
+    SitePatch,
+    SiteStatusIn,
+)
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
 
-def _site_with_status(db: Session, site: Site) -> SiteOut:
-    services = db.query(Service).filter(Service.site_id == site.id).all()
-    gateways = db.query(Gateway).filter(Gateway.site_id == site.id).all()
-    out = SiteOut.model_validate(site)
-    out.status = site_status(
-        [effective_service_status(s, gateways) for s in services]
-    )
-    return out
-
-
 @router.get("", response_model=list[SiteOut])
 def list_sites(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
-    sites = db.query(Site).order_by(Site.name).all()
-    return [_site_with_status(db, s) for s in sites]
+    return db.query(Site).order_by(Site.name).all()
 
 
 @router.post("", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
@@ -45,7 +39,7 @@ def create_site(
     db.add(site)
     db.flush()
     notify(background_tasks)
-    return _site_with_status(db, site)
+    return site
 
 
 @router.get("/{site_id}", response_model=SiteOut)
@@ -53,7 +47,7 @@ def get_site(site_id: int, db: Session = Depends(get_db), _=Depends(requires("vi
     site = db.get(Site, site_id)
     if site is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
-    return _site_with_status(db, site)
+    return site
 
 
 @router.patch("/{site_id}", response_model=SiteOut)
@@ -71,7 +65,37 @@ def patch_site(
         setattr(site, k, v)
     db.flush()
     notify(background_tasks)
-    return _site_with_status(db, site)
+    return site
+
+
+@router.post("/{site_id}/status", response_model=SiteOut)
+def set_site_status(
+    site_id: int,
+    body: SiteStatusIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(requires("operator")),
+):
+    """Change a site's posture status and append an event row."""
+    site = db.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    kwargs = dict(
+        subject_kind="site_status",
+        subject_id=site.id,
+        prev_status=site.status,
+        status=body.status,
+        source="manual",
+        validated_by_user_id=current_user.id,
+        note=body.note,
+    )
+    if body.validated_at is not None:
+        kwargs["validated_at"] = body.validated_at
+    db.add(Event(**kwargs))
+    site.status = body.status
+    db.flush()
+    notify(background_tasks)
+    return site
 
 
 @router.post("/{site_id}/fpcon", response_model=SiteOut)
@@ -101,7 +125,7 @@ def set_site_fpcon(
     site.fpcon = body.level
     db.flush()
     notify(background_tasks)
-    return _site_with_status(db, site)
+    return site
 
 
 @router.post("/{site_id}/emcon", response_model=SiteOut)
@@ -131,7 +155,7 @@ def set_site_emcon(
     site.emcon = body.level
     db.flush()
     notify(background_tasks)
-    return _site_with_status(db, site)
+    return site
 
 
 @router.delete("/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
