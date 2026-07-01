@@ -2,6 +2,7 @@ import type {
   AnyStatus,
   GatewayStatus,
   ServiceStatus,
+  SiteStatus,
   StatusValue,
 } from "./types"
 
@@ -25,6 +26,16 @@ export const GATEWAY_STATUS_VALUES: GatewayStatus[] = [
   "setup",
 ]
 
+export const SITE_STATUS_VALUES: SiteStatus[] = [
+  "operational",
+  "limited",
+  "degraded",
+  "maintenance",
+  "standby",
+  "offline",
+  "setup",
+]
+
 export type StatusCategory = "operational" | "issue" | "transitional" | "unknown"
 
 /** Stroke color used on canvas edges keyed on a service's status. The three
@@ -34,9 +45,16 @@ export function statusEdgeStroke(s: AnyStatus): string {
   switch (s) {
     case "up":
     case "active":
+    case "operational":
       return "rgb(34 197 94)" // green-500
+    case "limited":
+      return "rgb(132 204 22)" // lime-500
     case "degraded":
       return "rgb(245 158 11)" // amber-500
+    case "maintenance":
+      return "rgb(168 85 247)" // purple-500
+    case "standby":
+      return "rgb(100 116 139)" // slate-500
     case "down":
       return "rgb(239 68 68)" // red-500
     case "ready":
@@ -106,6 +124,14 @@ export function statusLabel(s: AnyStatus): string {
       return "Active"
     case "ready":
       return "Ready"
+    case "operational":
+      return "Operational"
+    case "limited":
+      return "Limited"
+    case "maintenance":
+      return "Maintenance"
+    case "standby":
+      return "Standby"
     case "degraded":
       return "Degraded"
     case "down":
@@ -124,9 +150,16 @@ export function statusBadgeClass(s: AnyStatus): string {
   switch (s) {
     case "up":
     case "active":
+    case "operational":
       return "border-emerald-500/40 bg-emerald-500/5"
+    case "limited":
+      return "border-lime-500/50 bg-lime-500/10"
     case "degraded":
       return "border-amber-500/50 bg-amber-500/10"
+    case "maintenance":
+      return "border-purple-500/50 bg-purple-500/10"
+    case "standby":
+      return "border-slate-500/50 bg-slate-500/10"
     case "down":
       return "border-red-500/60 bg-red-500/10"
     case "offline":
@@ -147,16 +180,20 @@ export function statusToIndicatorState(
   switch (s) {
     case "up":
     case "active":
+    case "operational":
       return "active"
     case "down":
       return "down"
     case "degraded":
+    case "limited":
+    case "maintenance":
       return "fixing"
     case "offline":
       return "offline"
     case "setup":
       return "setup"
     case "ready":
+    case "standby":
       return "ready"
     case "unknown":
     default:

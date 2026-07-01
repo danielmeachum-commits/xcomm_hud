@@ -10,10 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field
 StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
 ServiceStatusValue = StatusValue
 GatewayStatusValue = Literal["active", "ready", "degraded", "down", "offline", "setup"]
-# Event rows for FPCON/EMCON changes reuse the `status` column to record
-# the new level — keep this union in sync with FPCON_LEVELS + EMCON_LEVELS.
+SiteStatusValue = Literal[
+    "operational", "limited", "degraded", "maintenance", "standby", "offline", "setup"
+]
+# Event rows for FPCON/EMCON/site-status changes reuse the `status` column to
+# record the new level — keep this union in sync with FPCON_LEVELS,
+# EMCON_LEVELS, and SITE_STATUS_VALUES.
 AnyStatusValue = Literal[
     "up", "active", "ready", "degraded", "down", "unknown", "offline", "setup",
+    "operational", "limited", "maintenance", "standby",
     "normal", "alpha", "bravo", "charlie", "delta",
     "a", "b", "c", "d",
 ]
@@ -29,6 +34,7 @@ SubjectKind = Literal[
     "gateway",
     "site_fpcon",
     "site_emcon",
+    "site_status",
     "system",
     "mission",
     "exercise",
@@ -37,7 +43,14 @@ EventType = Literal["validation", "general"]
 
 # Which subject_kinds belong to which event_type. Used for validation on both
 # create and list endpoints.
-VALIDATION_SUBJECT_KINDS = {"service", "site", "gateway", "site_fpcon", "site_emcon"}
+VALIDATION_SUBJECT_KINDS = {
+    "service",
+    "site",
+    "gateway",
+    "site_fpcon",
+    "site_emcon",
+    "site_status",
+}
 GENERAL_SUBJECT_KINDS = {"system", "mission", "exercise"}
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]
@@ -85,6 +98,7 @@ class MeOut(BaseModel):
 class SiteIn(BaseModel):
     name: str
     location_label: Optional[str] = None
+    status: SiteStatusValue = "operational"
     fpcon: Fpcon = "normal"
     emcon: Emcon = "a"
     show_fpcon: bool = True
@@ -110,6 +124,7 @@ class SiteOut(_ORM):
     id: int
     name: str
     location_label: Optional[str] = None
+    status: SiteStatusValue = "operational"
     fpcon: Fpcon
     emcon: Emcon
     show_fpcon: bool = True
@@ -117,7 +132,6 @@ class SiteOut(_ORM):
     lat: Optional[float] = None
     lon: Optional[float] = None
     notes: Optional[str] = None
-    status: StatusValue = "unknown"  # computed rollup (effective)
 
 
 # --- Service template ---
@@ -202,6 +216,12 @@ class SiteFpconIn(BaseModel):
 
 class SiteEmconIn(BaseModel):
     level: Emcon
+    note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None
+
+
+class SiteStatusIn(BaseModel):
+    status: SiteStatusValue
     note: Optional[str] = None
     validated_at: Optional[datetime.datetime] = None
 
@@ -318,7 +338,7 @@ class MapBundle(BaseModel):
 class SiteRollup(BaseModel):
     id: int
     name: str
-    status: StatusValue
+    status: SiteStatusValue
     fpcon: Fpcon
     emcon: Emcon
     show_fpcon: bool = True

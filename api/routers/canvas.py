@@ -19,7 +19,6 @@ from models import (
     User,
 )
 from pubsub import notify
-from rollup import site_status
 from schemas import (
     CanvasAnnotationIn,
     CanvasAnnotationOut,
@@ -65,14 +64,7 @@ def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
     for g in gateways:
         gateways_by_site.setdefault(g.site_id, []).append(g)
 
-    # Site rollup uses effective_status of its services
-    site_outs: list[SiteOut] = []
-    for site in sites:
-        gws = gateways_by_site.get(site.id, [])
-        svcs = services_by_site.get(site.id, [])
-        out = SiteOut.model_validate(site)
-        out.status = site_status([effective_service_status(s, gws) for s in svcs])
-        site_outs.append(out)
+    site_outs: list[SiteOut] = [SiteOut.model_validate(s) for s in sites]
 
     template_cache: dict[int, ServiceTemplate] = {}
     service_outs: list[ServiceOut] = []
