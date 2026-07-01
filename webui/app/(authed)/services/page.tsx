@@ -26,15 +26,22 @@ export default async function ServicesPage() {
     ),
   ])
 
-  const siteName = new Map(sites.map((s) => [s.id, s.name]))
+  const siteById = new Map(sites.map((s) => [s.id, s]))
 
-  const byCategory = new Map<string, Service[]>()
-  for (const s of services) {
-    const list = byCategory.get(s.category) ?? []
-    list.push(s)
-    byCategory.set(s.category, list)
-  }
   const categoryOrder = ["critical", "sustainment", "other"] as const
+
+  const bySite = new Map<number, Service[]>()
+  for (const s of services) {
+    const list = bySite.get(s.site_id) ?? []
+    list.push(s)
+    bySite.set(s.site_id, list)
+  }
+
+  const siteOrder = Array.from(bySite.keys()).sort((a, b) => {
+    const an = siteById.get(a)?.name ?? `site ${a}`
+    const bn = siteById.get(b)?.name ?? `site ${b}`
+    return an.localeCompare(bn)
+  })
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
@@ -54,56 +61,78 @@ export default async function ServicesPage() {
           No services yet — add your first service.
         </div>
       ) : (
-        <div className="flex flex-col gap-5">
-          {categoryOrder.map((cat) => {
-            const items = byCategory.get(cat) ?? []
-            if (items.length === 0) return null
+        <div className="flex flex-col gap-6">
+          {siteOrder.map((siteId) => {
+            const siteServices = bySite.get(siteId) ?? []
+            const byCategory = new Map<string, Service[]>()
+            for (const s of siteServices) {
+              const list = byCategory.get(s.category) ?? []
+              list.push(s)
+              byCategory.set(s.category, list)
+            }
+            const site = siteById.get(siteId)
             return (
-              <section key={cat}>
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  {categoryLabel(cat)}
+              <section key={siteId}>
+                <h2 className="mb-3 text-sm font-semibold tracking-tight">
+                  <Link href={`/sites/${siteId}`} className="hover:underline">
+                    {site?.name ?? `site ${siteId}`}
+                  </Link>
                 </h2>
-                <ul className="flex flex-col gap-2">
-                  {items.map((s) => {
-                    const Icon = serviceIcon(s.icon, s.kind)
+                <div className="flex flex-col gap-4">
+                  {categoryOrder.map((cat) => {
+                    const items = byCategory.get(cat) ?? []
+                    if (items.length === 0) return null
                     return (
-                      <li
-                        key={s.id}
-                        className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${categoryAccentClass(s.category)}`}
-                      >
-                        <Link
-                          href={`/services/${s.id}`}
-                          className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
-                        >
-                          <Icon className="size-5 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0">
-                            <div className="font-medium">{s.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {s.kind} · {reachLabel(s.reach)} ·{" "}
-                              {siteName.get(s.site_id) ?? `site ${s.site_id}`}
-                            </div>
-                            {s.validated_at && (
-                              <div className="text-[10px] font-mono text-muted-foreground">
-                                Validated <LocalTime iso={s.validated_at} /> /{" "}
-                                {formatZulu(s.validated_at)}
-                                {s.validated_by_username ? ` · ${s.validated_by_username}` : ""}
-                              </div>
-                            )}
-                          </div>
-                        </Link>
-                        <ServiceStatusPill
-                          serviceId={s.id}
-                          serviceName={s.name}
-                          status={s.status}
-                          effectiveStatus={s.effective_status}
-                          lastValidatedAt={s.validated_at}
-                          lastValidatedBy={s.validated_by_username}
-                          allowedStatuses={s.allowed_statuses}
-                        />
-                      </li>
+                      <div key={cat}>
+                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                          {categoryLabel(cat)}
+                        </h3>
+                        <ul className="flex flex-col gap-2">
+                          {items.map((s) => {
+                            const Icon = serviceIcon(s.icon, s.kind)
+                            return (
+                              <li
+                                key={s.id}
+                                className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${categoryAccentClass(s.category)}`}
+                              >
+                                <Link
+                                  href={`/services/${s.id}`}
+                                  className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                                >
+                                  <Icon className="size-5 shrink-0 text-muted-foreground" />
+                                  <div className="min-w-0">
+                                    <div className="font-medium">{s.name}</div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {s.kind} · {reachLabel(s.reach)}
+                                    </div>
+                                  </div>
+                                </Link>
+                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                  <ServiceStatusPill
+                                    serviceId={s.id}
+                                    serviceName={s.name}
+                                    status={s.status}
+                                    effectiveStatus={s.effective_status}
+                                    lastValidatedAt={s.validated_at}
+                                    lastValidatedBy={s.validated_by_username}
+                                    allowedStatuses={s.allowed_statuses}
+                                  />
+                                  {s.validated_at && (
+                                    <div className="text-right text-[10px] font-mono text-muted-foreground">
+                                      Validated <LocalTime iso={s.validated_at} /> /{" "}
+                                      {formatZulu(s.validated_at)}
+                                      {s.validated_by_username ? ` · ${s.validated_by_username}` : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
                     )
                   })}
-                </ul>
+                </div>
               </section>
             )
           })}

@@ -73,10 +73,12 @@ export function SiteDetailClient({
           { label: site.name },
         ]}
       />
-      <header className="flex flex-wrap items-baseline justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-lg font-semibold tracking-tight">{site.name}</h1>
-          <p className="text-xs text-muted-foreground">
+      <header className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
+          <h1 className="truncate text-lg font-semibold tracking-tight">
+            {site.name}
+          </h1>
+          <p className="truncate text-xs text-muted-foreground">
             {site.location_label ?? "—"}
           </p>
           <div className="inline-flex items-center gap-1">
@@ -97,8 +99,6 @@ export function SiteDetailClient({
               />
             )}
           </div>
-        </div>
-        <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider">
             <StatusIndicator
               state={statusToIndicatorState(site.status)}
@@ -106,15 +106,15 @@ export function SiteDetailClient({
             />
             <span>{statusLabel(site.status)}</span>
           </div>
-          <div className="flex gap-2">
-            <SiteForm site={site} />
-            <GatewayForm siteId={site.id} />
-            <ServiceForm
-              sites={sites}
-              templates={templates}
-              defaultSiteId={site.id}
-            />
-          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <SiteForm site={site} />
+          <GatewayForm siteId={site.id} />
+          <ServiceForm
+            sites={sites}
+            templates={templates}
+            defaultSiteId={site.id}
+          />
         </div>
       </header>
 

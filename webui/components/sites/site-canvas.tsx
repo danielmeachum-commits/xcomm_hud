@@ -11,17 +11,27 @@ import {
   Handle,
   type Node,
   type NodeProps,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react"
-import { MoreHorizontal } from "lucide-react"
+import { MoreHorizontal, Settings2 } from "lucide-react"
 
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { NodeActionPanel } from "@/components/sites/node-action-sheet"
 import { TimeAgo } from "@/components/time-display"
+import { Button } from "@/components/ui/button"
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  categoryLabel,
   gatewayIcon,
   gatewayKindLabel,
   paceClasses,
@@ -38,6 +48,7 @@ import type {
   Gateway,
   GatewayStatus,
   Service,
+  ServiceCategory,
 } from "@/lib/types"
 
 const LANE_WIDTH = 240
@@ -45,6 +56,23 @@ const LANE_X = { local: 40, gateways: 360, external: 680 }
 const NODE_HEIGHT = 84
 const NODE_GAP = 16
 const LANE_TOP = 80
+const SUBHEADER_HEIGHT = 28
+const SUBHEADER_GAP = 8
+const GROUP_GAP = 12
+
+const CATEGORY_ORDER: ServiceCategory[] = ["critical", "sustainment", "other"]
+
+function subheaderAccent(c: ServiceCategory): string {
+  switch (c) {
+    case "critical":
+      return "border-sky-500/50 text-sky-700 dark:text-sky-300"
+    case "sustainment":
+      return "border-violet-500/50 text-violet-700 dark:text-violet-300"
+    case "other":
+    default:
+      return "border-muted-foreground/40 text-muted-foreground"
+  }
+}
 
 interface ServiceNodeData extends Record<string, unknown> {
   service: Service
@@ -76,6 +104,28 @@ function LaneHeaderNode({ data }: NodeProps) {
       <div className="text-[10px] normal-case text-muted-foreground/80">
         {d.count} {d.count === 1 ? "item" : "items"}
       </div>
+    </div>
+  )
+}
+
+interface LaneSubheaderData extends Record<string, unknown> {
+  label: string
+  count: number
+  accent: string
+}
+
+function LaneSubheaderNode({ data }: NodeProps) {
+  const d = data as LaneSubheaderData
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between rounded border-l-2 bg-background/40 px-2 text-[10px] font-semibold uppercase tracking-widest",
+        d.accent,
+      )}
+      style={{ width: LANE_WIDTH, height: SUBHEADER_HEIGHT }}
+    >
+      <span>{d.label}</span>
+      <span className="text-muted-foreground">{d.count}</span>
     </div>
   )
 }
@@ -264,6 +314,7 @@ function GatewayCanvasNode({ data }: NodeProps) {
 
 const NODE_TYPES = {
   laneHeader: LaneHeaderNode,
+  laneSubheader: LaneSubheaderNode,
   service: ServiceCanvasNode,
   gateway: GatewayCanvasNode,
 }
@@ -288,6 +339,8 @@ function SiteCanvasInner({
   onOpenService: (svc: Service) => void
   onOpenGateway: (gw: Gateway) => void
 }) {
+  const [showAlternate, setShowAlternate] = useState(true)
+
   const { nodes, edges } = useMemo(() => {
     const local = services.filter((s) => s.reach === "local")
     const external = services.filter((s) => s.reach === "external")
@@ -320,15 +373,41 @@ function SiteCanvasInner({
     ]
     const builtEdges: Edge[] = []
 
-    local.forEach((svc, i) => {
-      built.push({
-        id: `service-${svc.id}`,
-        type: "service",
-        position: { x: LANE_X.local, y: LANE_TOP + i * (NODE_HEIGHT + NODE_GAP) },
-        data: { service: svc, onOpen: () => onOpenService(svc) },
-        draggable: false,
-      })
-    })
+    function placeServiceLane(svcs: Service[], lane: "local" | "external") {
+      const xCol = LANE_X[lane]
+      let y = LANE_TOP
+      for (const cat of CATEGORY_ORDER) {
+        const items = svcs.filter((s) => s.category === cat)
+        if (items.length === 0) continue
+        built.push({
+          id: `subheader-${lane}-${cat}`,
+          type: "laneSubheader",
+          position: { x: xCol, y },
+          data: {
+            label: categoryLabel(cat),
+            count: items.length,
+            accent: subheaderAccent(cat),
+          },
+          draggable: false,
+          selectable: false,
+        })
+        y += SUBHEADER_HEIGHT + SUBHEADER_GAP
+        for (const svc of items) {
+          built.push({
+            id: `service-${svc.id}`,
+            type: "service",
+            position: { x: xCol, y },
+            data: { service: svc, onOpen: () => onOpenService(svc) },
+            draggable: false,
+          })
+          y += NODE_HEIGHT + NODE_GAP
+        }
+        y += GROUP_GAP
+      }
+    }
+
+    placeServiceLane(local, "local")
+    placeServiceLane(external, "external")
 
     gateways.forEach((gw, i) => {
       built.push({
@@ -336,16 +415,6 @@ function SiteCanvasInner({
         type: "gateway",
         position: { x: LANE_X.gateways, y: LANE_TOP + i * (NODE_HEIGHT + NODE_GAP) },
         data: { gateway: gw, onOpen: () => onOpenGateway(gw) },
-        draggable: false,
-      })
-    })
-
-    external.forEach((svc, i) => {
-      built.push({
-        id: `service-${svc.id}`,
-        type: "service",
-        position: { x: LANE_X.external, y: LANE_TOP + i * (NODE_HEIGHT + NODE_GAP) },
-        data: { service: svc, onOpen: () => onOpenService(svc) },
         draggable: false,
       })
     })
@@ -363,6 +432,9 @@ function SiteCanvasInner({
         const stroke = statusEdgeStroke(status)
         for (const gw of gateways) {
           if (!enabled.has(gw.pace)) continue
+          // "Alternate" = any backup PACE path (anything besides primary).
+          // Toggle off to declutter and show only the primary route.
+          if (!showAlternate && gw.pace !== "primary") continue
           const dash = dashForGateway(gw.status)
           // Healthy path = service up + gateway active. Those edges get
           // bolder + full opacity; everything else fades to recede visually.
@@ -387,7 +459,7 @@ function SiteCanvasInner({
     pushEdges(external, "right", 1.8)
 
     return { nodes: built, edges: builtEdges }
-  }, [services, gateways, onOpenService, onOpenGateway])
+  }, [services, gateways, onOpenService, onOpenGateway, showAlternate])
 
   return (
     <ReactFlow
@@ -402,6 +474,31 @@ function SiteCanvasInner({
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
       <Controls showInteractive={false} />
+      <Panel position="top-right">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 bg-background/90 backdrop-blur"
+              >
+                <Settings2 className="size-3.5" />
+                Options
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>Graph options</DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={showAlternate}
+              onCheckedChange={setShowAlternate}
+            >
+              Show alternate paths
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </Panel>
     </ReactFlow>
   )
 }
