@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import Site, User, Validation
+from models import Event, Site, User
 from pubsub import notify
 from schemas import (
     SiteEmconIn,
@@ -76,7 +76,7 @@ def set_site_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
-    """Change a site's posture status and append a validation row."""
+    """Change a site's posture status and append an event row."""
     site = db.get(Site, site_id)
     if site is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
@@ -91,7 +91,7 @@ def set_site_status(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    db.add(Validation(**kwargs))
+    db.add(Event(**kwargs))
     site.status = body.status
     db.flush()
     notify(background_tasks)
@@ -121,7 +121,7 @@ def set_site_fpcon(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    db.add(Validation(**kwargs))
+    db.add(Event(**kwargs))
     site.fpcon = body.level
     db.flush()
     notify(background_tasks)
@@ -151,7 +151,7 @@ def set_site_emcon(
     )
     if body.validated_at is not None:
         kwargs["validated_at"] = body.validated_at
-    db.add(Validation(**kwargs))
+    db.add(Event(**kwargs))
     site.emcon = body.level
     db.flush()
     notify(background_tasks)

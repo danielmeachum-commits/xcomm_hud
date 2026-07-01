@@ -3,7 +3,7 @@ import { notFound } from "next/navigation"
 import { requireSession } from "@/lib/auth"
 import { apiGet, ApiError } from "@/lib/api"
 import { ServiceDetailClient } from "@/components/services/service-detail-client"
-import type { Service, Site, Validation } from "@/lib/types"
+import type { Event, Service, Site } from "@/lib/types"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -25,9 +25,9 @@ export default async function ServiceDetailPage({ params }: PageProps) {
 
   const [sites, validations] = await Promise.all([
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
-    apiGet<Validation[]>(
-      `/validations?subject_kind=service&subject_id=${sid}&limit=100`,
-    ).catch(() => [] as Validation[]),
+    apiGet<Event[]>(
+      `/events?subject_kind=service&subject_id=${sid}&limit=100`,
+    ).catch(() => [] as Event[]),
   ])
 
   return (

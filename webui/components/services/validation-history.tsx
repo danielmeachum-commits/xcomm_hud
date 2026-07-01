@@ -2,10 +2,10 @@ import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { LocalTime, TimeAgo } from "@/components/time-display"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { formatZulu } from "@/lib/time"
-import type { Validation } from "@/lib/types"
+import type { Event } from "@/lib/types"
 
 interface Props {
-  validations: Validation[]
+  validations: Event[]
 }
 
 export function ValidationHistory({ validations }: Props) {
@@ -41,13 +41,17 @@ export function ValidationHistory({ validations }: Props) {
                 {formatZulu(v.validated_at)}
               </td>
               <td className="px-3 py-2">
-                <div className="inline-flex items-center gap-2">
-                  <StatusIndicator
-                    state={statusToIndicatorState(v.status)}
-                    size="sm"
-                  />
-                  <span>{statusLabel(v.status)}</span>
-                </div>
+                {v.status ? (
+                  <div className="inline-flex items-center gap-2">
+                    <StatusIndicator
+                      state={statusToIndicatorState(v.status)}
+                      size="sm"
+                    />
+                    <span>{statusLabel(v.status)}</span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
                 {v.prev_status && v.prev_status !== v.status && (
                   <div className="text-[10px] text-muted-foreground">
                     was {statusLabel(v.prev_status)}
