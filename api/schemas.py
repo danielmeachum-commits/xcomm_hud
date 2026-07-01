@@ -85,11 +85,131 @@ class UserPatch(BaseModel):
     disabled: Optional[bool] = None
 
 
+class WorkspaceIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class WorkspacePatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
+class WorkspaceOut(_ORM):
+    id: int
+    slug: str
+    name: str
+    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    is_default: bool = False
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class WorkspaceDuplicateIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class WorkspaceSelectIn(BaseModel):
+    workspace_id: int
+
+
+# --- Workspace export / import ---
+#
+# Portable, ID-free representation of a workspace. Sites are referenced by
+# name inside the envelope so services / gateways / positions can hang off
+# them without hard-coded ids. `format_version` guards against future breaking
+# changes; bump on any incompatible schema shift.
+
+
+class ExportedSite(BaseModel):
+    name: str
+    location_label: Optional[str] = None
+    fpcon: Fpcon = "normal"
+    emcon: Emcon = "a"
+    show_fpcon: bool = True
+    show_emcon: bool = True
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class ExportedService(BaseModel):
+    site_name: str
+    service_template_name: Optional[str] = None
+    name: str
+    kind: ServiceKind = "other"
+    category: ServiceCategory = "other"
+    reach: ServiceReach = "local"
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+    notes: Optional[str] = None
+    enabled_pace: list[GatewayPace] = Field(default_factory=lambda: list(_DEFAULT_PACE))
+
+
+class ExportedGateway(BaseModel):
+    site_name: str
+    name: str
+    kind: GatewayKind = "other"
+    provider: Optional[str] = None
+    pace: GatewayPace = "primary"
+    display_order: int = 0
+    notes: Optional[str] = None
+
+
+class ExportedPosition(BaseModel):
+    site_name: str
+    x: float = 0.0
+    y: float = 0.0
+
+
+class ExportedAnnotation(BaseModel):
+    text: str = ""
+    x: float = 0.0
+    y: float = 0.0
+
+
+class ExportedWorkspaceMeta(BaseModel):
+    name: str
+    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class WorkspaceExport(BaseModel):
+    format_version: Literal[1] = 1
+    exported_at: datetime.datetime
+    workspace: ExportedWorkspaceMeta
+    sites: list[ExportedSite] = Field(default_factory=list)
+    services: list[ExportedService] = Field(default_factory=list)
+    gateways: list[ExportedGateway] = Field(default_factory=list)
+    positions: list[ExportedPosition] = Field(default_factory=list)
+    annotations: list[ExportedAnnotation] = Field(default_factory=list)
+
+
+class WorkspaceImportIn(BaseModel):
+    """Envelope from `GET /workspaces/{id}/export`, optionally with a name override.
+
+    When `name_override` is provided it takes precedence over `payload.workspace.name`
+    — used from the UI when the source name would collide with an existing
+    workspace on this instance.
+    """
+
+    payload: WorkspaceExport
+    name_override: Optional[str] = None
+
+
 class MeOut(BaseModel):
     user_id: int
     username: str
     display_name: Optional[str] = None
     role: UserRole
+    current_workspace: WorkspaceOut
+    workspaces: list[WorkspaceOut] = Field(default_factory=list)
 
 
 # --- Site ---
@@ -122,6 +242,7 @@ class SitePatch(BaseModel):
 
 class SiteOut(_ORM):
     id: int
+    workspace_id: int
     name: str
     location_label: Optional[str] = None
     status: SiteStatusValue = "operational"

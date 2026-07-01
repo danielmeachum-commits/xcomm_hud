@@ -20,6 +20,7 @@ import {
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type { Gateway, GatewayKind, GatewayPace, Site } from "@/lib/types"
+import { useWorkspace } from "@/lib/workspace"
 
 interface Props {
   gateways: Gateway[]
@@ -37,6 +38,7 @@ const PACE_RANK: Record<GatewayPace, number> = {
 }
 
 export function GatewaysAdmin({ gateways, sites }: Props) {
+  const { w } = useWorkspace()
   const [search, setSearch] = useState("")
   const [siteFilter, setSiteFilter] = useState<string>("all")
   const [kindFilter, setKindFilter] = useState<"all" | GatewayKind>("all")
@@ -212,7 +214,7 @@ export function GatewaysAdmin({ gateways, sites }: Props) {
                   </td>
                   <td className="px-3 py-2">
                     <Link
-                      href={`/sites/${g.site_id}`}
+                      href={w(`/sites/${g.site_id}`)}
                       className="text-muted-foreground hover:underline"
                     >
                       {siteName.get(g.site_id) ?? `site ${g.site_id}`}

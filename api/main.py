@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user, hash_password
 from db import SessionLocal, get_db
-from models import User
+from deps import get_current_workspace
+from models import User, Workspace
 from routers import (
     auth,
     canvas,
@@ -25,8 +26,9 @@ from routers import (
     sites,
     status as status_router,
     users,
+    workspaces,
 )
-from schemas import MeOut
+from schemas import MeOut, WorkspaceOut
 
 log = logging.getLogger("xcomm_hud.startup")
 logging.basicConfig(level=logging.INFO)
@@ -81,6 +83,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(workspaces.router)
+app.include_router(workspaces.me_router)
 app.include_router(sites.router)
 app.include_router(services.router)
 app.include_router(service_templates.router)
@@ -91,7 +95,6 @@ app.include_router(events.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
 app.include_router(enclave_sources.router)
-app.include_router(events.router)
 
 
 @app.get("/health")
@@ -100,10 +103,17 @@ def health() -> dict[str, bool]:
 
 
 @app.get("/me", response_model=MeOut)
-def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def me(
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: Session = Depends(get_db),
+):
+    workspaces_list = db.query(Workspace).order_by(Workspace.name).all()
     return MeOut(
         user_id=current_user.id,
         username=current_user.username,
         display_name=current_user.display_name,
         role=current_user.role,
+        current_workspace=WorkspaceOut.model_validate(current_workspace),
+        workspaces=[WorkspaceOut.model_validate(w) for w in workspaces_list],
     )

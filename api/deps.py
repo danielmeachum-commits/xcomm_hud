@@ -1,14 +1,15 @@
-"""FastAPI dependency factories for authz."""
+"""FastAPI dependency factories for authz and workspace scoping."""
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
 
 from auth import get_current_user
-from db import get_db  # noqa: F401  (re-exported)
-from models import User
+from db import get_db
+from models import User, Workspace
 
 ROLE_ORDER = ["viewer", "operator", "admin"]
 
@@ -32,3 +33,44 @@ def requires(min_role: str) -> Callable:
         return current_user
 
     return dependency
+
+
+def get_current_workspace(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    x_workspace_slug: Optional[str] = Header(default=None),
+) -> Workspace:
+    """Resolve the workspace whose data the caller is currently viewing.
+
+    Precedence:
+      1. `X-Workspace-Slug` header (set by the frontend from `/w/<slug>/...`
+         URLs — the URL is the source of truth when present).
+      2. `user.current_workspace_id` (last-used, for landing on `/`).
+      3. The `is_default` workspace as a final fallback. The 0012 migration
+         guarantees exactly one default row exists.
+    """
+    if x_workspace_slug:
+        ws = (
+            db.query(Workspace)
+            .filter(Workspace.slug == x_workspace_slug)
+            .first()
+        )
+        if ws is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workspace '{x_workspace_slug}' not found",
+            )
+        return ws
+
+    if current_user.current_workspace_id is not None:
+        ws = db.get(Workspace, current_user.current_workspace_id)
+        if ws is not None:
+            return ws
+
+    ws = db.query(Workspace).filter(Workspace.is_default.is_(True)).first()
+    if ws is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No default workspace configured",
+        )
+    return ws

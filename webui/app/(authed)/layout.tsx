@@ -5,6 +5,7 @@ import { BreadcrumbsProvider } from "@/components/breadcrumbs"
 import { LiveUpdatesProvider } from "@/components/live-updates-provider"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { WorkspaceProvider } from "@/lib/workspace"
 import type { Site } from "@/lib/types"
 
 export default async function AuthedLayout({
@@ -26,15 +27,20 @@ export default async function AuthedLayout({
       <BreadcrumbsProvider>
         {/* LiveUpdatesProvider lives here (not root) so SSE only runs while authed */}
         <LiveUpdatesProvider>
-          <SidebarProvider>
-            <AppSidebar user={user} sites={sites} />
-            <SidebarInset>
-              <SiteHeader />
-              <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-                {children}
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
+          <WorkspaceProvider
+            initialCurrent={user.current_workspace}
+            initialAll={user.workspaces}
+          >
+            <SidebarProvider>
+              <AppSidebar user={user} sites={sites} />
+              <SidebarInset>
+                <SiteHeader />
+                <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+                  {children}
+                </div>
+              </SidebarInset>
+            </SidebarProvider>
+          </WorkspaceProvider>
         </LiveUpdatesProvider>
       </BreadcrumbsProvider>
     </div>

@@ -51,6 +51,7 @@ import type {
   Service,
   ServiceCategory,
 } from "@/lib/types"
+import { useWorkspace } from "@/lib/workspace"
 
 const LANE_WIDTH = 240
 const LANE_X = { local: 40, gateways: 360, external: 680 }
@@ -158,6 +159,7 @@ function ServiceCanvasNode({ data }: NodeProps) {
   const { service, onOpen } = data as ServiceNodeData
   const Icon = serviceIcon(service.icon, service.kind)
   const isExternal = service.reach === "external"
+  const { w } = useWorkspace()
   return (
     <div
       className={cn(
@@ -175,7 +177,7 @@ function ServiceCanvasNode({ data }: NodeProps) {
       )}
       <div className="flex items-center justify-between gap-2">
         <a
-          href={`/services/${service.id}`}
+          href={w(`/services/${service.id}`)}
           onClick={(e) => e.stopPropagation()}
           onPointerDownCapture={(e) => e.stopPropagation()}
           className="nodrag flex min-w-0 flex-1 items-center gap-2 hover:underline"

@@ -10,6 +10,7 @@ import { MapCanvas } from "@/components/map/map-canvas"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import { statusBadgeClass, statusLabel, statusToIndicatorState } from "@/lib/status"
 import type { MapBundle, Site } from "@/lib/types"
+import { useWorkspace } from "@/lib/workspace"
 
 type View = "list" | "graph"
 
@@ -42,6 +43,7 @@ export function SitesTabs({ sites, bundle }: Props) {
 }
 
 function SitesList({ sites }: { sites: Site[] }) {
+  const { w } = useWorkspace()
   if (sites.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border p-12 text-sm text-muted-foreground">
@@ -55,7 +57,7 @@ function SitesList({ sites }: { sites: Site[] }) {
       {sites.map((s) => (
         <Link
           key={s.id}
-          href={`/sites/${s.id}`}
+          href={w(`/sites/${s.id}`)}
           className={`flex flex-col gap-2 rounded-lg border p-4 transition-colors hover:bg-accent ${statusBadgeClass(s.status)}`}
         >
           <div className="flex items-center justify-between gap-2">

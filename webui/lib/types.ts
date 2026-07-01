@@ -83,11 +83,24 @@ export const GENERAL_SUBJECT_KINDS: readonly SubjectKind[] = [
   "exercise",
 ]
 
+export interface Workspace {
+  id: number
+  slug: string
+  name: string
+  description: string | null
+  tags: string[]
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface Me {
   user_id: number
   username: string
   display_name: string | null
   role: Role
+  current_workspace: Workspace
+  workspaces: Workspace[]
 }
 
 export interface User {
@@ -100,6 +113,7 @@ export interface User {
 
 export interface Site {
   id: number
+  workspace_id: number
   name: string
   location_label: string | null
   status: SiteStatus

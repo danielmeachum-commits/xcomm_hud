@@ -12,23 +12,38 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
-from deps import requires
+from deps import get_current_workspace, requires
 from effective import effective_service_status
-from models import Gateway, Service, ServiceTemplate, Site
+from models import Gateway, Service, ServiceTemplate, Site, Workspace
 from schemas import ServiceRollup, SiteRollup, StatusRollupOut
 
 router = APIRouter(prefix="/status", tags=["status"])
 
 
 @router.get("/rollup", response_model=StatusRollupOut)
-def rollup(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
-    sites = db.query(Site).order_by(Site.name).all()
-    services = (
-        db.query(Service)
-        .order_by(Service.category, Service.display_order, Service.name)
+def rollup(
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    sites = (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace.id)
+        .order_by(Site.name)
         .all()
     )
-    gateways = db.query(Gateway).all()
+    site_ids = [s.id for s in sites]
+    services = (
+        db.query(Service)
+        .filter(Service.site_id.in_(site_ids))
+        .order_by(Service.category, Service.display_order, Service.name)
+        .all()
+    ) if site_ids else []
+    gateways = (
+        db.query(Gateway).filter(Gateway.site_id.in_(site_ids)).all()
+        if site_ids
+        else []
+    )
 
     services_by_site: dict[int, list[Service]] = {}
     for s in services:

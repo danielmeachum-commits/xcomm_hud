@@ -1,11 +1,18 @@
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 
 const API = process.env.API_URL!
 
-async function getAuthHeader(): Promise<HeadersInit> {
+async function getForwardHeaders(): Promise<HeadersInit> {
   const cookieStore = await cookies()
   const session = cookieStore.get("xcomm_hud_session")
-  return session ? { Cookie: `xcomm_hud_session=${session.value}` } : {}
+  const out: Record<string, string> = {}
+  if (session) out["Cookie"] = `xcomm_hud_session=${session.value}`
+  // The middleware injects `x-workspace-slug` for URLs matching /w/<slug>/...
+  // Forward it so backend endpoints scope to the workspace shown in the URL.
+  const reqHeaders = await headers()
+  const slug = reqHeaders.get("x-workspace-slug")
+  if (slug) out["X-Workspace-Slug"] = slug
+  return out
 }
 
 export class ApiError extends Error {
@@ -33,7 +40,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const authHeader = await getAuthHeader()
+  const authHeader = await getForwardHeaders()
   const res = await fetch(`${API}${path}`, {
     method: "GET",
     headers: {
@@ -46,7 +53,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const authHeader = await getAuthHeader()
+  const authHeader = await getForwardHeaders()
   const res = await fetch(`${API}${path}`, {
     method: "POST",
     headers: {
@@ -60,7 +67,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const authHeader = await getAuthHeader()
+  const authHeader = await getForwardHeaders()
   const res = await fetch(`${API}${path}`, {
     method: "PATCH",
     headers: {
@@ -74,7 +81,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const authHeader = await getAuthHeader()
+  const authHeader = await getForwardHeaders()
   const res = await fetch(`${API}${path}`, {
     method: "DELETE",
     headers: {

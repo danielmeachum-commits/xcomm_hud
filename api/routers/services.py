@@ -6,9 +6,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy.orm import Session
 
 from db import get_db
-from deps import requires
+from deps import get_current_workspace, requires
 from effective import effective_service_status
-from models import Event, Gateway, Service, ServiceTemplate, Site, User
+from models import Event, Gateway, Service, ServiceTemplate, Site, User, Workspace
 from pubsub import notify
 from schemas import ServiceIn, ServiceOut, ServicePatch, ServiceValidateIn
 
@@ -32,13 +32,26 @@ def _service_out(db: Session, service: Service) -> ServiceOut:
     return out
 
 
+def _service_in_workspace(db: Session, service_id: int, workspace: Workspace) -> Service:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    site = db.get(Site, service.site_id)
+    if site is None or site.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    return service
+
+
 @router.get("", response_model=list[ServiceOut])
 def list_services(
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
     services = (
         db.query(Service)
+        .join(Site, Site.id == Service.site_id)
+        .filter(Site.workspace_id == workspace.id)
         .order_by(Service.site_id, Service.display_order, Service.name)
         .all()
     )
@@ -50,9 +63,11 @@ def create_service(
     body: ServiceIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    if db.get(Site, body.site_id) is None:
+    site = db.get(Site, body.site_id)
+    if site is None or site.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     if body.service_template_id is not None and db.get(
         ServiceTemplate, body.service_template_id
@@ -79,11 +94,10 @@ def create_service(
 def get_service(
     service_id: int,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    service = db.get(Service, service_id)
-    if service is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    service = _service_in_workspace(db, service_id, workspace)
     return _service_out(db, service)
 
 
@@ -93,15 +107,16 @@ def patch_service(
     body: ServicePatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    service = db.get(Service, service_id)
-    if service is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    service = _service_in_workspace(db, service_id, workspace)
 
     data = body.model_dump(exclude_unset=True)
-    if "site_id" in data and db.get(Site, data["site_id"]) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    if "site_id" in data:
+        target_site = db.get(Site, data["site_id"])
+        if target_site is None or target_site.workspace_id != workspace.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     if "service_template_id" in data and data["service_template_id"] is not None:
         if db.get(ServiceTemplate, data["service_template_id"]) is None:
             raise HTTPException(
@@ -123,11 +138,10 @@ def validate_service(
     body: ServiceValidateIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    service = db.get(Service, service_id)
-    if service is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    service = _service_in_workspace(db, service_id, workspace)
 
     prev = service.status
     kwargs = dict(
@@ -159,6 +173,7 @@ def move_service(
     background_tasks: BackgroundTasks,
     direction: str = Query(..., pattern="^(up|down)$"),
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
     """Swap display_order with the adjacent service at the same site.
@@ -167,9 +182,7 @@ def move_service(
     move only reshuffles within Local or within External, matching the canvas
     layout the operator sees.
     """
-    service = db.get(Service, service_id)
-    if service is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    service = _service_in_workspace(db, service_id, workspace)
 
     siblings = (
         db.query(Service)
@@ -201,10 +214,9 @@ def delete_service(
     service_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    service = db.get(Service, service_id)
-    if service is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
+    service = _service_in_workspace(db, service_id, workspace)
     db.delete(service)
     notify(background_tasks)

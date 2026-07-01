@@ -7,7 +7,7 @@ from sqlalchemy import case as sql_case
 from sqlalchemy.orm import Session
 
 from db import get_db
-from deps import requires
+from deps import get_current_workspace, requires
 from effective import effective_service_status
 from models import (
     CanvasAnnotation,
@@ -17,6 +17,7 @@ from models import (
     Site,
     SiteCanvasPosition,
     User,
+    Workspace,
 )
 from pubsub import notify
 from schemas import (
@@ -35,13 +36,24 @@ router = APIRouter(prefix="/canvas", tags=["canvas"])
 
 
 @router.get("/map", response_model=MapBundle)
-def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
-    sites = db.query(Site).order_by(Site.name).all()
-    services = (
-        db.query(Service)
-        .order_by(Service.site_id, Service.display_order, Service.name)
+def map_bundle(
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    sites = (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace.id)
+        .order_by(Site.name)
         .all()
     )
+    site_ids = [s.id for s in sites]
+    services = (
+        db.query(Service)
+        .filter(Service.site_id.in_(site_ids))
+        .order_by(Service.site_id, Service.display_order, Service.name)
+        .all()
+    ) if site_ids else []
     pace_order = sql_case(
         (Gateway.pace == "primary", 0),
         (Gateway.pace == "alternate", 1),
@@ -51,11 +63,21 @@ def map_bundle(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
     )
     gateways = (
         db.query(Gateway)
+        .filter(Gateway.site_id.in_(site_ids))
         .order_by(Gateway.site_id, pace_order, Gateway.display_order, Gateway.name)
         .all()
+    ) if site_ids else []
+    positions = (
+        db.query(SiteCanvasPosition)
+        .filter(SiteCanvasPosition.site_id.in_(site_ids))
+        .all()
+    ) if site_ids else []
+    annotations = (
+        db.query(CanvasAnnotation)
+        .filter(CanvasAnnotation.workspace_id == workspace.id)
+        .order_by(CanvasAnnotation.id)
+        .all()
     )
-    positions = db.query(SiteCanvasPosition).all()
-    annotations = db.query(CanvasAnnotation).order_by(CanvasAnnotation.id).all()
 
     services_by_site: dict[int, list[Service]] = {}
     for s in services:
@@ -121,9 +143,11 @@ def upsert_position(
     body: CanvasPositionIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    if db.get(Site, site_id) is None:
+    site = db.get(Site, site_id)
+    if site is None or site.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     pos = db.get(SiteCanvasPosition, site_id)
     if pos is None:
@@ -138,8 +162,17 @@ def upsert_position(
 
 
 @router.get("/annotations", response_model=list[CanvasAnnotationOut])
-def list_annotations(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
-    return db.query(CanvasAnnotation).order_by(CanvasAnnotation.id).all()
+def list_annotations(
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    return (
+        db.query(CanvasAnnotation)
+        .filter(CanvasAnnotation.workspace_id == workspace.id)
+        .order_by(CanvasAnnotation.id)
+        .all()
+    )
 
 
 @router.post(
@@ -151,9 +184,10 @@ def create_annotation(
     body: CanvasAnnotationIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    ann = CanvasAnnotation(**body.model_dump())
+    ann = CanvasAnnotation(workspace_id=workspace.id, **body.model_dump())
     db.add(ann)
     db.flush()
     notify(background_tasks)
@@ -166,10 +200,11 @@ def patch_annotation(
     body: CanvasAnnotationPatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
     ann = db.get(CanvasAnnotation, ann_id)
-    if ann is None:
+    if ann is None or ann.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Annotation not found")
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(ann, k, v)
@@ -183,10 +218,11 @@ def delete_annotation(
     ann_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
     ann = db.get(CanvasAnnotation, ann_id)
-    if ann is None:
+    if ann is None or ann.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Annotation not found")
     db.delete(ann)
     notify(background_tasks)

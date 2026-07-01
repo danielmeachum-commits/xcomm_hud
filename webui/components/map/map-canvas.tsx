@@ -37,6 +37,7 @@ import type {
   Service,
   Site,
 } from "@/lib/types"
+import { useWorkspace } from "@/lib/workspace"
 
 interface SiteNodeData extends Record<string, unknown> {
   site: Site
@@ -54,6 +55,7 @@ const SITE_NODE_WIDTH = 300
 
 function SiteMapNode({ data }: NodeProps) {
   const { site, services, gateways } = data as SiteNodeData
+  const { w } = useWorkspace()
   const fpconRing = site.show_fpcon
     ? fpconClasses(site.fpcon).ring
     : "ring-border"
@@ -89,7 +91,7 @@ function SiteMapNode({ data }: NodeProps) {
           </div>
         </div>
         <a
-          href={`/sites/${site.id}`}
+          href={w(`/sites/${site.id}`)}
           className="nodrag rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Open site"
           onClick={(e) => e.stopPropagation()}
@@ -226,6 +228,7 @@ const SAVE_DELAY_MS = 400
 
 function MapCanvasInner({ bundle }: Props) {
   const router = useRouter()
+  const { w } = useWorkspace()
 
   const positionMap = useMemo(() => {
     const m = new Map<number, { x: number; y: number }>()
@@ -371,7 +374,7 @@ function MapCanvasInner({ bundle }: Props) {
           Add label
         </Button>
         <a
-          href="/sites"
+          href={w("/sites")}
           className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs hover:bg-accent"
         >
           <Plus className="size-3" />

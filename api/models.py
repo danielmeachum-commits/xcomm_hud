@@ -7,6 +7,7 @@ from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -62,6 +63,34 @@ FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
 EMCON_LEVELS = ("a", "b", "c", "d")
 
 
+class Workspace(Base):
+    """A container for one full operating picture (sites/services/gateways/canvas).
+
+    Users switch between workspaces to plan upcoming exercises, look back at
+    past missions, or maintain a garrison baseline separate from mission
+    layouts. Tags are freeform strings (e.g. "garrison", "exercise", "archived")
+    and are used by the UI switcher for grouping — no server-side state machine.
+    """
+
+    __tablename__ = "workspace"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    # URL-safe identifier generated once at creation from the name. Slug is
+    # frozen after creation — this keeps shared links stable when workspaces
+    # are renamed.
+    slug: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
 class User(Base):
     __tablename__ = "user"
 
@@ -73,6 +102,11 @@ class User(Base):
     disabled_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    current_workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
@@ -80,9 +114,18 @@ class User(Base):
 
 class Site(Base):
     __tablename__ = "site"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_site_workspace_name"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
     location_label: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="operational"
@@ -240,6 +283,12 @@ class CanvasAnnotation(Base):
     __tablename__ = "canvas_annotation"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

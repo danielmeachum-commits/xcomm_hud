@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
 
 const API = process.env.API_URL!
+const WORKSPACE_URL_RE = /\/w\/([^/?#]+)/
 
 async function cookieHeader(): Promise<HeadersInit> {
   const store = await cookies()
@@ -9,15 +10,34 @@ async function cookieHeader(): Promise<HeadersInit> {
   return session ? { Cookie: `xcomm_hud_session=${session.value}` } : {}
 }
 
+function workspaceSlugFromReferer(referer: string | null): string | null {
+  if (!referer) return null
+  try {
+    const url = new URL(referer)
+    const match = url.pathname.match(WORKSPACE_URL_RE)
+    return match ? decodeURIComponent(match[1]) : null
+  } catch {
+    return null
+  }
+}
+
 async function proxy(req: NextRequest, path: string): Promise<NextResponse> {
   const search = req.nextUrl.search
   const url = `${API}/${path}${search}`
 
   const authHeader = await cookieHeader()
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...authHeader,
+    ...(authHeader as Record<string, string>),
   }
+  // Prefer an explicit header from the caller; otherwise infer the workspace
+  // from the browser's Referer, which is `/w/<slug>/...` for any page under a
+  // workspace. This means client-side fetches automatically scope correctly
+  // without every call site having to attach the slug.
+  const explicitSlug = req.headers.get("x-workspace-slug")
+  const inferredSlug = workspaceSlugFromReferer(req.headers.get("referer"))
+  const slug = explicitSlug ?? inferredSlug
+  if (slug) headers["X-Workspace-Slug"] = slug
 
   let body: string | undefined
   if (req.method !== "GET" && req.method !== "DELETE") {

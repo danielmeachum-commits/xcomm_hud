@@ -6,8 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from db import get_db
-from deps import requires
-from models import Event, Site, User
+from deps import get_current_workspace, requires
+from models import Event, Site, User, Workspace
 from pubsub import notify
 from schemas import (
     SiteEmconIn,
@@ -22,8 +22,17 @@ router = APIRouter(prefix="/sites", tags=["sites"])
 
 
 @router.get("", response_model=list[SiteOut])
-def list_sites(db: Session = Depends(get_db), _=Depends(requires("viewer"))):
-    return db.query(Site).order_by(Site.name).all()
+def list_sites(
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    return (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace.id)
+        .order_by(Site.name)
+        .all()
+    )
 
 
 @router.post("", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
@@ -31,11 +40,16 @@ def create_site(
     body: SiteIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    if db.query(Site).filter(Site.name == body.name).first():
+    if (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace.id, Site.name == body.name)
+        .first()
+    ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Site name already exists")
-    site = Site(**body.model_dump())
+    site = Site(workspace_id=workspace.id, **body.model_dump())
     db.add(site)
     db.flush()
     notify(background_tasks)
@@ -43,9 +57,21 @@ def create_site(
 
 
 @router.get("/{site_id}", response_model=SiteOut)
-def get_site(site_id: int, db: Session = Depends(get_db), _=Depends(requires("viewer"))):
+def get_site(
+    site_id: int,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
     site = db.get(Site, site_id)
-    if site is None:
+    if site is None or site.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    return site
+
+
+def _load_site_in_workspace(db: Session, site_id: int, workspace: Workspace) -> Site:
+    site = db.get(Site, site_id)
+    if site is None or site.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     return site
 
@@ -56,11 +82,10 @@ def patch_site(
     body: SitePatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    site = db.get(Site, site_id)
-    if site is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    site = _load_site_in_workspace(db, site_id, workspace)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(site, k, v)
     db.flush()
@@ -74,12 +99,11 @@ def set_site_status(
     body: SiteStatusIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
     """Change a site's posture status and append an event row."""
-    site = db.get(Site, site_id)
-    if site is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    site = _load_site_in_workspace(db, site_id, workspace)
     kwargs = dict(
         subject_kind="site_status",
         subject_id=site.id,
@@ -104,12 +128,11 @@ def set_site_fpcon(
     body: SiteFpconIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
     """Change a site's FPCON level and append a validation row to the event log."""
-    site = db.get(Site, site_id)
-    if site is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    site = _load_site_in_workspace(db, site_id, workspace)
     kwargs = dict(
         subject_kind="site_fpcon",
         subject_id=site.id,
@@ -134,12 +157,11 @@ def set_site_emcon(
     body: SiteEmconIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
     """Change a site's EMCON level and append a validation row to the event log."""
-    site = db.get(Site, site_id)
-    if site is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    site = _load_site_in_workspace(db, site_id, workspace)
     kwargs = dict(
         subject_kind="site_emcon",
         subject_id=site.id,
@@ -163,10 +185,9 @@ def delete_site(
     site_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("admin")),
 ):
-    site = db.get(Site, site_id)
-    if site is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    site = _load_site_in_workspace(db, site_id, workspace)
     db.delete(site)
     notify(background_tasks)

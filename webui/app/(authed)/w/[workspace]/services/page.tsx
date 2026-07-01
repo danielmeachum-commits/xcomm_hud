@@ -14,8 +14,15 @@ import {
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
 import type { Service, ServiceTemplate, Site } from "@/lib/types"
+import { workspacePath } from "@/lib/workspace"
 
-export default async function ServicesPage() {
+export default async function ServicesPage({
+  params,
+}: {
+  params: Promise<{ workspace: string }>
+}) {
+  const { workspace: slug } = await params
+  const w = (path: string) => workspacePath(slug, path)
   await requireSession()
 
   const [services, sites, templates] = await Promise.all([
@@ -74,7 +81,7 @@ export default async function ServicesPage() {
             return (
               <section key={siteId}>
                 <h2 className="mb-3 text-sm font-semibold tracking-tight">
-                  <Link href={`/sites/${siteId}`} className="hover:underline">
+                  <Link href={w(`/sites/${siteId}`)} className="hover:underline">
                     {site?.name ?? `site ${siteId}`}
                   </Link>
                 </h2>
@@ -96,7 +103,7 @@ export default async function ServicesPage() {
                                 className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${categoryAccentClass(s.category)}`}
                               >
                                 <Link
-                                  href={`/services/${s.id}`}
+                                  href={w(`/services/${s.id}`)}
                                   className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
                                 >
                                   <Icon className="size-5 shrink-0 text-muted-foreground" />

@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import case as sql_case
 
 from db import get_db
-from deps import requires
-from models import Event, Gateway, Site, User
+from deps import get_current_workspace, requires
+from models import Event, Gateway, Site, User, Workspace
 from pubsub import notify
 from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
 
@@ -35,14 +35,33 @@ def _gateway_out(db: Session, gw: Gateway) -> GatewayOut:
     return out
 
 
+def _site_in_workspace(db: Session, site_id: int, workspace: Workspace) -> Site:
+    site = db.get(Site, site_id)
+    if site is None or site.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    return site
+
+
+def _gateway_in_workspace(
+    db: Session, gateway_id: int, workspace: Workspace
+) -> Gateway:
+    gw = db.get(Gateway, gateway_id)
+    if gw is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    site = db.get(Site, gw.site_id)
+    if site is None or site.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    return gw
+
+
 @router.get("/sites/{site_id}/gateways", response_model=list[GatewayOut])
 def list_site_gateways(
     site_id: int,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    if db.get(Site, site_id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    _site_in_workspace(db, site_id, workspace)
     rows = (
         db.query(Gateway)
         .filter(Gateway.site_id == site_id)
@@ -62,10 +81,10 @@ def create_gateway(
     body: GatewayIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    if db.get(Site, site_id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+    _site_in_workspace(db, site_id, workspace)
     max_order = (
         db.query(Gateway)
         .filter(Gateway.site_id == site_id)
@@ -83,10 +102,13 @@ def create_gateway(
 @router.get("/gateways", response_model=list[GatewayOut])
 def list_all_gateways(
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
     rows = (
         db.query(Gateway)
+        .join(Site, Site.id == Gateway.site_id)
+        .filter(Site.workspace_id == workspace.id)
         .order_by(Gateway.site_id, _pace_order(), Gateway.display_order, Gateway.name)
         .all()
     )
@@ -99,11 +121,10 @@ def patch_gateway(
     body: GatewayPatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    gw = db.get(Gateway, gateway_id)
-    if gw is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    gw = _gateway_in_workspace(db, gateway_id, workspace)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(gw, k, v)
     db.flush()
@@ -118,11 +139,10 @@ def validate_gateway(
     body: GatewayValidateIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    gw = db.get(Gateway, gateway_id)
-    if gw is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    gw = _gateway_in_workspace(db, gateway_id, workspace)
     prev = gw.status
     kwargs = dict(
         subject_kind="gateway",
@@ -153,11 +173,10 @@ def move_gateway(
     background_tasks: BackgroundTasks,
     direction: str = Query(..., pattern="^(up|down)$"),
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    gw = db.get(Gateway, gateway_id)
-    if gw is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    gw = _gateway_in_workspace(db, gateway_id, workspace)
 
     siblings = (
         db.query(Gateway)
@@ -186,10 +205,9 @@ def delete_gateway(
     gateway_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    gw = db.get(Gateway, gateway_id)
-    if gw is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    gw = _gateway_in_workspace(db, gateway_id, workspace)
     db.delete(gw)
     notify(background_tasks)

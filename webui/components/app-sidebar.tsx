@@ -4,7 +4,6 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import {
-  Activity,
   Bell,
   ChevronRight,
   ChevronUp,
@@ -42,19 +41,25 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
+import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import { statusToIndicatorState } from "@/lib/status"
 import type { Me, Site } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useWorkspace } from "@/lib/workspace"
 
 const SECONDARY_NAV_ITEMS = [
-  { href: "/services", label: "Services", icon: Radio },
-  { href: "/events", label: "Events", icon: Bell },
+  { path: "/services", label: "Services", icon: Radio },
+  { path: "/events", label: "Events", icon: Bell },
 ]
 
-const ADMIN_ITEMS = [
+// Workspace-scoped admin items (gateways lives under the current workspace);
+// truly global admin items follow with absolute paths.
+const WORKSPACE_ADMIN_ITEMS = [
+  { path: "/admin/gateways", label: "Gateways", icon: Network },
+]
+const GLOBAL_ADMIN_ITEMS = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/service-types", label: "Service catalog", icon: Settings },
-  { href: "/admin/gateways", label: "Gateways", icon: Network },
 ]
 
 interface Props {
@@ -63,12 +68,14 @@ interface Props {
   title?: string
 }
 
-export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
+export function AppSidebar({ user, sites }: Props) {
   const pathname = usePathname()
   const router = useRouter()
+  const { w } = useWorkspace()
   const isAdmin = user.role === "admin"
+  const sitesHref = w("/sites")
   const onSitesRoute =
-    pathname === "/sites" || pathname.startsWith("/sites/")
+    pathname === sitesHref || pathname.startsWith(sitesHref + "/")
   const [sitesOpen, setSitesOpen] = useState(onSitesRoute)
 
   useEffect(() => {
@@ -87,22 +94,7 @@ export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              render={<Link href="/sites" />}
-              tooltip={title}
-            >
-              <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Activity className="size-4" />
-              </div>
-              <span className="truncate font-heading text-sm font-semibold tracking-tight">
-                {title}
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <WorkspaceSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
@@ -112,9 +104,9 @@ export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={isActive("/sites")}
+                  isActive={isActive(sitesHref)}
                   tooltip="Sites"
-                  render={<Link href="/sites" />}
+                  render={<Link href={sitesHref} />}
                 >
                   <MapPin />
                   <span>Sites</span>
@@ -138,8 +130,8 @@ export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
                         {sites.map((s) => (
                           <SidebarMenuSubItem key={s.id}>
                             <SidebarMenuSubButton
-                              isActive={pathname === `/sites/${s.id}`}
-                              render={<Link href={`/sites/${s.id}`} />}
+                              isActive={pathname === w(`/sites/${s.id}`)}
+                              render={<Link href={w(`/sites/${s.id}`)} />}
                             >
                               <StatusIndicator
                                 state={statusToIndicatorState(s.status)}
@@ -155,18 +147,21 @@ export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
                 )}
               </SidebarMenuItem>
 
-              {SECONDARY_NAV_ITEMS.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    isActive={isActive(item.href)}
-                    tooltip={item.label}
-                    render={<Link href={item.href} />}
-                  >
-                    <item.icon />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {SECONDARY_NAV_ITEMS.map((item) => {
+                const href = w(item.path)
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      isActive={isActive(href)}
+                      tooltip={item.label}
+                      render={<Link href={href} />}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -176,7 +171,13 @@ export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
             <SidebarGroupLabel>Admin</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {ADMIN_ITEMS.map((item) => (
+                {[
+                  ...WORKSPACE_ADMIN_ITEMS.map((item) => ({
+                    ...item,
+                    href: w(item.path),
+                  })),
+                  ...GLOBAL_ADMIN_ITEMS,
+                ].map((item) => (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       isActive={isActive(item.href)}
@@ -231,7 +232,7 @@ export function AppSidebar({ user, sites, title = "xCOMM HUD" }: Props) {
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={handleLogout}>
+                <DropdownMenuItem onClick={handleLogout}>
                   <LogOut data-icon="inline-start" />
                   Sign out
                 </DropdownMenuItem>

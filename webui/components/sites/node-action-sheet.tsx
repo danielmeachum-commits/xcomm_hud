@@ -20,6 +20,7 @@ import {
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
 import type { Gateway, Service } from "@/lib/types"
+import { useWorkspace } from "@/lib/workspace"
 
 interface Props {
   onClose: () => void
@@ -106,6 +107,7 @@ function ServiceSheetBody({
   onDelete: () => void
 }) {
   const Icon = serviceIcon(service.icon, service.kind)
+  const { w } = useWorkspace()
   return (
     <div className="flex flex-col gap-4 p-4">
       <header className="p-0">
@@ -170,7 +172,7 @@ function ServiceSheetBody({
 
       <div className="flex items-center justify-between gap-2">
         <Link
-          href={`/services/${service.id}`}
+          href={w(`/services/${service.id}`)}
           className="inline-flex items-center gap-1 text-xs hover:underline"
         >
           <ExternalLink className="size-3" />

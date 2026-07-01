@@ -23,6 +23,7 @@ import {
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { useWorkspace } from "@/lib/workspace"
 import type {
   Event,
   GatewayPace,
@@ -43,6 +44,7 @@ interface Props {
 
 export function ServiceDetailClient({ service, sites, validations }: Props) {
   const router = useRouter()
+  const { w } = useWorkspace()
   const siteById = new Map(sites.map((s) => [s.id, s]))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -104,7 +106,7 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
   async function remove() {
     if (!confirm(`Delete service "${service.name}"?`)) return
     const res = await fetch(`/api/be/services/${service.id}`, { method: "DELETE" })
-    if (res.ok) router.push("/services")
+    if (res.ok) router.push(w("/services"))
   }
 
   const siteName = sites.find((s) => s.id === service.site_id)?.name
@@ -112,9 +114,9 @@ export function ServiceDetailClient({ service, sites, validations }: Props) {
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       <PageBreadcrumbs
         items={[
-          { label: "Sites", href: "/sites" },
+          { label: "Sites", href: w("/sites") },
           ...(siteName
-            ? [{ label: siteName, href: `/sites/${service.site_id}` }]
+            ? [{ label: siteName, href: w(`/sites/${service.site_id}`) }]
             : []),
           { label: service.name },
         ]}

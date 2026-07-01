@@ -14,6 +14,7 @@ import { SiteStatusPill } from "@/components/sites/site-status-pill"
 import { SiteThreatPill } from "@/components/sites/site-threat-pill"
 import { LocalTime } from "@/components/time-display"
 import { ViewTabs } from "@/components/ui/view-tabs"
+import { useWorkspace } from "@/lib/workspace"
 import {
   ClipboardList,
   Info,
@@ -62,11 +63,12 @@ export function SiteDetailClient({
   templates,
 }: Props) {
   const [tab, setTab] = useState<Tab>("services")
+  const { w } = useWorkspace()
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
       <PageBreadcrumbs
-        items={[{ label: "Sites", href: "/sites" }, { label: site.name }]}
+        items={[{ label: "Sites", href: w("/sites") }, { label: site.name }]}
       />
       <header className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
@@ -153,6 +155,7 @@ function ServicesTab({
   templates: ServiceTemplate[]
 }) {
   const [view, setView] = useState<"list" | "graph">("graph")
+  const { w } = useWorkspace()
 
   const byCategory = new Map<ServiceCategory, Service[]>()
   for (const s of services) {
@@ -256,7 +259,7 @@ function ServicesTab({
                         className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${categoryAccentClass(s.category)}`}
                       >
                         <Link
-                          href={`/services/${s.id}`}
+                          href={w(`/services/${s.id}`)}
                           className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
                         >
                           <Icon className="size-5 shrink-0 text-muted-foreground" />
