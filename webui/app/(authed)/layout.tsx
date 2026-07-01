@@ -2,6 +2,7 @@ import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import { AppSidebar } from "@/components/app-sidebar"
 import { BreadcrumbsProvider } from "@/components/breadcrumbs"
+import { LiveUpdatesProvider } from "@/components/live-updates-provider"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import type { Site } from "@/lib/types"
@@ -23,15 +24,18 @@ export default async function AuthedLayout({
   return (
     <div className="theme-class-U">
       <BreadcrumbsProvider>
-        <SidebarProvider>
-          <AppSidebar user={user} sites={sites} />
-          <SidebarInset>
-            <SiteHeader />
-            <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-              {children}
-            </div>
-          </SidebarInset>
-        </SidebarProvider>
+        {/* LiveUpdatesProvider lives here (not root) so SSE only runs while authed */}
+        <LiveUpdatesProvider>
+          <SidebarProvider>
+            <AppSidebar user={user} sites={sites} />
+            <SidebarInset>
+              <SiteHeader />
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+                {children}
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </LiveUpdatesProvider>
       </BreadcrumbsProvider>
     </div>
   )
