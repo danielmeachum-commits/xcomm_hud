@@ -6,7 +6,7 @@ interface StatusIndicatorProps {
   color?: string
   label?: string
   className?: string
-  size?: "sm" | "md" | "lg"
+  size?: "sm" | "md" | "lg" | "xl"
   labelClassName?: string
 }
 
@@ -38,6 +38,8 @@ const getSizeClasses = (size: StatusIndicatorProps["size"]) => {
       return { dot: "h-2 w-2", ping: "h-2 w-2" }
     case "lg":
       return { dot: "h-4 w-4", ping: "h-4 w-4" }
+    case "xl":
+      return { dot: "h-6 w-6", ping: "h-6 w-6" }
     case "md":
     default:
       return { dot: "h-3 w-3", ping: "h-3 w-3" }

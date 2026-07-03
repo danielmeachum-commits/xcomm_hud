@@ -10,6 +10,7 @@ import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
 import { SiteForm } from "@/components/sites/site-form"
+import { SiteMatrix } from "@/components/sites/site-matrix"
 import { SiteStatusPill } from "@/components/sites/site-status-pill"
 import { SiteThreatPill } from "@/components/sites/site-threat-pill"
 import { LocalTime } from "@/components/time-display"
@@ -21,6 +22,7 @@ import {
   LayoutGrid,
   Network,
   Package,
+  Table as TableIcon,
   Users,
   Waypoints,
 } from "lucide-react"
@@ -154,7 +156,7 @@ function ServicesTab({
   gateways: Gateway[]
   templates: ServiceTemplate[]
 }) {
-  const [view, setView] = useState<"list" | "graph">("graph")
+  const [view, setView] = useState<"list" | "graph" | "matrix">("matrix")
   const { w } = useWorkspace()
 
   const byCategory = new Map<ServiceCategory, Service[]>()
@@ -167,12 +169,13 @@ function ServicesTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <ViewTabs<"list" | "graph">
+        <ViewTabs<"list" | "graph" | "matrix">
           value={view}
           onChange={setView}
           options={[
             { value: "list", label: "List", icon: LayoutGrid },
             { value: "graph", label: "Graph", icon: Network },
+            { value: "matrix", label: "Matrix", icon: TableIcon },
           ]}
         />
         <div className="flex flex-wrap gap-2">
@@ -185,7 +188,9 @@ function ServicesTab({
         </div>
       </div>
 
-      {view === "graph" ? (
+      {view === "matrix" ? (
+        <SiteMatrix services={services} gateways={gateways} />
+      ) : view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />
       ) : (
         <div className="flex flex-col gap-6">

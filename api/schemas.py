@@ -32,6 +32,7 @@ SubjectKind = Literal[
     "service",
     "site",
     "gateway",
+    "service_gateway",
     "site_fpcon",
     "site_emcon",
     "site_status",
@@ -47,6 +48,7 @@ VALIDATION_SUBJECT_KINDS = {
     "service",
     "site",
     "gateway",
+    "service_gateway",
     "site_fpcon",
     "site_emcon",
     "site_status",
@@ -327,6 +329,10 @@ class ServiceValidateIn(BaseModel):
     status: StatusValue
     note: Optional[str] = None
     validated_at: Optional[datetime.datetime] = None  # override; defaults to now
+    # When true (default) cell states cascade per R10/R11 when this local
+    # status is written. UI leaves the "cascade to cells" checkbox on unless
+    # the operator opts out.
+    cascade: bool = True
 
 
 class SiteFpconIn(BaseModel):
@@ -343,6 +349,28 @@ class SiteEmconIn(BaseModel):
 
 class SiteStatusIn(BaseModel):
     status: SiteStatusValue
+    note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None
+
+
+class ServiceGatewayStatusOut(_ORM):
+    """One matrix cell — this service's reachability via one gateway.
+
+    `status` is the raw stored value (last operator validation). `effective_status`
+    reflects R10 gateway/local overrides and R11 clamp so the UI can render
+    it directly without re-implementing the rules.
+    """
+
+    gateway_id: int
+    status: StatusValue
+    effective_status: StatusValue = "unknown"
+    validated_at: Optional[datetime.datetime] = None
+    validated_by_user_id: Optional[int] = None
+    validated_by_username: Optional[str] = None
+
+
+class ServiceGatewayStatusValidateIn(BaseModel):
+    status: StatusValue
     note: Optional[str] = None
     validated_at: Optional[datetime.datetime] = None
 
@@ -368,6 +396,9 @@ class ServiceOut(_ORM):
     validated_by_username: Optional[str] = None
     display_order: int = 0
     notes: Optional[str] = None
+    # Per-gateway matrix cells. One entry per gateway on this site whose PACE
+    # tier the service enables — auto-materialized by the API on read.
+    gateway_statuses: list[ServiceGatewayStatusOut] = Field(default_factory=list)
 
 
 # --- Gateway ---
@@ -395,6 +426,10 @@ class GatewayValidateIn(BaseModel):
     status: GatewayStatusValue
     note: Optional[str] = None
     validated_at: Optional[datetime.datetime] = None  # override; defaults to now
+    # When true (default) every cell for this gateway is snapped to a new
+    # value per R8/R9/R10. Off leaves cells untouched — useful when the
+    # operator is just recording gateway state without re-driving cells.
+    cascade: bool = True
 
 
 class GatewayOut(_ORM):

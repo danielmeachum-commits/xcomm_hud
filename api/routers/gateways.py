@@ -9,6 +9,7 @@ from sqlalchemy import case as sql_case
 
 from db import get_db
 from deps import get_current_workspace, requires
+from effective import reset_cells_for_gateway
 from models import Event, Gateway, Site, User, Workspace
 from pubsub import notify
 from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
@@ -161,6 +162,13 @@ def validate_gateway(
     gw.status = body.status
     gw.validated_at = v.validated_at
     gw.validated_by_user_id = current_user.id
+    # R8/R9/R10 cascade — cell states for this gateway snap to the derived
+    # value (unknown for active/degraded/setup, ready for ready, matching
+    # down/offline). Skipped when the operator unchecked "cascade to cells"
+    # in the validation dialog — useful when just recording an intermediate
+    # gateway state without re-driving every cell.
+    if body.cascade:
+        reset_cells_for_gateway(db, gw.id, body.status)
     db.flush()
     db.refresh(gw)
     notify(background_tasks)

@@ -21,6 +21,7 @@ from routers import (
     events,
     gateways,
     ingest,
+    service_gateway_status,
     service_templates,
     services,
     sites,
@@ -87,6 +88,7 @@ app.include_router(workspaces.router)
 app.include_router(workspaces.me_router)
 app.include_router(sites.router)
 app.include_router(services.router)
+app.include_router(service_gateway_status.router)
 app.include_router(service_templates.router)
 app.include_router(gateways.router)
 app.include_router(canvas.router)

@@ -14,7 +14,6 @@ import {
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
 import type { Service, ServiceTemplate, Site } from "@/lib/types"
-import { workspacePath } from "@/lib/workspace"
 
 export default async function ServicesPage({
   params,
@@ -22,7 +21,10 @@ export default async function ServicesPage({
   params: Promise<{ workspace: string }>
 }) {
   const { workspace: slug } = await params
-  const w = (path: string) => workspacePath(slug, path)
+  // Inlined to avoid importing a "use client" module (workspacePath lives in
+  // workspace.tsx alongside the WorkspaceProvider hook). Server components
+  // can't call functions exported from a "use client" module.
+  const w = (path: string) => `/w/${slug}${path.startsWith("/") ? path : `/${path}`}`
   await requireSession()
 
   const [services, sites, templates] = await Promise.all([

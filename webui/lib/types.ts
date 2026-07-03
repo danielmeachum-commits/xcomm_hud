@@ -126,6 +126,18 @@ export interface Site {
   notes: string | null
 }
 
+export interface ServiceGatewayStatus {
+  gateway_id: number
+  /** Raw stored value — the operator's last cell validation. */
+  status: ServiceStatus
+  /** Displayed value: applies R10 gateway/local overrides and R11 clamp
+   *  to the raw stored status. UI should render this. */
+  effective_status: ServiceStatus
+  validated_at: string | null
+  validated_by_user_id: number | null
+  validated_by_username: string | null
+}
+
 export interface Service {
   id: number
   name: string
@@ -145,6 +157,9 @@ export interface Service {
   validated_by_username: string | null
   display_order: number
   notes: string | null
+  /** Per-(service × gateway) matrix cells for every gateway on this site
+   *  whose PACE tier the service enables. Materialized by the API on read. */
+  gateway_statuses: ServiceGatewayStatus[]
 }
 
 export interface ServiceTemplate {

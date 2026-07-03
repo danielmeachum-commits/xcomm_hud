@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from deps import get_current_workspace, requires
 from effective import effective_service_status
-from models import Gateway, Service, ServiceTemplate, Site, Workspace
+from models import Gateway, Service, ServiceGatewayStatus, ServiceTemplate, Site, Workspace
 from schemas import ServiceRollup, SiteRollup, StatusRollupOut
 
 router = APIRouter(prefix="/status", tags=["status"])
@@ -52,6 +52,19 @@ def rollup(
     for g in gateways:
         gateways_by_site.setdefault(g.site_id, []).append(g)
     site_name_by_id = {s.id: s.name for s in sites}
+
+    # Bulk-load matrix cells (see canvas.py note). Missing cells → unknown,
+    # which the rollup treats optimistically over a live gateway so this
+    # summary keeps matching pre-matrix behaviour on fresh installs.
+    service_ids = [s.id for s in services]
+    cells_by_svc: dict[int, dict[int, ServiceGatewayStatus]] = {}
+    if service_ids:
+        for c in (
+            db.query(ServiceGatewayStatus)
+            .filter(ServiceGatewayStatus.service_id.in_(service_ids))
+            .all()
+        ):
+            cells_by_svc.setdefault(c.service_id, {})[c.gateway_id] = c
 
     site_rollups: list[SiteRollup] = []
     for site in sites:
@@ -93,7 +106,9 @@ def rollup(
                 icon=s.icon,
                 status=s.status,
                 effective_status=effective_service_status(
-                    s, gateways_by_site.get(s.site_id, [])
+                    s,
+                    gateways_by_site.get(s.site_id, []),
+                    cells_by_svc.get(s.id, {}),
                 ),
                 allowed_statuses=allowed,
                 site_id=s.site_id,

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { LocalTime } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -29,9 +30,12 @@ import type { AnyStatus } from "@/lib/types"
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
-  kind: "service" | "gateway"
+  kind: "service" | "gateway" | "service_gateway"
   subjectId: number
   subjectName: string
+  /** Second subject id used only for `service_gateway` (matrix cell)
+   *  validations — the gateway id for the (service, gateway) pair. */
+  secondSubjectId?: number
   /** Stored status — this is what was last validated. */
   currentStatus: AnyStatus
   lastValidatedAt: string | null
@@ -54,6 +58,7 @@ export function ValidationDialog({
   kind,
   subjectId,
   subjectName,
+  secondSubjectId,
   currentStatus,
   lastValidatedAt,
   lastValidatedBy,
@@ -67,6 +72,11 @@ export function ValidationDialog({
   const [whenLocal, setWhenLocal] = useState<string>(() => toLocalInput(new Date()))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Cascade behaviour only applies to gateway + local-service validation
+  // (drives R8/R9/R10 for gateways, R10/R11 for services). Cell validations
+  // never cascade, so the checkbox is hidden and the state stays true.
+  const supportsCascade = kind === "service" || kind === "gateway"
+  const [cascade, setCascade] = useState(true)
 
   // Reset when the dialog opens so the previewed time is current and any
   // prior selection doesn't bleed across sessions.
@@ -76,6 +86,7 @@ export function ValidationDialog({
       setNote("")
       setWhenLocal(toLocalInput(new Date()))
       setError(null)
+      setCascade(true)
     }
   }, [open, currentStatus])
 
@@ -92,10 +103,15 @@ export function ValidationDialog({
     setPending(true)
     setError(null)
     try {
-      const endpoint =
-        kind === "service"
-          ? `/api/be/services/${subjectId}/validate`
-          : `/api/be/gateways/${subjectId}/validate`
+      let endpoint: string
+      if (kind === "service") {
+        endpoint = `/api/be/services/${subjectId}/validate`
+      } else if (kind === "gateway") {
+        endpoint = `/api/be/gateways/${subjectId}/validate`
+      } else {
+        // service_gateway — matrix cell for (service, gateway).
+        endpoint = `/api/be/services/${subjectId}/gateways/${secondSubjectId}/validate`
+      }
       const body: Record<string, unknown> = {
         status,
         note: note || null,
@@ -106,6 +122,11 @@ export function ValidationDialog({
       const nowMs = Date.now()
       if (Math.abs(enteredMs - nowMs) > 60 * 1000) {
         body.validated_at = new Date(whenLocal).toISOString()
+      }
+      // Include cascade only when the backend endpoint understands it —
+      // the cell validation endpoint doesn't take it.
+      if (supportsCascade) {
+        body.cascade = cascade
       }
       const res = await fetch(endpoint, {
         method: "POST",
@@ -245,6 +266,29 @@ export function ValidationDialog({
               disabled={pending}
             />
           </div>
+
+          {/* Cascade to service cells — only relevant for gateway or
+           *  local-service validation. Uncheck to record the row status
+           *  without touching individual matrix cells. */}
+          {supportsCascade && (
+            <label className="flex items-start gap-2 rounded-md border bg-muted/20 p-3 text-xs cursor-pointer">
+              <Checkbox
+                checked={cascade}
+                onCheckedChange={(v) => setCascade(Boolean(v))}
+                disabled={pending}
+              />
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">
+                  Cascade to service cells
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  {kind === "gateway"
+                    ? "Reset every matrix cell for this gateway per R8/R9/R10 (active/degraded → unknown; ready → ready; down/offline → matching)."
+                    : "Clamp matrix cells that exceed this new local status (R11); force cells to match if this is down/offline (R10)."}
+                </span>
+              </div>
+            </label>
+          )}
 
           {error && (
             <p className="text-sm text-destructive" role="alert">

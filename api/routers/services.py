@@ -7,10 +7,30 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import get_current_workspace, requires
-from effective import effective_service_status
-from models import Event, Gateway, Service, ServiceTemplate, Site, User, Workspace
+from effective import (
+    clamp_cells_for_service,
+    effective_cell_status,
+    effective_service_status,
+    materialize_cells,
+)
+from models import (
+    Event,
+    Gateway,
+    Service,
+    ServiceGatewayStatus,
+    ServiceTemplate,
+    Site,
+    User,
+    Workspace,
+)
 from pubsub import notify
-from schemas import ServiceIn, ServiceOut, ServicePatch, ServiceValidateIn
+from schemas import (
+    ServiceGatewayStatusOut,
+    ServiceIn,
+    ServiceOut,
+    ServicePatch,
+    ServiceValidateIn,
+)
 
 router = APIRouter(prefix="/services", tags=["services"])
 
@@ -19,8 +39,14 @@ def _service_out(db: Session, service: Service) -> ServiceOut:
     gateways = (
         db.query(Gateway).filter(Gateway.site_id == service.site_id).all()
     )
+    # Materialize any missing (service, gateway) cells so downstream views
+    # always see a full row per enabled-tier gateway. `cells_by_gw` maps
+    # gateway_id → ServiceGatewayStatus for the rollup + response shaping.
+    cells_by_gw = materialize_cells(db, service, gateways)
     out = ServiceOut.model_validate(service)
-    out.effective_status = effective_service_status(service, gateways)
+    out.effective_status = effective_service_status(
+        service, gateways, cells_by_gw
+    )
     if service.service_template_id is not None:
         tpl = db.get(ServiceTemplate, service.service_template_id)
         if tpl and tpl.allowed_statuses:
@@ -29,6 +55,29 @@ def _service_out(db: Session, service: Service) -> ServiceOut:
         u = db.get(User, service.validated_by_user_id)
         if u:
             out.validated_by_username = u.username
+
+    # Cell rows attached to the response. Sorted by gateway_id so the UI
+    # can iterate deterministically without a second lookup.
+    gw_by_id = {g.id: g for g in gateways}
+    user_cache: dict[int, str] = {}
+    cell_out: list[ServiceGatewayStatusOut] = []
+    for gw_id, cell in sorted(cells_by_gw.items()):
+        gw = gw_by_id.get(gw_id)
+        if gw is None:
+            continue
+        entry = ServiceGatewayStatusOut.model_validate(cell)
+        entry.effective_status = effective_cell_status(
+            cell.status, service.status, gw.status
+        )
+        if cell.validated_by_user_id is not None:
+            uid = cell.validated_by_user_id
+            if uid not in user_cache:
+                u = db.get(User, uid)
+                if u:
+                    user_cache[uid] = u.username
+            entry.validated_by_username = user_cache.get(uid)
+        cell_out.append(entry)
+    out.gateway_statuses = cell_out
     return out
 
 
@@ -161,6 +210,13 @@ def validate_service(
     service.status = body.status
     service.validated_at = v.validated_at
     service.validated_by_user_id = current_user.id
+    # R10/R11 cascade to matrix cells. R10: local down/offline forces every
+    # cell to match. R11: any cell better than the new local is clamped
+    # down. Cascade is skipped when the operator unchecks "cascade to
+    # cells" in the validation dialog — cells stay as they were. Upward
+    # local moves never cascade (see effective.clamp_cells_for_service).
+    if body.cascade:
+        clamp_cells_for_service(db, service.id, body.status)
     db.flush()
     db.refresh(service)
     notify(background_tasks)

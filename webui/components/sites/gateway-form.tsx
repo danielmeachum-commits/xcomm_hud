@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -30,9 +30,24 @@ interface Props {
   gateway?: Gateway
   triggerLabel?: string
   triggerSize?: "sm" | "lg"
+  /** Optional custom trigger element. When provided, replaces the default
+   *  "Add/Edit gateway" button — lets other views (e.g. matrix column header)
+   *  make an arbitrary element open the edit dialog. Must be a single
+   *  ReactElement since Base UI's Dialog forwards refs to it. */
+  renderTrigger?: ReactElement
+  /** Pre-select the PACE tier when opening in create mode. Ignored in edit
+   *  mode since the gateway already has one. */
+  defaultPace?: GatewayPace
 }
 
-export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" }: Props) {
+export function GatewayForm({
+  siteId,
+  gateway,
+  triggerLabel,
+  triggerSize = "sm",
+  renderTrigger,
+  defaultPace,
+}: Props) {
   const router = useRouter()
   const editing = !!gateway
   const [open, setOpen] = useState(false)
@@ -43,7 +58,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
     kind: (gateway?.kind ?? "commercial") as GatewayKind,
     provider: gateway?.provider ?? "",
     status: (gateway?.status ?? "ready") as GatewayStatus,
-    pace: (gateway?.pace ?? "primary") as GatewayPace,
+    pace: (gateway?.pace ?? defaultPace ?? "primary") as GatewayPace,
     notes: gateway?.notes ?? "",
   })
 
@@ -81,7 +96,7 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
           kind: "commercial",
           provider: "",
           status: "ready",
-          pace: "primary",
+          pace: defaultPace ?? "primary",
           notes: "",
         })
       }
@@ -97,9 +112,11 @@ export function GatewayForm({ siteId, gateway, triggerLabel, triggerSize = "sm" 
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button size={triggerSize} variant="outline">
-            {triggerLabel ?? (editing ? "Edit gateway" : "Add gateway")}
-          </Button>
+          renderTrigger ?? (
+            <Button size={triggerSize} variant="outline">
+              {triggerLabel ?? (editing ? "Edit gateway" : "Add gateway")}
+            </Button>
+          )
         }
       />
       <DialogContent>

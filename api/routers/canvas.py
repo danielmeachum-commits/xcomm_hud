@@ -13,6 +13,7 @@ from models import (
     CanvasAnnotation,
     Gateway,
     Service,
+    ServiceGatewayStatus,
     ServiceTemplate,
     Site,
     SiteCanvasPosition,
@@ -86,6 +87,22 @@ def map_bundle(
     for g in gateways:
         gateways_by_site.setdefault(g.site_id, []).append(g)
 
+    # Bulk-load the matrix cells once so effective_service_status can apply
+    # R10/R11 accurately across every service instead of falling back to the
+    # legacy any-live-gateway heuristic. Missing cells default to unknown
+    # inside the rollup (treated as inheriting local when the gateway is
+    # live), so a fresh workspace with no validated cells still renders
+    # normal statuses instead of collapsing to "down".
+    service_ids = [s.id for s in services]
+    cells_by_svc: dict[int, dict[int, ServiceGatewayStatus]] = {}
+    if service_ids:
+        for c in (
+            db.query(ServiceGatewayStatus)
+            .filter(ServiceGatewayStatus.service_id.in_(service_ids))
+            .all()
+        ):
+            cells_by_svc.setdefault(c.service_id, {})[c.gateway_id] = c
+
     site_outs: list[SiteOut] = [SiteOut.model_validate(s) for s in sites]
 
     template_cache: dict[int, ServiceTemplate] = {}
@@ -94,7 +111,9 @@ def map_bundle(
     for s in services:
         gws = gateways_by_site.get(s.site_id, [])
         so = ServiceOut.model_validate(s)
-        so.effective_status = effective_service_status(s, gws)
+        so.effective_status = effective_service_status(
+            s, gws, cells_by_svc.get(s.id, {})
+        )
         if s.service_template_id is not None:
             tpl = template_cache.get(s.service_template_id)
             if tpl is None:

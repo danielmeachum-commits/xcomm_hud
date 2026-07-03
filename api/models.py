@@ -51,6 +51,7 @@ SUBJECT_KINDS = (
     "service",
     "site",
     "gateway",
+    "service_gateway",
     "site_fpcon",
     "site_emcon",
     "site_status",
@@ -262,6 +263,49 @@ class Gateway(Base):
     )
 
     site: Mapped["Site"] = relationship("Site", back_populates="gateways")
+
+
+class ServiceGatewayStatus(Base):
+    """Per-(service, gateway) reachability cell backing the matrix view.
+
+    One row per intersection where a service's enabled_pace matches a
+    gateway's pace. The API materializes missing rows on read/write and
+    seeds them to `unknown` (needs validation). Cascade rules in
+    api/effective.py drive how a gateway or local service status change
+    propagates here — but only when the validation dialog leaves
+    "cascade to cells" checked. Manual cell writes enforce R11 (cell
+    cannot exceed local service status) and the R10 down/offline lock
+    as hard invariants regardless of the cascade flag.
+    """
+
+    __tablename__ = "service_gateway_status"
+
+    service_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("service.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # Composite PK covers service-side lookups; a separate index on
+    # gateway_id keeps "find every cell for this gateway" fast when a
+    # gateway status change cascades.
+    gateway_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("gateway.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unknown"
+    )
+    validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
 
 
 class SiteCanvasPosition(Base):

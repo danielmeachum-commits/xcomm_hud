@@ -11,25 +11,29 @@ import type { StatusValue } from "@/lib/types"
 interface Props {
   serviceId: number
   serviceName: string
-  /** Stored status — what the operator last validated. */
+  gatewayId: number
+  gatewayName: string
+  /** Stored cell status — operator's last validation of this pair. */
   status: StatusValue
-  /** Effective status — same as status for local; for external it may be
-   * forced to "down" by gateway cascade. Shown if different from status. */
+  /** Displayed cell status — R10/R11 applied. Shown if it diverges from
+   *  the stored value so the operator can see the cascade in effect. */
   effectiveStatus?: StatusValue
   lastValidatedAt?: string | null
   lastValidatedBy?: string | null
-  /** Optional whitelist of statuses this service can be set to. */
   allowedStatuses?: StatusValue[] | null
   className?: string
-  /** Size of the inline StatusIndicator dot. Defaults to sm (8px). Use xl
-   *  in matrix "minimum" mode where the pill's label is hidden and the dot
-   *  must carry the status signal on its own. */
+  /** Size of the inline StatusIndicator dot. */
   indicatorSize?: "sm" | "md" | "lg" | "xl"
 }
 
-export function ServiceStatusPill({
+/** Matrix cell pill for a single (service × gateway) intersection. Same
+ *  shape as ServiceStatusPill but its click routes to the cell validation
+ *  endpoint via ValidationDialog kind="service_gateway". */
+export function MatrixCellPill({
   serviceId,
   serviceName,
+  gatewayId,
+  gatewayName,
   status,
   effectiveStatus,
   lastValidatedAt = null,
@@ -53,8 +57,8 @@ export function ServiceStatusPill({
         }}
         title={
           cascaded
-            ? `Stored: ${statusLabel(status)} — overridden because no enabled gateway is live`
-            : `Tap to validate`
+            ? `Stored: ${statusLabel(status)} — overridden by R10/R11 cascade`
+            : `Tap to validate ${serviceName} via ${gatewayName}`
         }
         className={cn(
           "nodrag nowheel inline-flex items-center gap-2 rounded-full border bg-background/60 px-2 py-1 text-xs uppercase tracking-wider transition-colors hover:bg-accent",
@@ -67,14 +71,17 @@ export function ServiceStatusPill({
           size={indicatorSize}
         />
         <span>{statusLabel(shown)}</span>
-        {cascaded && <span className="text-[10px] text-muted-foreground">(no path)</span>}
+        {cascaded && (
+          <span className="text-[10px] text-muted-foreground">(cascade)</span>
+        )}
       </button>
       <ValidationDialog
         open={open}
         onOpenChange={setOpen}
-        kind="service"
+        kind="service_gateway"
         subjectId={serviceId}
-        subjectName={serviceName}
+        subjectName={`${serviceName} · ${gatewayName}`}
+        secondSubjectId={gatewayId}
         currentStatus={status}
         lastValidatedAt={lastValidatedAt}
         lastValidatedBy={lastValidatedBy}
