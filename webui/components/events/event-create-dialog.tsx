@@ -51,6 +51,7 @@ function labelForStatus(value: AnyStatus): string {
 function statusOptionsFor(kind: SubjectKind): AnyStatus[] {
   switch (kind) {
     case "service":
+    case "service_gateway":
     case "site":
       return SERVICE_STATUS_VALUES
     case "gateway":

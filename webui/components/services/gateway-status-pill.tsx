@@ -15,6 +15,10 @@ interface Props {
   lastValidatedAt?: string | null
   lastValidatedBy?: string | null
   className?: string
+  /** Size of the inline StatusIndicator dot. Defaults to sm (8px). Use xl
+   *  when the pill collapses to a dot-only circle (matrix minimum mode /
+   *  per-column collapse) so the status signal reads at a glance. */
+  indicatorSize?: "sm" | "md" | "lg" | "xl"
 }
 
 export function GatewayStatusPill({
@@ -24,6 +28,7 @@ export function GatewayStatusPill({
   lastValidatedAt = null,
   lastValidatedBy = null,
   className,
+  indicatorSize = "sm",
 }: Props) {
   const [open, setOpen] = useState(false)
 
@@ -41,7 +46,10 @@ export function GatewayStatusPill({
           className,
         )}
       >
-        <StatusIndicator state={statusToIndicatorState(status)} size="sm" />
+        <StatusIndicator
+          state={statusToIndicatorState(status)}
+          size={indicatorSize}
+        />
         <span>{statusLabel(status)}</span>
       </button>
       <ValidationDialog

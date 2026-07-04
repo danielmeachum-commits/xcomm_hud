@@ -10,6 +10,12 @@ export type ServiceStatus =
   | "offline"
   | "setup"
 
+/** Cell status is a superset of ServiceStatus that also allows "ready" —
+ *  a cell can inherit that value from a gateway on PACE standby via the
+ *  R9 cascade in the API. Also used for rolled-up `service.effective_status`
+ *  for the same reason. */
+export type CellStatus = ServiceStatus | "ready"
+
 export type GatewayStatus =
   | "active"
   | "ready"
@@ -59,6 +65,7 @@ export type SubjectKind =
   | "service"
   | "site"
   | "gateway"
+  | "service_gateway"
   | "site_fpcon"
   | "site_emcon"
   | "site_status"
@@ -72,6 +79,7 @@ export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
   "service",
   "site",
   "gateway",
+  "service_gateway",
   "site_fpcon",
   "site_emcon",
   "site_status",
@@ -128,11 +136,13 @@ export interface Site {
 
 export interface ServiceGatewayStatus {
   gateway_id: number
-  /** Raw stored value — the operator's last cell validation. */
-  status: ServiceStatus
+  /** Raw stored value — the operator's last cell validation, or the R9
+   *  cascade value ("ready") when the underlying gateway was flipped to
+   *  PACE standby. */
+  status: CellStatus
   /** Displayed value: applies R10 gateway/local overrides and R11 clamp
    *  to the raw stored status. UI should render this. */
-  effective_status: ServiceStatus
+  effective_status: CellStatus
   validated_at: string | null
   validated_by_user_id: number | null
   validated_by_username: string | null
@@ -149,7 +159,9 @@ export interface Service {
   icon: string | null
   description: string | null
   status: ServiceStatus
-  effective_status: ServiceStatus
+  /** Rolled-up effective status — may resolve to "ready" if every reachable
+   *  path routes through a gateway on PACE standby, so uses CellStatus. */
+  effective_status: CellStatus
   allowed_statuses: ServiceStatus[] | null
   enabled_pace: GatewayPace[]
   validated_at: string | null
@@ -229,7 +241,8 @@ export interface ServiceRollup {
   reach: ServiceReach
   icon: string | null
   status: StatusValue
-  effective_status: StatusValue
+  /** Same superset as Service.effective_status — can be "ready". */
+  effective_status: CellStatus
   allowed_statuses: StatusValue[] | null
   site_id: number
   site_name: string
@@ -247,6 +260,7 @@ export interface Event {
   validated_at: string
   subject_kind: SubjectKind
   subject_id: number | null
+  second_subject_id: number | null
   subject_name: string | null
   subject_label: string | null
   site_id: number | null
@@ -260,6 +274,78 @@ export interface Event {
   edited_at: string | null
   hidden_at: string | null
   hidden_by_user_id: number | null
+}
+
+export type SitePropertyType =
+  | "text"
+  | "long_text"
+  | "number"
+  | "phone"
+  | "email"
+  | "url"
+  | "date"
+  | "bool"
+
+export type SitePropertySource = "template" | "custom"
+
+export interface SitePropertyDefinition {
+  id: number
+  template_id: number
+  key: string
+  label: string
+  type: SitePropertyType
+  required: boolean
+  group: string | null
+  description: string | null
+  display_order: number
+}
+
+export interface SitePropertyTemplate {
+  id: number
+  workspace_id: number
+  name: string
+  description: string | null
+  /** Ordered list of section names. Definitions still store their group
+   *  as a freeform string; this controls section render order and lets an
+   *  empty section persist between edits. */
+  group_order: string[]
+  created_at: string
+  updated_at: string
+  definitions: SitePropertyDefinition[]
+}
+
+/** Scalar JSON — text/number/bool. Dates/emails/urls/phones ride as strings. */
+export type SitePropertyValue = string | number | boolean | null
+
+export interface SiteProperty {
+  id: number
+  site_id: number
+  key: string
+  label: string
+  type: SitePropertyType
+  required: boolean
+  group: string | null
+  description: string | null
+  display_order: number
+  value: SitePropertyValue
+  source: SitePropertySource
+}
+
+export interface SitePropertyTemplateExport {
+  format_version: 1
+  exported_at: string
+  name: string
+  description: string | null
+  group_order: string[]
+  definitions: Array<{
+    key: string
+    label: string
+    type: SitePropertyType
+    required: boolean
+    group: string | null
+    description: string | null
+    display_order: number
+  }>
 }
 
 export interface EnclaveSource {

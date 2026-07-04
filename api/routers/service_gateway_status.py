@@ -150,6 +150,7 @@ def validate_cell(
     ev = Event(
         subject_kind="service_gateway",
         subject_id=service.id,
+        second_subject_id=gw.id,
         subject_label=f"{service.name} via {gw.name}",
         prev_status=prev,
         status=body.status,

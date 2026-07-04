@@ -62,6 +62,17 @@ SUBJECT_KINDS = (
 EVENT_TYPES = ("validation", "general")
 FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
 EMCON_LEVELS = ("a", "b", "c", "d")
+SITE_PROPERTY_TYPES = (
+    "text",
+    "long_text",
+    "number",
+    "phone",
+    "email",
+    "url",
+    "date",
+    "bool",
+)
+SITE_PROPERTY_SOURCES = ("template", "custom")
 
 
 class Workspace(Base):
@@ -344,6 +355,116 @@ class CanvasAnnotation(Base):
     )
 
 
+class SitePropertyTemplate(Base):
+    """A named set of typed property fields that can be applied to sites.
+
+    Templates are workspace-scoped so operators can maintain distinct sets
+    per exercise/garrison. Applying a template to a site copies its
+    definitions into `SiteProperty` rows — the site then owns its schema
+    and can diverge (add custom fields, edit labels, etc).
+    """
+
+    __tablename__ = "site_property_template"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "name", name="uq_site_property_template_workspace_name"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Ordered list of group (section) names for this template. Definitions
+    # still store their group as a freeform string; this column controls the
+    # section render order and lets the UI keep an empty section around
+    # between edits.
+    group_order: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    definitions: Mapped[list["SitePropertyDefinition"]] = relationship(
+        "SitePropertyDefinition",
+        back_populates="template",
+        cascade="all, delete-orphan",
+        order_by="SitePropertyDefinition.display_order",
+    )
+
+
+class SitePropertyDefinition(Base):
+    """One field on a `SitePropertyTemplate` — the schema, not a value."""
+
+    __tablename__ = "site_property_definition"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_id", "key", name="uq_site_property_definition_template_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    template_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("site_property_template.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    template: Mapped["SitePropertyTemplate"] = relationship(
+        "SitePropertyTemplate", back_populates="definitions"
+    )
+
+
+class SiteProperty(Base):
+    """A property + value belonging to a specific site.
+
+    Definitions are copied here on template apply so each site owns its own
+    schema. `source` records whether the field came from a template or was
+    added ad-hoc — used only for UI hinting today, no behavior hangs off it.
+    Values are stored as JSON so scalar types (text/number/bool/date/etc)
+    can share one column without a discriminated schema.
+    """
+
+    __tablename__ = "site_property"
+    __table_args__ = (
+        UniqueConstraint("site_id", "key", name="uq_site_property_site_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    site_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    value = mapped_column(JSONB, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
+
+
 class Event(Base):
     """Append-only audit of every status change.
 
@@ -364,6 +485,11 @@ class Event(Base):
     )
     subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     subject_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # For paired subjects like (service, gateway) cell validations — the
+    # gateway id lives here so history can be scoped to a single cell.
+    second_subject_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True, index=True
+    )
     subject_label: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     prev_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)

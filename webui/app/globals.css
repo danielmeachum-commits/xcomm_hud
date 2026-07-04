@@ -193,3 +193,23 @@ input[type="search"]::-webkit-search-decoration,input[type="search"]::-webkit-se
   transform-origin: center center;
   backface-visibility: hidden;
 }
+
+/* Marching-ants "data flowing out" animation for gateway connector lines
+ * in the site services matrix. Dash pattern is `8 6` (14-unit cycle); one
+ * full loop shifts by exactly 14 units so the pattern seams cleanly.
+ * Positive offset makes dashes travel toward the line's start (gateway
+ * end), which reads as "flowing from service up to gateway". */
+@keyframes gateway-line-flow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: 14; }
+}
+.gateway-line-flow {
+  animation: gateway-line-flow 1.1s linear infinite;
+}
+.gateway-line-flow-slow {
+  animation: gateway-line-flow 2.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gateway-line-flow,
+  .gateway-line-flow-slow { animation: none; }
+}

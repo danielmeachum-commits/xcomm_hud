@@ -11,7 +11,9 @@ Rules (see the design conversation for the full ruleset):
 
     R8/R9/R10  Gateway status change → cells snap to a derived state:
                active/degraded/setup → unknown (needs re-validation);
-               ready → ready; down/offline → matching down/offline.
+               ready → cells untouched (PACE standby means "available but
+               not active" — the operator's prior cell validation still
+               holds); down/offline → matching down/offline.
     R10        Gateway or local `down`/`offline` overrides the displayed
                cell no matter what's stored — you cannot report a working
                path over a dead gateway or a dead service.
@@ -178,17 +180,23 @@ def effective_service_status(
 
 # ---------- Cascade helpers (called by validation endpoints) ----------
 
-def cell_status_from_gateway(new_gateway_status: str) -> str:
-    """R8/R9/R10: the derived cell status implied by a new gateway status.
+def cell_status_from_gateway(new_gateway_status: str) -> Optional[str]:
+    """R8/R9/R10: the derived cell status implied by a new gateway status,
+    or None when the gateway change shouldn't touch cells at all.
 
     - `down`/`offline` → matching status (R10)
-    - `ready`         → `ready` (R9; PACE standby, no re-validation needed)
+    - `ready`         → None (R9 revised; PACE standby means the gateway is
+                       available-but-not-active. It doesn't invalidate the
+                       operator's prior cell validation, so cells keep their
+                       stored status and their validated_at. If the gateway
+                       later goes back to `active`, effective_status flows
+                       naturally from the preserved cell.status.)
     - anything else   → `unknown` (R8; force operator to re-validate the path)
     """
     if new_gateway_status in ("down", "offline"):
         return new_gateway_status
     if new_gateway_status == "ready":
-        return "ready"
+        return None
     return "unknown"
 
 
@@ -200,9 +208,12 @@ def reset_cells_for_gateway(
     Wipes the cell's own validated_at / validated_by since the operator's
     prior validation no longer represents current reality. Called from
     the gateway validation endpoint when the "cascade to cells" checkbox
-    is left checked.
+    is left checked. No-ops when `cell_status_from_gateway` returns None
+    (currently: gateway → `ready`, which preserves cell state).
     """
     new_cell_status = cell_status_from_gateway(new_gateway_status)
+    if new_cell_status is None:
+        return
     db.query(ServiceGatewayStatus).filter(
         ServiceGatewayStatus.gateway_id == gateway_id
     ).update(

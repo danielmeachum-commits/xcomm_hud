@@ -9,6 +9,7 @@ import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { SiteCanvas } from "@/components/sites/site-canvas"
+import { SiteDetailsTab } from "@/components/sites/site-details-tab"
 import { SiteForm } from "@/components/sites/site-form"
 import { SiteMatrix } from "@/components/sites/site-matrix"
 import { SiteStatusPill } from "@/components/sites/site-status-pill"
@@ -43,6 +44,8 @@ import type {
   ServiceCategory,
   ServiceTemplate,
   Site,
+  SiteProperty,
+  SitePropertyTemplate,
 } from "@/lib/types"
 
 interface Props {
@@ -51,6 +54,8 @@ interface Props {
   gateways: Gateway[]
   sites: Site[]
   templates: ServiceTemplate[]
+  properties: SiteProperty[]
+  propertyTemplates: SitePropertyTemplate[]
 }
 
 type Tab = "services" | "personnel" | "equipment" | "details" | "events"
@@ -63,6 +68,8 @@ export function SiteDetailClient({
   gateways,
   sites,
   templates,
+  properties,
+  propertyTemplates,
 }: Props) {
   const [tab, setTab] = useState<Tab>("services")
   const { w } = useWorkspace()
@@ -135,7 +142,11 @@ export function SiteDetailClient({
       ) : tab === "equipment" ? (
         <PlaceholderTab title="Equipment" description="Site equipment inventory will live here." />
       ) : tab === "details" ? (
-        <PlaceholderTab title="Details" description="Additional site properties will live here." />
+        <SiteDetailsTab
+          siteId={site.id}
+          properties={properties}
+          templates={propertyTemplates}
+        />
       ) : (
         <PlaceholderTab title="Events" description="A site-scoped event log with select and CRUD will live here." />
       )}

@@ -7,6 +7,7 @@ import {
   Bell,
   ChevronRight,
   ChevronUp,
+  ListChecks,
   LogOut,
   MapPin,
   Network,
@@ -56,6 +57,7 @@ const SECONDARY_NAV_ITEMS = [
 // truly global admin items follow with absolute paths.
 const WORKSPACE_ADMIN_ITEMS = [
   { path: "/admin/gateways", label: "Gateways", icon: Network },
+  { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
 ]
 const GLOBAL_ADMIN_ITEMS = [
   { href: "/admin/users", label: "Users", icon: Users },

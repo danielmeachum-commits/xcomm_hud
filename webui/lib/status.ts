@@ -123,7 +123,11 @@ export function statusLabel(s: AnyStatus): string {
     case "active":
       return "Active"
     case "ready":
-      return "Ready"
+      // Labelled "Standby" in the UI even though the stored enum value is
+      // "ready" — the semantic is "gateway is available but not currently
+      // active", which reads better as "Standby" in operator language and
+      // stays consistent with the tier Standby state in the matrix.
+      return "Standby"
     case "operational":
       return "Operational"
     case "limited":

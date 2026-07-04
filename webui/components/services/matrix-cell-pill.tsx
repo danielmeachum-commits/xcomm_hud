@@ -6,20 +6,27 @@ import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { ValidationDialog } from "@/components/validation-dialog"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
-import type { StatusValue } from "@/lib/types"
+import type { CellStatus, GatewayStatus, StatusValue } from "@/lib/types"
 
 interface Props {
   serviceId: number
   serviceName: string
   gatewayId: number
   gatewayName: string
-  /** Stored cell status — operator's last validation of this pair. */
-  status: StatusValue
+  /** Live gateway status — used to render a second indicator in the
+   *  validation dialog so the operator can see which gateway is being
+   *  validated and what shape it's in right now. */
+  gatewayStatus?: GatewayStatus
+  /** Stored cell status — operator's last validation, or "ready" cascaded
+   *  from a gateway on PACE standby. */
+  status: CellStatus
   /** Displayed cell status — R10/R11 applied. Shown if it diverges from
    *  the stored value so the operator can see the cascade in effect. */
-  effectiveStatus?: StatusValue
+  effectiveStatus?: CellStatus
   lastValidatedAt?: string | null
   lastValidatedBy?: string | null
+  /** Restricted to StatusValue — operators can't manually set a cell to
+   *  "ready"; that value only arrives via the R9 gateway cascade. */
   allowedStatuses?: StatusValue[] | null
   className?: string
   /** Size of the inline StatusIndicator dot. */
@@ -34,6 +41,7 @@ export function MatrixCellPill({
   serviceName,
   gatewayId,
   gatewayName,
+  gatewayStatus,
   status,
   effectiveStatus,
   lastValidatedAt = null,
@@ -80,8 +88,10 @@ export function MatrixCellPill({
         onOpenChange={setOpen}
         kind="service_gateway"
         subjectId={serviceId}
-        subjectName={`${serviceName} · ${gatewayName}`}
+        subjectName={serviceName}
         secondSubjectId={gatewayId}
+        secondSubjectName={gatewayName}
+        secondSubjectStatus={gatewayStatus}
         currentStatus={status}
         lastValidatedAt={lastValidatedAt}
         lastValidatedBy={lastValidatedBy}

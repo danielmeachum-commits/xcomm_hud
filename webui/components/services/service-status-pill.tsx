@@ -6,7 +6,7 @@ import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { ValidationDialog } from "@/components/validation-dialog"
 import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
-import type { StatusValue } from "@/lib/types"
+import type { CellStatus, StatusValue } from "@/lib/types"
 
 interface Props {
   serviceId: number
@@ -14,8 +14,9 @@ interface Props {
   /** Stored status — what the operator last validated. */
   status: StatusValue
   /** Effective status — same as status for local; for external it may be
-   * forced to "down" by gateway cascade. Shown if different from status. */
-  effectiveStatus?: StatusValue
+   * forced to "down" by gateway cascade, or resolve to "ready" if every
+   * path rides a ready-standby gateway. Shown if different from status. */
+  effectiveStatus?: CellStatus
   lastValidatedAt?: string | null
   lastValidatedBy?: string | null
   /** Optional whitelist of statuses this service can be set to. */

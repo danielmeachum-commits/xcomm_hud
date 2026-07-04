@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
 ServiceStatusValue = StatusValue
 GatewayStatusValue = Literal["active", "ready", "degraded", "down", "offline", "setup"]
+# A cell can inherit "ready" from a gateway on PACE standby (R9 cascade in
+# api/effective.py), so its allowed set is a superset of ServiceStatus.
+CellStatusValue = Literal[
+    "up", "degraded", "down", "unknown", "offline", "setup", "ready"
+]
 SiteStatusValue = Literal[
     "operational", "limited", "degraded", "maintenance", "standby", "offline", "setup"
 ]
@@ -362,8 +367,8 @@ class ServiceGatewayStatusOut(_ORM):
     """
 
     gateway_id: int
-    status: StatusValue
-    effective_status: StatusValue = "unknown"
+    status: CellStatusValue
+    effective_status: CellStatusValue = "unknown"
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
@@ -386,7 +391,10 @@ class ServiceOut(_ORM):
     icon: Optional[str] = None
     description: Optional[str] = None
     status: StatusValue
-    effective_status: StatusValue = "unknown"  # cascaded; same as status for local
+    # Rolled-up status can be "ready" when every reachable path routes
+    # through a gateway in PACE standby, so the effective side allows the
+    # cell-status superset (StatusValue + "ready").
+    effective_status: CellStatusValue = "unknown"
     allowed_statuses: Optional[list[StatusValue]] = None  # from template if has one
     enabled_pace: list[GatewayPace] = Field(
         default_factory=lambda: list(_DEFAULT_PACE)
@@ -511,7 +519,8 @@ class ServiceRollup(BaseModel):
     reach: ServiceReach
     icon: Optional[str] = None
     status: StatusValue
-    effective_status: StatusValue
+    # Same rationale as ServiceOut.effective_status — rollup can be "ready".
+    effective_status: CellStatusValue
     allowed_statuses: Optional[list[StatusValue]] = None
     site_id: int
     site_name: str
@@ -532,6 +541,7 @@ class EventOut(_ORM):
     validated_at: datetime.datetime
     subject_kind: SubjectKind
     subject_id: Optional[int] = None
+    second_subject_id: Optional[int] = None
     subject_name: Optional[str] = None
     subject_label: Optional[str] = None
     site_id: Optional[int] = None
@@ -604,3 +614,172 @@ class IngestPayload(BaseModel):
 class IngestAck(BaseModel):
     accepted: bool
     enclave_source_id: int
+
+
+# --- Site property templates ---
+
+SitePropertyType = Literal[
+    "text", "long_text", "number", "phone", "email", "url", "date", "bool"
+]
+SitePropertySource = Literal["template", "custom"]
+
+
+class SitePropertyDefinitionIn(BaseModel):
+    key: str
+    label: str
+    type: SitePropertyType = "text"
+    required: bool = False
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+
+
+class SitePropertyDefinitionPatch(BaseModel):
+    key: Optional[str] = None
+    label: Optional[str] = None
+    type: Optional[SitePropertyType] = None
+    required: Optional[bool] = None
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: Optional[int] = None
+
+
+class SitePropertyDefinitionOut(_ORM):
+    id: int
+    template_id: int
+    key: str
+    label: str
+    type: SitePropertyType
+    required: bool = False
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+
+
+class SitePropertyTemplateIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    group_order: list[str] = Field(default_factory=list)
+
+
+class SitePropertyTemplatePatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    group_order: Optional[list[str]] = None
+
+
+class SitePropertyTemplateOut(_ORM):
+    id: int
+    workspace_id: int
+    name: str
+    description: Optional[str] = None
+    group_order: list[str] = Field(default_factory=list)
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    definitions: list[SitePropertyDefinitionOut] = Field(default_factory=list)
+
+
+class SitePropertyTemplateDuplicateIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class RenameGroupIn(BaseModel):
+    """Rename or delete a group in one atomic operation.
+
+    `old` is the current group name (`None` means the implicit ungrouped
+    bucket — cannot be renamed but can absorb definitions on delete of
+    another group). `new` is the destination name; pass `None` to remove
+    the group entirely, moving its definitions to ungrouped.
+    """
+
+    old: Optional[str]
+    new: Optional[str]
+
+
+# Portable, ID-free representation of a template. `format_version` guards
+# breaking changes; bump on any incompatible schema shift.
+
+
+class ExportedSitePropertyDefinition(BaseModel):
+    key: str
+    label: str
+    type: SitePropertyType = "text"
+    required: bool = False
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+
+
+class SitePropertyTemplateExport(BaseModel):
+    format_version: Literal[1] = 1
+    exported_at: datetime.datetime
+    name: str
+    description: Optional[str] = None
+    group_order: list[str] = Field(default_factory=list)
+    definitions: list[ExportedSitePropertyDefinition] = Field(default_factory=list)
+
+
+class SitePropertyTemplateImportIn(BaseModel):
+    payload: SitePropertyTemplateExport
+    name_override: Optional[str] = None
+
+
+# --- Per-site properties ---
+
+
+class SitePropertyIn(BaseModel):
+    """Create a custom (ad-hoc) property on a site."""
+
+    key: str
+    label: str
+    type: SitePropertyType = "text"
+    required: bool = False
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+    value: Optional[Any] = None
+
+
+class SitePropertyPatch(BaseModel):
+    key: Optional[str] = None
+    label: Optional[str] = None
+    type: Optional[SitePropertyType] = None
+    required: Optional[bool] = None
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: Optional[int] = None
+    value: Optional[Any] = None
+
+
+class SitePropertyValueIn(BaseModel):
+    """Value-only write for the Details tab inline editor."""
+
+    value: Optional[Any] = None
+
+
+class SitePropertyOut(_ORM):
+    id: int
+    site_id: int
+    key: str
+    label: str
+    type: SitePropertyType
+    required: bool = False
+    group: Optional[str] = None
+    description: Optional[str] = None
+    display_order: int = 0
+    value: Optional[Any] = None
+    source: SitePropertySource = "custom"
+
+
+class SiteApplyTemplateIn(BaseModel):
+    """Apply a template's definitions to a site.
+
+    `mode="add"` keeps existing properties untouched — new definitions are
+    added, existing keys are left alone. `mode="replace"` removes any
+    template-sourced properties not in the template and refreshes the rest;
+    custom (ad-hoc) properties survive either mode.
+    """
+
+    template_id: int
+    mode: Literal["add", "replace"] = "add"

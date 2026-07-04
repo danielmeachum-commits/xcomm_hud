@@ -24,6 +24,8 @@ from routers import (
     service_gateway_status,
     service_templates,
     services,
+    site_properties,
+    site_property_templates,
     sites,
     status as status_router,
     users,
@@ -87,6 +89,8 @@ app.include_router(auth.router)
 app.include_router(workspaces.router)
 app.include_router(workspaces.me_router)
 app.include_router(sites.router)
+app.include_router(site_property_templates.router)
+app.include_router(site_properties.router)
 app.include_router(services.router)
 app.include_router(service_gateway_status.router)
 app.include_router(service_templates.router)

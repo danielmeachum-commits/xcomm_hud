@@ -136,7 +136,7 @@ const STATUS_GROUPS: MultiSelectGroup[] = [
 const STATUS_OPTIONS: MultiSelectOption[] = [
   { value: "up", label: "Up", group: "operational" },
   { value: "active", label: "Active", group: "operational" },
-  { value: "ready", label: "Ready", group: "operational" },
+  { value: "ready", label: "Standby", group: "operational" },
   { value: "operational", label: "Operational", group: "operational" },
   { value: "standby", label: "Standby", group: "operational" },
   { value: "limited", label: "Limited", group: "issue" },
@@ -713,6 +713,18 @@ function renderCell(key: ColumnKey, v: Event): React.ReactNode {
         </span>
       )
     case "subject_name":
+      // For paired subjects (matrix cells), surface the "svc via gw" label
+      // below the primary name so the gateway isn't hidden in the note.
+      if (v.subject_kind === "service_gateway" && v.subject_label) {
+        return (
+          <div className="flex flex-col leading-tight">
+            <span>{v.subject_name ?? `id ${v.subject_id}`}</span>
+            <span className="text-[10px] text-muted-foreground">
+              {v.subject_label}
+            </span>
+          </div>
+        )
+      }
       return v.subject_name ?? `id ${v.subject_id}`
     case "site_name":
       return v.site_name ?? "—"

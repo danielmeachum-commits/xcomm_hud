@@ -69,6 +69,17 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 site = db.get(Site, gw.site_id)
                 if site:
                     out.site_name = site.name
+        elif v.subject_kind == "service_gateway":
+            # subject_id is the service; the gateway lives in second_subject_id
+            # so subject_name stays the service, and subject_label carries the
+            # "svc via gw" hint that the UI shows as a subtitle.
+            svc = db.get(Service, v.subject_id)
+            if svc:
+                out.subject_name = svc.name
+                out.site_id = svc.site_id
+                site = db.get(Site, svc.site_id)
+                if site:
+                    out.site_name = site.name
         elif v.subject_kind in ("site", "site_fpcon", "site_emcon"):
             site = db.get(Site, v.subject_id)
             if site:
@@ -107,6 +118,7 @@ def list_events(
     event_type: Optional[EventType] = Query(default=None),
     subject_kind: Optional[SubjectKind] = Query(default=None),
     subject_id: Optional[int] = Query(default=None),
+    second_subject_id: Optional[int] = Query(default=None),
     since: Optional[datetime.datetime] = Query(default=None),
     include_hidden: bool = Query(default=False),
     limit: int = Query(default=200, ge=1, le=2000),
@@ -118,6 +130,8 @@ def list_events(
         q = q.filter(Event.subject_kind == subject_kind)
     if subject_id:
         q = q.filter(Event.subject_id == subject_id)
+    if second_subject_id:
+        q = q.filter(Event.second_subject_id == second_subject_id)
     if since:
         q = q.filter(Event.validated_at >= since)
     if not include_hidden:

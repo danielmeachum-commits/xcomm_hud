@@ -3,7 +3,14 @@ import { notFound } from "next/navigation"
 import { requireSession } from "@/lib/auth"
 import { apiGet, ApiError } from "@/lib/api"
 import { SiteDetailClient } from "@/components/sites/site-detail-client"
-import type { Gateway, Service, ServiceTemplate, Site } from "@/lib/types"
+import type {
+  Gateway,
+  Service,
+  ServiceTemplate,
+  Site,
+  SiteProperty,
+  SitePropertyTemplate,
+} from "@/lib/types"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -23,12 +30,25 @@ export default async function SiteDetailPage({ params }: PageProps) {
     throw err
   }
 
-  const [allServices, allSites, gateways, templates] = await Promise.all([
+  const [
+    allServices,
+    allSites,
+    gateways,
+    templates,
+    properties,
+    propertyTemplates,
+  ] = await Promise.all([
     apiGet<Service[]>(`/services`).catch(() => [] as Service[]),
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
     apiGet<Gateway[]>(`/sites/${siteId}/gateways`).catch(() => [] as Gateway[]),
     apiGet<ServiceTemplate[]>(`/service-templates`).catch(
       () => [] as ServiceTemplate[],
+    ),
+    apiGet<SiteProperty[]>(`/sites/${siteId}/properties`).catch(
+      () => [] as SiteProperty[],
+    ),
+    apiGet<SitePropertyTemplate[]>(`/site-property-templates`).catch(
+      () => [] as SitePropertyTemplate[],
     ),
   ])
 
@@ -41,6 +61,8 @@ export default async function SiteDetailPage({ params }: PageProps) {
       gateways={gateways}
       sites={allSites}
       templates={templates}
+      properties={properties}
+      propertyTemplates={propertyTemplates}
     />
   )
 }
