@@ -21,6 +21,7 @@ from routers import (
     events,
     gateways,
     ingest,
+    personnel,
     service_gateway_status,
     service_templates,
     services,
@@ -28,7 +29,10 @@ from routers import (
     site_property_templates,
     sites,
     status as status_router,
+    teams,
+    units,
     users,
+    work_centers,
     workspaces,
 )
 from schemas import MeOut, WorkspaceOut
@@ -101,6 +105,10 @@ app.include_router(events.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
 app.include_router(enclave_sources.router)
+app.include_router(units.router)
+app.include_router(work_centers.router)
+app.include_router(teams.router)
+app.include_router(personnel.router)
 
 
 @app.get("/health")

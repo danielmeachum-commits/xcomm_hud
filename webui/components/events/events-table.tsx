@@ -12,6 +12,11 @@ import {
 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { PersonnelStatusBadge } from "@/components/personnel/personnel-status-badge"
+import {
+  PERSONNEL_STATUS_LABELS,
+  PERSONNEL_STATUSES,
+} from "@/lib/personnel-data"
 import { LocalTime } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -42,6 +47,7 @@ import type {
   Fpcon,
   Gateway,
   Me,
+  PersonnelStatus,
   Service,
   Site,
   SubjectKind,
@@ -105,6 +111,7 @@ function renderLevelBadge(kind: "fpcon" | "emcon", value: string) {
 
 const KIND_GROUPS: MultiSelectGroup[] = [
   { key: "validation", label: "Validation" },
+  { key: "personnel", label: "Personnel" },
   { key: "general", label: "General" },
 ]
 
@@ -115,6 +122,7 @@ const KIND_OPTIONS: MultiSelectOption[] = [
   { value: "site_status", label: "Site status", group: "validation" },
   { value: "site_fpcon", label: "Site FPCON", group: "validation" },
   { value: "site_emcon", label: "Site EMCON", group: "validation" },
+  { value: "personnel_location", label: "Personnel", group: "personnel" },
   { value: "system", label: "System", group: "general" },
   { value: "mission", label: "Mission", group: "general" },
   { value: "exercise", label: "Exercise", group: "general" },
@@ -130,8 +138,19 @@ const STATUS_GROUPS: MultiSelectGroup[] = [
   { key: "operational", label: "Operational" },
   { key: "issue", label: "Issue" },
   { key: "transitional", label: "Transitional" },
+  { key: "personnel", label: "Personnel" },
   { key: "other", label: "Other" },
 ]
+
+// Personnel sign-in states carried by personnel_location events. Skip
+// "unknown" — the "other" group already contributes that value.
+const PERSONNEL_STATUS_OPTIONS: MultiSelectOption[] = PERSONNEL_STATUSES.filter(
+  (s) => s !== "unknown",
+).map((s) => ({
+  value: s,
+  label: PERSONNEL_STATUS_LABELS[s],
+  group: "personnel",
+}))
 
 const STATUS_OPTIONS: MultiSelectOption[] = [
   { value: "up", label: "Up", group: "operational" },
@@ -155,6 +174,7 @@ const STATUS_OPTIONS: MultiSelectOption[] = [
   { value: "b", label: "EMCON B", group: "other" },
   { value: "c", label: "EMCON C", group: "other" },
   { value: "d", label: "EMCON D", group: "other" },
+  ...PERSONNEL_STATUS_OPTIONS,
 ]
 
 type SortKey = "validated_at" | "subject_kind" | "subject_name" | "site_name" | "status" | "operator"
@@ -751,6 +771,11 @@ function renderStatusValue(
   const threatKind = isFpcon ? "fpcon" : isEmcon ? "emcon" : null
   if (threatKind) {
     return renderLevelBadge(threatKind, value)
+  }
+  if (subject_kind === "personnel_location") {
+    // Personnel status uses its own badge palette (colored dot) — keep the
+    // events feed consistent with the personnel pages.
+    return <PersonnelStatusBadge status={value as PersonnelStatus} />
   }
   return (
     <span className="inline-flex items-center gap-2">

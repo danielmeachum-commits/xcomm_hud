@@ -144,6 +144,23 @@ export function statusLabel(s: AnyStatus): string {
       return "Offline"
     case "setup":
       return "Setup"
+    // Personnel sign-in states.
+    case "on_site":
+      return "On site"
+    case "traveling":
+      return "Traveling"
+    case "off_site":
+      return "Off site"
+    case "out_of_office":
+      return "Out of office"
+    case "lunch":
+      return "Lunch"
+    case "leave":
+      return "Leave"
+    case "sick":
+      return "Sick"
+    case "training":
+      return "Training"
     case "unknown":
     default:
       return "Unknown"

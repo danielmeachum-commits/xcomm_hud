@@ -1,0 +1,489 @@
+"""Personnel CRUD + CSV bulk import.
+
+Personnel are a workspace-scoped roster. Team assignments live on the
+`personnel_team` join and are exposed on read as `team_ids` for a compact
+UI-friendly shape.
+"""
+
+from __future__ import annotations
+
+import csv
+import datetime
+import io
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from db import get_db
+from deps import get_current_workspace, requires
+from auth import get_current_user
+from models import (
+    Event,
+    Personnel,
+    PersonnelLocationEvent,
+    PersonnelTeam,
+    Site,
+    Team,
+    Unit,
+    User,
+    WorkCenter,
+    Workspace,
+)
+from pubsub import notify
+from schemas import (
+    PersonnelCheckInIn,
+    PersonnelCsvImportIn,
+    PersonnelCsvImportOut,
+    PersonnelIn,
+    PersonnelLocationEventOut,
+    PersonnelOut,
+    PersonnelPatch,
+)
+
+router = APIRouter(prefix="/personnel", tags=["personnel"])
+
+
+def _to_out(p: Personnel) -> dict:
+    """Serialize a Personnel row with team_ids resolved from the join."""
+    return {
+        "id": p.id,
+        "workspace_id": p.workspace_id,
+        "personnel_type": p.personnel_type,
+        "branch": p.branch,
+        "rank": p.rank,
+        "last_name": p.last_name,
+        "first_name": p.first_name,
+        "cellphone": p.cellphone,
+        "dsn": p.dsn,
+        "sipr_number": p.sipr_number,
+        "email": p.email,
+        "notes": p.notes,
+        "work_center_id": p.work_center_id,
+        "unit_id": p.unit_id,
+        "supervisor_id": p.supervisor_id,
+        "assigned_site_id": p.assigned_site_id,
+        "room_number": p.room_number,
+        "team_ids": [t.id for t in p.teams],
+        "current_status": p.current_status,
+        "current_site_id": p.current_site_id,
+        "current_status_since": p.current_status_since,
+        "current_status_note": p.current_status_note,
+        "expected_return_at": p.expected_return_at,
+        "created_at": p.created_at,
+        "updated_at": p.updated_at,
+    }
+
+
+def _load(db: Session, pid: int, workspace: Workspace) -> Personnel:
+    p = db.get(Personnel, pid)
+    if p is None or p.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Personnel not found")
+    return p
+
+
+def _validate_refs(
+    db: Session,
+    workspace: Workspace,
+    *,
+    work_center_id: int | None,
+    unit_id: int | None,
+    supervisor_id: int | None,
+    assigned_site_id: int | None,
+    self_id: int | None,
+) -> None:
+    if work_center_id is not None:
+        wc = db.get(WorkCenter, work_center_id)
+        if wc is None or wc.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Work center not found"
+            )
+    if unit_id is not None:
+        u = db.get(Unit, unit_id)
+        if u is None or u.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Unit not found"
+            )
+    if supervisor_id is not None:
+        if self_id is not None and supervisor_id == self_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "A person cannot be their own supervisor",
+            )
+        sup = db.get(Personnel, supervisor_id)
+        if sup is None or sup.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Supervisor not found"
+            )
+    if assigned_site_id is not None:
+        s = db.get(Site, assigned_site_id)
+        if s is None or s.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Assigned site not found"
+            )
+
+
+def _resolve_teams(
+    db: Session, workspace: Workspace, team_ids: list[int]
+) -> list[Team]:
+    if not team_ids:
+        return []
+    teams = (
+        db.query(Team)
+        .filter(Team.id.in_(team_ids), Team.workspace_id == workspace.id)
+        .all()
+    )
+    if len(teams) != len(set(team_ids)):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "One or more teams not found in this workspace",
+        )
+    return teams
+
+
+@router.get("", response_model=list[PersonnelOut])
+def list_personnel(
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    people = (
+        db.query(Personnel)
+        .filter(Personnel.workspace_id == workspace.id)
+        .order_by(Personnel.last_name, Personnel.first_name)
+        .all()
+    )
+    return [_to_out(p) for p in people]
+
+
+@router.post("", response_model=PersonnelOut, status_code=status.HTTP_201_CREATED)
+def create_personnel(
+    body: PersonnelIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    _validate_refs(
+        db,
+        workspace,
+        work_center_id=body.work_center_id,
+        unit_id=body.unit_id,
+        supervisor_id=body.supervisor_id,
+        assigned_site_id=body.assigned_site_id,
+        self_id=None,
+    )
+    teams = _resolve_teams(db, workspace, body.team_ids)
+    data = body.model_dump(exclude={"team_ids"})
+    p = Personnel(workspace_id=workspace.id, **data)
+    p.teams = teams
+    db.add(p)
+    db.flush()
+    notify(background_tasks)
+    return _to_out(p)
+
+
+@router.get("/{pid}", response_model=PersonnelOut)
+def get_personnel(
+    pid: int,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    return _to_out(_load(db, pid, workspace))
+
+
+@router.patch("/{pid}", response_model=PersonnelOut)
+def patch_personnel(
+    pid: int,
+    body: PersonnelPatch,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    p = _load(db, pid, workspace)
+    data = body.model_dump(exclude_unset=True)
+    _validate_refs(
+        db,
+        workspace,
+        work_center_id=data.get("work_center_id", p.work_center_id),
+        unit_id=data.get("unit_id", p.unit_id),
+        supervisor_id=data.get("supervisor_id", p.supervisor_id),
+        assigned_site_id=data.get("assigned_site_id", p.assigned_site_id),
+        self_id=p.id,
+    )
+    team_ids = data.pop("team_ids", None)
+    for k, v in data.items():
+        setattr(p, k, v)
+    if team_ids is not None:
+        p.teams = _resolve_teams(db, workspace, team_ids)
+    db.flush()
+    notify(background_tasks)
+    return _to_out(p)
+
+
+@router.delete("/{pid}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_personnel(
+    pid: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("admin")),
+):
+    p = _load(db, pid, workspace)
+    # Break any supervisor pointers that reference this person before delete;
+    # ondelete=SET NULL would handle it, but flushing here keeps the ORM state
+    # consistent for the notify payload.
+    db.query(Personnel).filter(Personnel.supervisor_id == p.id).update(
+        {Personnel.supervisor_id: None}
+    )
+    db.delete(p)
+    notify(background_tasks)
+
+
+@router.post("/{pid}/checkin", response_model=PersonnelOut)
+def checkin_personnel(
+    pid: int,
+    body: PersonnelCheckInIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+):
+    """Sign a person in / out. Appends a PersonnelLocationEvent and updates
+    the denormalized current_* fields on the Personnel row.
+    """
+    p = _load(db, pid, workspace)
+    # on_site carries the present location; traveling carries the destination.
+    # Both require a site; every other status is site-less.
+    if body.status in ("on_site", "traveling"):
+        if body.site_id is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"site_id is required when status is {body.status}",
+            )
+        site = db.get(Site, body.site_id)
+        if site is None or site.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Site not found"
+            )
+        target_site_id: int | None = body.site_id
+    else:
+        # Site-less status drops the site link even if the client sent one —
+        # keeps history honest.
+        target_site_id = None
+    when = body.changed_at or datetime.datetime.now(datetime.timezone.utc)
+    prev_status = p.current_status
+    db.add(
+        PersonnelLocationEvent(
+            personnel_id=p.id,
+            status=body.status,
+            site_id=target_site_id,
+            note=body.note,
+            expected_return_at=body.expected_return_at,
+            changed_at=when,
+            changed_by_user_id=current_user.id,
+        )
+    )
+    # Also append to the workspace event feed so the Events page reflects
+    # sign-in/out changes alongside every other status change. The person
+    # detail page still reads its own history from personnel_location_event.
+    db.add(
+        Event(
+            event_type="validation",
+            validated_at=when,
+            subject_kind="personnel_location",
+            subject_id=p.id,
+            second_subject_id=target_site_id,
+            subject_label=f"{p.last_name}, {p.first_name}",
+            prev_status=prev_status,
+            status=body.status,
+            source="manual",
+            validated_by_user_id=current_user.id,
+            note=body.note,
+        )
+    )
+    p.current_status = body.status
+    p.current_site_id = target_site_id
+    p.current_status_since = when
+    p.current_status_note = body.note
+    p.expected_return_at = body.expected_return_at
+    db.flush()
+    notify(background_tasks)
+    return _to_out(p)
+
+
+@router.get(
+    "/{pid}/history",
+    response_model=list[PersonnelLocationEventOut],
+)
+def list_personnel_history(
+    pid: int,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    _load(db, pid, workspace)  # 404 if not in workspace
+    return (
+        db.query(PersonnelLocationEvent)
+        .filter(PersonnelLocationEvent.personnel_id == pid)
+        .order_by(PersonnelLocationEvent.changed_at.desc())
+        .limit(max(1, min(500, limit)))
+        .all()
+    )
+
+
+CSV_COLUMNS = {
+    "first_name",
+    "last_name",
+    "personnel_type",
+    "branch",
+    "rank",
+    "cellphone",
+    "dsn",
+    "sipr_number",
+    "email",
+    "notes",
+    "work_center",
+    "unit",
+    "room_number",
+}
+REQUIRED_CSV_COLUMNS = {"first_name", "last_name"}
+
+
+@router.post(
+    "/import-csv",
+    response_model=PersonnelCsvImportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_personnel_csv(
+    body: PersonnelCsvImportIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    """Bulk create personnel from a CSV blob. See PersonnelCsvImportIn docs."""
+    reader = csv.DictReader(io.StringIO(body.csv_text))
+    if reader.fieldnames is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "CSV has no header row"
+        )
+    headers = {(h or "").strip().lower() for h in reader.fieldnames}
+    missing = REQUIRED_CSV_COLUMNS - headers
+    if missing:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Missing required CSV columns: {', '.join(sorted(missing))}",
+        )
+
+    # Pre-load existing work centers / units for name lookup.
+    wc_by_name = {
+        wc.name.lower(): wc
+        for wc in db.query(WorkCenter)
+        .filter(WorkCenter.workspace_id == workspace.id)
+        .all()
+    }
+    unit_by_name = {
+        u.name.lower(): u
+        for u in db.query(Unit)
+        .filter(Unit.workspace_id == workspace.id)
+        .all()
+    }
+
+    imported = 0
+    skipped = 0
+    created_wc: list[str] = []
+    created_units: list[str] = []
+    errors: list[str] = []
+
+    for idx, raw in enumerate(reader, start=2):  # header is line 1
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+        first_name = row.get("first_name") or ""
+        last_name = row.get("last_name") or ""
+        if not first_name or not last_name:
+            skipped += 1
+            errors.append(f"line {idx}: missing first_name or last_name")
+            continue
+
+        personnel_type = row.get("personnel_type") or "military"
+        if personnel_type not in {"military", "civilian"}:
+            personnel_type = "military"
+
+        branch = row.get("branch") or None
+        if branch and branch not in {
+            "air_force",
+            "army",
+            "navy",
+            "marines",
+            "space_force",
+            "coast_guard",
+        }:
+            # Normalize a few common variants; unrecognized -> drop.
+            normalized = branch.lower().replace(" ", "_").replace("-", "_")
+            if normalized in {
+                "air_force",
+                "army",
+                "navy",
+                "marines",
+                "marine_corps",
+                "space_force",
+                "coast_guard",
+            }:
+                branch = "marines" if normalized == "marine_corps" else normalized
+            else:
+                branch = None
+        if personnel_type == "military" and branch is None:
+            branch = "air_force"
+
+        wc_name = row.get("work_center") or ""
+        wc_row: WorkCenter | None = None
+        if wc_name:
+            wc_row = wc_by_name.get(wc_name.lower())
+            if wc_row is None and body.create_missing:
+                wc_row = WorkCenter(workspace_id=workspace.id, name=wc_name)
+                db.add(wc_row)
+                db.flush()
+                wc_by_name[wc_name.lower()] = wc_row
+                created_wc.append(wc_name)
+
+        unit_name = row.get("unit") or ""
+        unit_row: Unit | None = None
+        if unit_name:
+            unit_row = unit_by_name.get(unit_name.lower())
+            if unit_row is None and body.create_missing:
+                unit_row = Unit(workspace_id=workspace.id, name=unit_name)
+                db.add(unit_row)
+                db.flush()
+                unit_by_name[unit_name.lower()] = unit_row
+                created_units.append(unit_name)
+
+        p = Personnel(
+            workspace_id=workspace.id,
+            personnel_type=personnel_type,
+            branch=branch,
+            rank=row.get("rank") or None,
+            last_name=last_name,
+            first_name=first_name,
+            cellphone=row.get("cellphone") or None,
+            dsn=row.get("dsn") or None,
+            sipr_number=row.get("sipr_number") or None,
+            email=row.get("email") or None,
+            notes=row.get("notes") or None,
+            work_center_id=wc_row.id if wc_row else None,
+            unit_id=unit_row.id if unit_row else None,
+            room_number=row.get("room_number") or None,
+        )
+        db.add(p)
+        imported += 1
+
+    db.flush()
+    notify(background_tasks)
+    return PersonnelCsvImportOut(
+        imported=imported,
+        skipped=skipped,
+        created_work_centers=created_wc,
+        created_units=created_units,
+        errors=errors,
+    )

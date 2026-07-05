@@ -26,6 +26,10 @@ AnyStatusValue = Literal[
     "operational", "limited", "maintenance", "standby",
     "normal", "alpha", "bravo", "charlie", "delta",
     "a", "b", "c", "d",
+    # Personnel sign-in states — appear on Event rows with
+    # subject_kind == "personnel_location".
+    "on_site", "traveling", "off_site", "out_of_office", "lunch", "leave",
+    "sick", "training",
 ]
 ServiceKind = Literal["voice", "data", "other"]
 ServiceCategory = Literal["critical", "sustainment", "other"]
@@ -41,6 +45,7 @@ SubjectKind = Literal[
     "site_fpcon",
     "site_emcon",
     "site_status",
+    "personnel_location",
     "system",
     "mission",
     "exercise",
@@ -57,6 +62,7 @@ VALIDATION_SUBJECT_KINDS = {
     "site_fpcon",
     "site_emcon",
     "site_status",
+    "personnel_location",
 }
 GENERAL_SUBJECT_KINDS = {"system", "mission", "exercise"}
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
@@ -188,7 +194,9 @@ class ExportedWorkspaceMeta(BaseModel):
 
 
 class WorkspaceExport(BaseModel):
-    format_version: Literal[1] = 1
+    # v2 added units / work_centers / teams / personnel. Old (v1) payloads
+    # remain valid — the new lists default to empty.
+    format_version: Literal[1, 2] = 2
     exported_at: datetime.datetime
     workspace: ExportedWorkspaceMeta
     sites: list[ExportedSite] = Field(default_factory=list)
@@ -196,6 +204,10 @@ class WorkspaceExport(BaseModel):
     gateways: list[ExportedGateway] = Field(default_factory=list)
     positions: list[ExportedPosition] = Field(default_factory=list)
     annotations: list[ExportedAnnotation] = Field(default_factory=list)
+    units: list["ExportedUnit"] = Field(default_factory=list)
+    work_centers: list["ExportedWorkCenter"] = Field(default_factory=list)
+    teams: list["ExportedTeam"] = Field(default_factory=list)
+    personnel: list["ExportedPersonnel"] = Field(default_factory=list)
 
 
 class WorkspaceImportIn(BaseModel):
@@ -571,6 +583,12 @@ class EventNotePatch(BaseModel):
     note: Optional[str] = None
 
 
+class EventEditIn(BaseModel):
+    note: Optional[str] = None
+    status: Optional[AnyStatusValue] = None
+    validated_at: Optional[datetime.datetime] = None
+
+
 class EventBulkIds(BaseModel):
     ids: list[int]
 
@@ -783,3 +801,251 @@ class SiteApplyTemplateIn(BaseModel):
 
     template_id: int
     mode: Literal["add", "replace"] = "add"
+
+
+# --- Personnel, work centers, teams, units ---
+
+PersonnelType = Literal["military", "civilian"]
+Branch = Literal[
+    "air_force", "army", "navy", "marines", "space_force", "coast_guard"
+]
+PersonnelStatusValue = Literal[
+    "unknown",
+    "on_site",
+    "traveling",
+    "off_site",
+    "out_of_office",
+    "lunch",
+    "leave",
+    "sick",
+    "training",
+]
+
+
+class UnitIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parent_unit_id: Optional[int] = None
+
+
+class UnitPatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    parent_unit_id: Optional[int] = None
+
+
+class UnitOut(_ORM):
+    id: int
+    workspace_id: int
+    name: str
+    description: Optional[str] = None
+    parent_unit_id: Optional[int] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class WorkCenterIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class WorkCenterPatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class WorkCenterOut(_ORM):
+    id: int
+    workspace_id: int
+    name: str
+    description: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class TeamIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class TeamPatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class TeamOut(_ORM):
+    id: int
+    workspace_id: int
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class PersonnelIn(BaseModel):
+    personnel_type: PersonnelType = "military"
+    branch: Optional[Branch] = "air_force"
+    rank: Optional[str] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    work_center_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+    assigned_site_id: Optional[int] = None
+    room_number: Optional[str] = None
+    team_ids: list[int] = Field(default_factory=list)
+
+
+class PersonnelPatch(BaseModel):
+    personnel_type: Optional[PersonnelType] = None
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    work_center_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+    assigned_site_id: Optional[int] = None
+    room_number: Optional[str] = None
+    team_ids: Optional[list[int]] = None
+
+
+class PersonnelOut(_ORM):
+    id: int
+    workspace_id: int
+    personnel_type: PersonnelType
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    work_center_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+    assigned_site_id: Optional[int] = None
+    room_number: Optional[str] = None
+    team_ids: list[int] = Field(default_factory=list)
+    current_status: PersonnelStatusValue = "unknown"
+    current_site_id: Optional[int] = None
+    current_status_since: Optional[datetime.datetime] = None
+    current_status_note: Optional[str] = None
+    expected_return_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class PersonnelCheckInIn(BaseModel):
+    """Sign-in / sign-out: set the person's current location status.
+
+    `site_id` carries the present location for `on_site` (required) and the
+    destination for `traveling`; it is ignored for site-less statuses. The
+    endpoint appends a PersonnelLocationEvent row and updates the denormalized
+    current_* fields on the Personnel row so lists stay fast.
+    `expected_return_at` is an optional accountability timer.
+    """
+
+    status: PersonnelStatusValue
+    site_id: Optional[int] = None
+    note: Optional[str] = None
+    expected_return_at: Optional[datetime.datetime] = None
+    changed_at: Optional[datetime.datetime] = None  # override; defaults to now
+
+
+class PersonnelLocationEventOut(_ORM):
+    id: int
+    personnel_id: int
+    status: PersonnelStatusValue
+    site_id: Optional[int] = None
+    note: Optional[str] = None
+    expected_return_at: Optional[datetime.datetime] = None
+    changed_at: datetime.datetime
+    changed_by_user_id: Optional[int] = None
+
+
+class PersonnelCsvImportIn(BaseModel):
+    """Bulk import from CSV. `csv_text` is the raw file body as string.
+
+    Column mapping (header row required, case-insensitive):
+      first_name, last_name, personnel_type, branch, rank, cellphone, dsn,
+      sipr_number, email, notes, work_center, unit, room_number.
+    Missing optional columns are fine. Work center / unit are matched by
+    name and auto-created if missing.
+    """
+
+    csv_text: str
+    # If true, missing work centers / units named in the CSV are created.
+    # Off means unknown names are ignored (person still imports without them).
+    create_missing: bool = True
+
+
+class PersonnelCsvImportOut(BaseModel):
+    imported: int
+    skipped: int
+    created_work_centers: list[str] = Field(default_factory=list)
+    created_units: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+# Portable export shapes — reference parents by name, no ids.
+
+
+class ExportedUnit(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parent_unit_name: Optional[str] = None
+
+
+class ExportedWorkCenter(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class ExportedTeam(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class ExportedPersonnel(BaseModel):
+    personnel_type: PersonnelType = "military"
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+    work_center_name: Optional[str] = None
+    unit_name: Optional[str] = None
+    # Supervisor referenced by "Last, First" — enough given personnel are
+    # workspace-scoped and rarely duplicated. If duplicates exist, first
+    # match wins on import.
+    supervisor_key: Optional[str] = None
+    assigned_site_name: Optional[str] = None
+    room_number: Optional[str] = None
+    team_names: list[str] = Field(default_factory=list)
+    # Current sign-in state at export time. Preserved through duplicate/import
+    # so a snapshot doesn't lose the location board.
+    current_status: PersonnelStatusValue = "unknown"
+    current_site_name: Optional[str] = None
+    current_status_note: Optional[str] = None
+    expected_return_at: Optional[datetime.datetime] = None

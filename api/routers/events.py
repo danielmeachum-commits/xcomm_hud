@@ -18,17 +18,18 @@ import asyncio
 import datetime
 from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import Event, Gateway, Service, Site, User
-from pubsub import broadcaster
+from models import Event, Gateway, Personnel, Service, ServiceGatewayStatus, Site, User
+from pubsub import broadcaster, notify
 from schemas import (
     EventBulkIds,
     EventCreateIn,
+    EventEditIn,
     EventNotePatch,
     EventOut,
     EventType,
@@ -80,12 +81,24 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 site = db.get(Site, svc.site_id)
                 if site:
                     out.site_name = site.name
-        elif v.subject_kind in ("site", "site_fpcon", "site_emcon"):
+        elif v.subject_kind in ("site", "site_fpcon", "site_emcon", "site_status"):
             site = db.get(Site, v.subject_id)
             if site:
                 out.subject_name = site.name
                 out.site_id = site.id
                 out.site_name = site.name
+        elif v.subject_kind == "personnel_location":
+            # subject_id is the personnel row; second_subject_id (when set)
+            # is the site they signed into. Fill site_name off that so the
+            # events table's site column stays useful.
+            p = db.get(Personnel, v.subject_id)
+            if p:
+                out.subject_name = f"{p.last_name}, {p.first_name}"
+            if v.second_subject_id is not None:
+                site = db.get(Site, v.second_subject_id)
+                if site:
+                    out.site_id = site.id
+                    out.site_name = site.name
     # For general events, fall back to the free-text label as the display name.
     if out.subject_name is None and v.subject_label:
         out.subject_name = v.subject_label
@@ -207,14 +220,19 @@ def create_event(
 
 
 @router.patch("/{event_id}", response_model=EventOut)
-def edit_event_note(
+def edit_event(
     event_id: int,
-    body: EventNotePatch,
+    body: EventEditIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(requires("operator")),
 ):
-    """Edit the note field only. Admins can edit any row; operators only their
-    own. Sets `edited_at` so downstream consumers can flag amended entries.
+    """Edit note, status, and/or validated_at on an event.
+
+    Admins can edit any row; operators only their own. Sets `edited_at` for
+    audit. If status or validated_at is changed *and* this event is the most
+    recent non-hidden validation for its subject, the subject's live status
+    and validated_at are updated to match.
     """
     row = db.get(Event, event_id)
     if row is None or row.hidden_at is not None:
@@ -224,10 +242,167 @@ def edit_event_note(
             status.HTTP_403_FORBIDDEN,
             "Only the author or an admin can edit this event",
         )
+
+    mutated_status = body.status is not None and body.status != row.status
+    mutated_ts = body.validated_at is not None and body.validated_at != row.validated_at
+
     row.note = body.note
+    if body.status is not None:
+        row.status = body.status
+    if body.validated_at is not None:
+        row.validated_at = body.validated_at
     row.edited_at = _now()
     db.flush()
+
+    # Propagate status/timestamp change to the live subject if this was the
+    # most recent validation. Only applies to validation-kind events that
+    # reference a known subject.
+    if (mutated_status or mutated_ts) and row.event_type == "validation":
+        _maybe_update_subject(db, row, background_tasks)
+
     return _enrich(db, row)
+
+
+@router.post("/{event_id}/revert", response_model=EventOut)
+def revert_event(
+    event_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(requires("operator")),
+):
+    """Hide the event and restore the subject to its previous status.
+
+    Only permitted when this event is the most recent non-hidden validation
+    for its subject (reverting older events would leave the subject in an
+    inconsistent state). Admins may revert any event; operators only their own.
+    """
+    row = db.get(Event, event_id)
+    if row is None or row.hidden_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Event not found")
+    if current_user.role != "admin" and row.validated_by_user_id != current_user.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only the author or an admin can revert this event",
+        )
+    if row.subject_kind not in VALIDATION_SUBJECT_KINDS or row.subject_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Only validation events with a known subject can be reverted",
+        )
+
+    # Confirm this is the most recent non-hidden validation for this subject.
+    q = (
+        db.query(Event)
+        .filter(
+            Event.subject_kind == row.subject_kind,
+            Event.subject_id == row.subject_id,
+            Event.event_type == "validation",
+            Event.hidden_at.is_(None),
+        )
+    )
+    if row.second_subject_id is not None:
+        q = q.filter(Event.second_subject_id == row.second_subject_id)
+    latest = q.order_by(Event.validated_at.desc()).first()
+    if latest is None or latest.id != row.id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only the most recent validation can be reverted",
+        )
+
+    row.hidden_at = _now()
+    row.hidden_by_user_id = current_user.id
+    db.flush()
+
+    # Restore subject status to prev_status, falling back to "unknown".
+    restore_status = row.prev_status or "unknown"
+    # Find the previous event's timestamp to use as the restored validated_at.
+    prev_event = (
+        db.query(Event)
+        .filter(
+            Event.subject_kind == row.subject_kind,
+            Event.subject_id == row.subject_id,
+            Event.event_type == "validation",
+            Event.hidden_at.is_(None),
+            Event.id != row.id,
+        )
+    )
+    if row.second_subject_id is not None:
+        prev_event = prev_event.filter(Event.second_subject_id == row.second_subject_id)
+    prev_row = prev_event.order_by(Event.validated_at.desc()).first()
+    restore_ts = prev_row.validated_at if prev_row else None
+
+    _apply_subject_status(db, row, restore_status, restore_ts, current_user.id, background_tasks)
+    return _enrich(db, row)
+
+
+def _is_most_recent_for_subject(db: Session, row: Event) -> bool:
+    """True when `row` is the latest non-hidden validation for its subject."""
+    q = (
+        db.query(Event)
+        .filter(
+            Event.subject_kind == row.subject_kind,
+            Event.subject_id == row.subject_id,
+            Event.event_type == "validation",
+            Event.hidden_at.is_(None),
+        )
+    )
+    if row.second_subject_id is not None:
+        q = q.filter(Event.second_subject_id == row.second_subject_id)
+    latest = q.order_by(Event.validated_at.desc()).first()
+    return latest is not None and latest.id == row.id
+
+
+def _maybe_update_subject(
+    db: Session, row: Event, background_tasks: BackgroundTasks
+) -> None:
+    """If `row` is the current validation for its subject, propagate changes."""
+    if not _is_most_recent_for_subject(db, row):
+        return
+    if row.status is None:
+        return
+    _apply_subject_status(db, row, row.status, row.validated_at, row.validated_by_user_id, background_tasks)
+
+
+def _apply_subject_status(
+    db: Session,
+    row: Event,
+    new_status: str,
+    new_ts,
+    user_id,
+    background_tasks: BackgroundTasks,
+) -> None:
+    """Write `new_status`/`new_ts` back to the live subject row."""
+    if row.subject_kind == "service":
+        svc = db.get(Service, row.subject_id)
+        if svc:
+            svc.status = new_status
+            svc.validated_at = new_ts
+            svc.validated_by_user_id = user_id
+            db.flush()
+            notify(background_tasks)
+    elif row.subject_kind == "gateway":
+        gw = db.get(Gateway, row.subject_id)
+        if gw:
+            gw.status = new_status
+            gw.validated_at = new_ts
+            gw.validated_by_user_id = user_id
+            db.flush()
+            notify(background_tasks)
+    elif row.subject_kind == "service_gateway" and row.second_subject_id is not None:
+        cell = (
+            db.query(ServiceGatewayStatus)
+            .filter(
+                ServiceGatewayStatus.service_id == row.subject_id,
+                ServiceGatewayStatus.gateway_id == row.second_subject_id,
+            )
+            .one_or_none()
+        )
+        if cell:
+            cell.status = new_status
+            cell.validated_at = new_ts
+            cell.validated_by_user_id = user_id
+            db.flush()
+            notify(background_tasks)
 
 
 @router.post("/bulk-hide", response_model=list[EventOut])

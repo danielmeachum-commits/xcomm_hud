@@ -50,6 +50,7 @@ import { useWorkspace } from "@/lib/workspace"
 
 const SECONDARY_NAV_ITEMS = [
   { path: "/services", label: "Services", icon: Radio },
+  { path: "/personnel", label: "Personnel", icon: Users },
   { path: "/events", label: "Events", icon: Bell },
 ]
 
@@ -58,6 +59,9 @@ const SECONDARY_NAV_ITEMS = [
 const WORKSPACE_ADMIN_ITEMS = [
   { path: "/admin/gateways", label: "Gateways", icon: Network },
   { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
+  { path: "/admin/work-centers", label: "Work centers", icon: Users },
+  { path: "/admin/teams", label: "Teams", icon: Users },
+  { path: "/admin/units", label: "Units", icon: Users },
 ]
 const GLOBAL_ADMIN_ITEMS = [
   { href: "/admin/users", label: "Users", icon: Users },

@@ -5,11 +5,15 @@ import { apiGet, ApiError } from "@/lib/api"
 import { SiteDetailClient } from "@/components/sites/site-detail-client"
 import type {
   Gateway,
+  Me,
+  Personnel,
   Service,
   ServiceTemplate,
   Site,
   SiteProperty,
   SitePropertyTemplate,
+  Unit,
+  WorkCenter,
 } from "@/lib/types"
 
 interface PageProps {
@@ -17,7 +21,7 @@ interface PageProps {
 }
 
 export default async function SiteDetailPage({ params }: PageProps) {
-  await requireSession()
+  const me: Me = await requireSession()
   const { id } = await params
   const siteId = Number(id)
   if (!Number.isFinite(siteId)) notFound()
@@ -37,6 +41,9 @@ export default async function SiteDetailPage({ params }: PageProps) {
     templates,
     properties,
     propertyTemplates,
+    personnel,
+    workCenters,
+    units,
   ] = await Promise.all([
     apiGet<Service[]>(`/services`).catch(() => [] as Service[]),
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
@@ -50,6 +57,9 @@ export default async function SiteDetailPage({ params }: PageProps) {
     apiGet<SitePropertyTemplate[]>(`/site-property-templates`).catch(
       () => [] as SitePropertyTemplate[],
     ),
+    apiGet<Personnel[]>(`/personnel`).catch(() => [] as Personnel[]),
+    apiGet<WorkCenter[]>(`/work-centers`).catch(() => [] as WorkCenter[]),
+    apiGet<Unit[]>(`/units`).catch(() => [] as Unit[]),
   ])
 
   const siteServices = allServices.filter((s) => s.site_id === siteId)
@@ -63,6 +73,10 @@ export default async function SiteDetailPage({ params }: PageProps) {
       templates={templates}
       properties={properties}
       propertyTemplates={propertyTemplates}
+      personnel={personnel}
+      workCenters={workCenters}
+      units={units}
+      userRole={me.role}
     />
   )
 }

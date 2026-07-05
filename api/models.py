@@ -55,6 +55,7 @@ SUBJECT_KINDS = (
     "site_fpcon",
     "site_emcon",
     "site_status",
+    "personnel_location",
     "system",
     "mission",
     "exercise",
@@ -73,6 +74,31 @@ SITE_PROPERTY_TYPES = (
     "bool",
 )
 SITE_PROPERTY_SOURCES = ("template", "custom")
+PERSONNEL_TYPES = ("military", "civilian")
+BRANCH_VALUES = (
+    "air_force",
+    "army",
+    "navy",
+    "marines",
+    "space_force",
+    "coast_guard",
+)
+# Location sign-in board — captures where each person is right now. "on_site"
+# and "traveling" carry a site_id (present location / destination); the rest
+# are site-less dispositions the person entered manually. The UI derives
+# "at assigned site" vs "temporary" from current_site_id vs assigned_site_id,
+# so there is no separate enum value for those.
+PERSONNEL_STATUS_VALUES = (
+    "unknown",
+    "on_site",
+    "traveling",
+    "off_site",
+    "out_of_office",
+    "lunch",
+    "leave",
+    "sick",
+    "training",
+)
 
 
 class Workspace(Base):
@@ -483,7 +509,7 @@ class Event(Base):
     validated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, index=True
     )
-    subject_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    subject_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     subject_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     # For paired subjects like (service, gateway) cell validations — the
     # gateway id lives here so history can be scoped to a single cell.
@@ -506,4 +532,246 @@ class Event(Base):
     )
     hidden_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class Unit(Base):
+    """A military unit / organization (squadron, wing, group, ...) for chain of command.
+
+    Distinct from WorkCenter (physical/functional workshop) — a person may
+    belong to the 375th Communications Squadron (Unit) while working in the
+    "Radio Shop" (WorkCenter). Unit primarily applies to military members
+    but is available for civilians too. `parent_unit_id` is a self-reference
+    to model the org hierarchy (e.g. squadron → group → wing).
+    """
+
+    __tablename__ = "unit"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_unit_workspace_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parent_unit_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("unit.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class WorkCenter(Base):
+    """A logical grouping of personnel (and later, equipment) within a workspace.
+
+    Work centers are the physical/functional bucket a person belongs to — one
+    person to one work center. Distinct from Unit (military org) and Team
+    (many-to-many overlay for ad-hoc collaboration across work centers).
+    """
+
+    __tablename__ = "work_center"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_work_center_workspace_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class Team(Base):
+    """A many-to-many overlay grouping personnel from across work centers.
+
+    Teams are ad-hoc — a person can belong to multiple teams. `color` is a
+    hex string used by the UI for pill accents; null falls back to a neutral.
+    """
+
+    __tablename__ = "team"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_team_workspace_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class Personnel(Base):
+    """A person assigned to this workspace's roster.
+
+    Covers both uniformed members and DoD civilians. For civilians the
+    `branch` field records the service they support (rank is optional or
+    a GS grade). Contact fields are all optional so a partial CSV import
+    doesn't reject rows.
+    """
+
+    __tablename__ = "personnel"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    personnel_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="military"
+    )
+    branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    rank: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    last_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    cellphone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    dsn: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    sipr_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    work_center_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("work_center.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    unit_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("unit.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Direct supervisor for chain-of-command display. SET NULL on delete so
+    # a departing supervisor doesn't cascade-remove their reports.
+    supervisor_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("personnel.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    assigned_site_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    room_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Current sign-in status. Denormalized from the latest
+    # PersonnelLocationEvent row so list pages don't have to join.
+    current_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="unknown"
+    )
+    current_site_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    current_status_since: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    current_status_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Optional accountability timer — when the person expects to be back at
+    # their assigned site / available again. Past this with no new check-in =
+    # overdue (the UI flags it red).
+    expected_return_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    teams: Mapped[list["Team"]] = relationship(
+        "Team",
+        secondary="personnel_team",
+        backref="personnel",
+    )
+
+
+class PersonnelLocationEvent(Base):
+    """Append-only history of every personnel sign-in/out.
+
+    Latest row for a person also seeds `Personnel.current_*` for fast reads.
+    `site_id` is only populated when `status == "on_site"`.
+    """
+
+    __tablename__ = "personnel_location_event"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    personnel_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("personnel.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    site_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_return_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    changed_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, index=True
+    )
+    changed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class PersonnelTeam(Base):
+    """Join row for the many-to-many between Personnel and Team."""
+
+    __tablename__ = "personnel_team"
+
+    personnel_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("personnel.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    team_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("team.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
     )

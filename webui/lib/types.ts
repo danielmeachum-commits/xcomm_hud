@@ -39,13 +39,15 @@ export type SiteStatus =
 export type StatusValue = ServiceStatus
 
 /** Union across every status kind that shares the validation `status` column:
- *  service/gateway/site statuses plus FPCON and EMCON levels. */
+ *  service/gateway/site statuses plus FPCON and EMCON levels, and personnel
+ *  sign-in states carried by subject_kind="personnel_location" events. */
 export type AnyStatus =
   | ServiceStatus
   | GatewayStatus
   | SiteStatus
   | Fpcon
   | Emcon
+  | PersonnelStatus
 
 export type ServiceKind = "voice" | "data" | "other"
 
@@ -69,6 +71,7 @@ export type SubjectKind =
   | "site_fpcon"
   | "site_emcon"
   | "site_status"
+  | "personnel_location"
   | "system"
   | "mission"
   | "exercise"
@@ -83,6 +86,7 @@ export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
   "site_fpcon",
   "site_emcon",
   "site_status",
+  "personnel_location",
 ]
 
 export const GENERAL_SUBJECT_KINDS: readonly SubjectKind[] = [
@@ -346,6 +350,105 @@ export interface SitePropertyTemplateExport {
     description: string | null
     display_order: number
   }>
+}
+
+// --- Personnel ---
+
+export type PersonnelType = "military" | "civilian"
+
+export type Branch =
+  | "air_force"
+  | "army"
+  | "navy"
+  | "marines"
+  | "space_force"
+  | "coast_guard"
+
+export interface Unit {
+  id: number
+  workspace_id: number
+  name: string
+  description: string | null
+  parent_unit_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkCenter {
+  id: number
+  workspace_id: number
+  name: string
+  description: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Team {
+  id: number
+  workspace_id: number
+  name: string
+  description: string | null
+  color: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type PersonnelStatus =
+  | "unknown"
+  | "on_site"
+  | "traveling"
+  | "off_site"
+  | "out_of_office"
+  | "lunch"
+  | "leave"
+  | "sick"
+  | "training"
+
+export interface Personnel {
+  id: number
+  workspace_id: number
+  personnel_type: PersonnelType
+  branch: Branch | null
+  rank: string | null
+  last_name: string
+  first_name: string
+  cellphone: string | null
+  dsn: string | null
+  sipr_number: string | null
+  email: string | null
+  notes: string | null
+  work_center_id: number | null
+  unit_id: number | null
+  supervisor_id: number | null
+  assigned_site_id: number | null
+  room_number: string | null
+  team_ids: number[]
+  current_status: PersonnelStatus
+  current_site_id: number | null
+  current_status_since: string | null
+  current_status_note: string | null
+  expected_return_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PersonnelLocationEvent {
+  id: number
+  personnel_id: number
+  status: PersonnelStatus
+  site_id: number | null
+  note: string | null
+  expected_return_at: string | null
+  changed_at: string
+  changed_by_user_id: number | null
+}
+
+export interface PersonnelCsvImportResult {
+  imported: number
+  skipped: number
+  created_work_centers: string[]
+  created_units: string[]
+  errors: string[]
 }
 
 export interface EnclaveSource {

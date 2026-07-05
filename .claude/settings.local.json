@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(python -c \"import routers.events; print\\('OK'\\)\")",
+      "Bash(python -m py_compile routers/events.py)",
+      "Bash(python -m py_compile schemas.py)",
+      "Bash(python3 -m json.tool)",
+      "Bash(docker exec *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(python3 -c \"print\\('personnel_location', len\\('personnel_location'\\)\\)\")"
+    ]
+  }
+}

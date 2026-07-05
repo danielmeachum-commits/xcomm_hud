@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import type {
+  Role,
   SiteProperty,
   SitePropertyTemplate,
   SitePropertyType,
@@ -49,12 +50,15 @@ interface Props {
   siteId: number
   properties: SiteProperty[]
   templates: SitePropertyTemplate[]
+  userRole?: Role
 }
 
-export function SiteDetailsTab({ siteId, properties, templates }: Props) {
+export function SiteDetailsTab({ siteId, properties, templates, userRole }: Props) {
   const router = useRouter()
+  const [editing, setEditing] = useState(false)
   const [applying, setApplying] = useState(false)
   const [adding, setAdding] = useState(false)
+  const canEdit = userRole === "operator" || userRole === "admin"
 
   // Group properties by their `group` — nullish falls into "Other".
   const grouped = useMemo(() => {
@@ -91,18 +95,30 @@ export function SiteDetailsTab({ siteId, properties, templates }: Props) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground">
-          Ad-hoc typed properties for this site. Values save on blur.
+          {editing ? "Values save on blur." : "Ad-hoc typed properties for this site."}
         </div>
         <div className="flex flex-wrap gap-2">
-          {hasTemplates && (
-            <Button size="sm" variant="outline" onClick={() => setApplying(true)}>
-              Apply template
+          {editing && (
+            <>
+              {hasTemplates && (
+                <Button size="sm" variant="outline" onClick={() => setApplying(true)}>
+                  Apply template
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setAdding(true)}>
+                <Plus className="size-3.5" />
+                Add property
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+                Done
+              </Button>
+            </>
+          )}
+          {!editing && canEdit && (
+            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+              Edit
             </Button>
           )}
-          <Button size="sm" onClick={() => setAdding(true)}>
-            <Plus className="size-3.5" />
-            Add property
-          </Button>
         </div>
       </div>
 
@@ -129,6 +145,7 @@ export function SiteDetailsTab({ siteId, properties, templates }: Props) {
                     siteId={siteId}
                     property={p}
                     groupSuggestions={groupSuggestions}
+                    editing={editing}
                     onChanged={() => router.refresh()}
                   />
                 ))}
@@ -158,15 +175,26 @@ export function SiteDetailsTab({ siteId, properties, templates }: Props) {
   )
 }
 
+function ReadOnlyValue({ property }: { property: SiteProperty }) {
+  const v = property.value
+  if (v == null || v === "") return <span className="text-muted-foreground">—</span>
+  if (property.type === "bool") return <span>{v === true ? "Yes" : "No"}</span>
+  if (property.type === "long_text")
+    return <span className="whitespace-pre-wrap">{String(v)}</span>
+  return <span>{String(v)}</span>
+}
+
 function PropertyRow({
   siteId,
   property,
   groupSuggestions,
+  editing,
   onChanged,
 }: {
   siteId: number
   property: SiteProperty
   groupSuggestions: string[]
+  editing: boolean
   onChanged: () => void
 }) {
   const [editingSchema, setEditingSchema] = useState(false)
@@ -185,23 +213,29 @@ function PropertyRow({
       <li className="flex items-center gap-3 px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setEditingSchema(true)}
-              className="text-sm font-medium hover:underline"
-              title="Edit field"
-            >
-              {property.label}
-            </button>
+            {editing ? (
+              <button
+                type="button"
+                onClick={() => setEditingSchema(true)}
+                className="text-sm font-medium hover:underline"
+                title="Edit field"
+              >
+                {property.label}
+              </button>
+            ) : (
+              <span className="text-sm font-medium">{property.label}</span>
+            )}
             {property.required && (
               <span className="text-[10px] uppercase tracking-wider text-destructive">
                 required
               </span>
             )}
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              {TYPE_LABEL[property.type]}
-            </span>
-            {property.source === "custom" && (
+            {editing && (
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {TYPE_LABEL[property.type]}
+              </span>
+            )}
+            {editing && property.source === "custom" && (
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 · custom
               </span>
@@ -213,16 +247,22 @@ function PropertyRow({
             </p>
           )}
         </div>
-        <div className="w-full max-w-sm">
-          <ValueEditor
-            siteId={siteId}
-            property={property}
-            onChanged={onChanged}
-          />
+        <div className="w-full max-w-sm text-sm">
+          {editing ? (
+            <ValueEditor
+              siteId={siteId}
+              property={property}
+              onChanged={onChanged}
+            />
+          ) : (
+            <ReadOnlyValue property={property} />
+          )}
         </div>
-        <Button size="sm" variant="ghost" onClick={remove} title="Delete">
-          <Trash2 className="size-3.5" />
-        </Button>
+        {editing && (
+          <Button size="sm" variant="ghost" onClick={remove} title="Delete">
+            <Trash2 className="size-3.5" />
+          </Button>
+        )}
       </li>
       {editingSchema && (
         <PropertySchemaDialog

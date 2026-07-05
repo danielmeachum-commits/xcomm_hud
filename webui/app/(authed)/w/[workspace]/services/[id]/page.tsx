@@ -3,14 +3,14 @@ import { notFound } from "next/navigation"
 import { requireSession } from "@/lib/auth"
 import { apiGet, ApiError } from "@/lib/api"
 import { ServiceDetailClient } from "@/components/services/service-detail-client"
-import type { Event, Service, Site } from "@/lib/types"
+import type { Event, Me, Service, Site } from "@/lib/types"
 
 interface PageProps {
   params: Promise<{ id: string }>
 }
 
 export default async function ServiceDetailPage({ params }: PageProps) {
-  await requireSession()
+  const me: Me = await requireSession()
   const { id } = await params
   const sid = Number(id)
   if (!Number.isFinite(sid)) notFound()
@@ -32,6 +32,7 @@ export default async function ServiceDetailPage({ params }: PageProps) {
 
   return (
     <ServiceDetailClient
+      me={me}
       service={service}
       sites={sites}
       validations={validations}

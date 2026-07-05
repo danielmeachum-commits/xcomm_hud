@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useCallback, useState } from "react"
 
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { GatewayForm } from "@/components/sites/gateway-form"
@@ -38,14 +39,21 @@ import {
   serviceIcon,
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
+import { PersonnelTable } from "@/components/personnel/personnel-table"
+import { QuickCheckInButton } from "@/components/personnel/quick-checkin-button"
+import { SiteCheckInDialog } from "@/components/personnel/site-checkin-dialog"
 import type {
   Gateway,
+  Personnel,
+  Role,
   Service,
   ServiceCategory,
   ServiceTemplate,
   Site,
   SiteProperty,
   SitePropertyTemplate,
+  Unit,
+  WorkCenter,
 } from "@/lib/types"
 
 interface Props {
@@ -56,9 +64,21 @@ interface Props {
   templates: ServiceTemplate[]
   properties: SiteProperty[]
   propertyTemplates: SitePropertyTemplate[]
+  personnel: Personnel[]
+  workCenters: WorkCenter[]
+  units: Unit[]
+  userRole?: Role
 }
 
 type Tab = "services" | "personnel" | "equipment" | "details" | "events"
+
+const TABS: readonly Tab[] = [
+  "services",
+  "personnel",
+  "equipment",
+  "details",
+  "events",
+]
 
 const CATEGORY_ORDER: ServiceCategory[] = ["critical", "sustainment", "other"]
 
@@ -70,9 +90,30 @@ export function SiteDetailClient({
   templates,
   properties,
   propertyTemplates,
+  personnel,
+  workCenters,
+  units,
+  userRole,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("services")
   const { w } = useWorkspace()
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Tab lives in the URL (?tab=) so returning to this page — e.g. via the
+  // browser back button after opening a person — restores the active tab.
+  const tabParam = searchParams.get("tab") as Tab | null
+  const tab: Tab = tabParam && TABS.includes(tabParam) ? tabParam : "services"
+  const setTab = useCallback(
+    (next: Tab) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (next === "services") params.delete("tab")
+      else params.set("tab", next)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams],
+  )
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6">
@@ -136,9 +177,17 @@ export function SiteDetailClient({
           services={services}
           gateways={gateways}
           templates={templates}
+          userRole={userRole}
         />
       ) : tab === "personnel" ? (
-        <PlaceholderTab title="Personnel" description="Assigned personnel and roles will live here." />
+        <SitePersonnelTab
+          site={site}
+          personnel={personnel}
+          sites={sites}
+          workCenters={workCenters}
+          units={units}
+          canEdit={userRole !== "viewer"}
+        />
       ) : tab === "equipment" ? (
         <PlaceholderTab title="Equipment" description="Site equipment inventory will live here." />
       ) : tab === "details" ? (
@@ -146,6 +195,7 @@ export function SiteDetailClient({
           siteId={site.id}
           properties={properties}
           templates={propertyTemplates}
+          userRole={userRole}
         />
       ) : (
         <PlaceholderTab title="Events" description="A site-scoped event log with select and CRUD will live here." />
@@ -160,12 +210,14 @@ function ServicesTab({
   services,
   gateways,
   templates,
+  userRole,
 }: {
   site: Site
   sites: Site[]
   services: Service[]
   gateways: Gateway[]
   templates: ServiceTemplate[]
+  userRole?: Role
 }) {
   const [view, setView] = useState<"list" | "graph" | "matrix">("matrix")
   const { w } = useWorkspace()
@@ -200,7 +252,7 @@ function ServicesTab({
       </div>
 
       {view === "matrix" ? (
-        <SiteMatrix services={services} gateways={gateways} />
+        <SiteMatrix services={services} gateways={gateways} userRole={userRole} />
       ) : view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />
       ) : (
@@ -332,6 +384,109 @@ function PlaceholderTab({
     <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-center">
       <p className="text-sm font-medium">{title}</p>
       <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+  )
+}
+
+function SitePersonnelTab({
+  site,
+  personnel,
+  sites,
+  workCenters,
+  units,
+  canEdit,
+}: {
+  site: Site
+  personnel: Personnel[]
+  sites: Site[]
+  workCenters: WorkCenter[]
+  units: Unit[]
+  canEdit: boolean
+}) {
+  const { w } = useWorkspace()
+  const assigned = personnel.filter((p) => p.assigned_site_id === site.id)
+  // People signed in on-site right now — regardless of assignment. Useful for
+  // seeing who is physically present including TDY visitors.
+  const currentlyOnSite = personnel.filter(
+    (p) => p.current_status === "on_site" && p.current_site_id === site.id,
+  )
+  const assignedIds = new Set(assigned.map((p) => p.id))
+  const visitors = currentlyOnSite.filter((p) => !assignedIds.has(p.id))
+
+  // Return link so opening a person from here breadcrumbs back to this tab.
+  const linkFrom = { path: `${w(`/sites/${site.id}`)}?tab=personnel`, label: site.name }
+
+  const empty = assigned.length === 0 && visitors.length === 0
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Personnel assigned to {site.name}, plus anyone currently signed in
+          on-site.
+        </p>
+        {canEdit && <SiteCheckInDialog site={site} personnel={personnel} />}
+      </div>
+
+      {empty ? (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-center">
+          <p className="text-sm font-medium">No personnel here yet</p>
+          <p className="text-xs text-muted-foreground">
+            Use <span className="font-medium">Check someone in</span> above to
+            log a visitor, assign someone to this site from their detail page,
+            or add a new person from{" "}
+            <Link href={w("/personnel")} className="underline">
+              Personnel
+            </Link>
+            .
+          </p>
+        </div>
+      ) : (
+        <>
+          <section className="space-y-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Assigned ({assigned.length})
+            </h2>
+            <PersonnelTable
+              personnel={assigned}
+              workCenters={workCenters}
+              units={units}
+              sites={sites}
+              canEdit={canEdit}
+              linkFrom={linkFrom}
+              emptyMessage="No one is assigned to this site."
+              rowAction={
+                canEdit
+                  ? (p) =>
+                      p.current_status === "on_site" &&
+                      p.current_site_id === site.id ? (
+                        <span className="text-xs text-muted-foreground">
+                          On station
+                        </span>
+                      ) : (
+                        <QuickCheckInButton personId={p.id} siteId={site.id} />
+                      )
+                  : undefined
+              }
+            />
+          </section>
+          {visitors.length > 0 && (
+            <section className="space-y-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                On-site now ({visitors.length})
+              </h2>
+              <PersonnelTable
+                personnel={visitors}
+                workCenters={workCenters}
+                units={units}
+                sites={sites}
+                canEdit={canEdit}
+                linkFrom={linkFrom}
+              />
+            </section>
+          )}
+        </>
+      )}
     </div>
   )
 }

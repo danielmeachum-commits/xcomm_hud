@@ -14,24 +14,16 @@ import {
   ArrowUpFromLine,
   MapPin,
   Plus,
-  Settings2,
 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { MatrixCellPill } from "@/components/services/matrix-cell-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
+import { ValidationDetailsPopover } from "@/components/services/validation-details-popover"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { TimeAgo } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   categoryLabel,
   GATEWAY_PACE_VALUES,
@@ -49,6 +41,7 @@ import type {
   Gateway,
   GatewayPace,
   GatewayStatus,
+  Role,
   Service,
   ServiceGatewayStatus,
   ServiceStatus,
@@ -56,11 +49,6 @@ import type {
 import { useWorkspace } from "@/lib/workspace"
 
 type Density = "full" | "min"
-
-const DENSITY_OPTIONS: { value: Density; label: string }[] = [
-  { value: "full", label: "Full details" },
-  { value: "min", label: "Minimum details" },
-]
 
 const CELL_DASH = "—"
 
@@ -212,6 +200,7 @@ function gatewayLineStyle(status: GatewayStatus): {
 interface Props {
   services: Service[]
   gateways: Gateway[]
+  userRole?: Role
 }
 
 function isTierOverridden(gws: Gateway[]): boolean {
@@ -297,7 +286,8 @@ function bestCellForTier(
   return best
 }
 
-export function SiteMatrix({ services, gateways }: Props) {
+export function SiteMatrix({ services, gateways, userRole }: Props) {
+  const isOperator = userRole === "operator" || userRole === "admin"
   const [density, setDensity] = useState<Density>("full")
 
   const {
@@ -362,35 +352,6 @@ export function SiteMatrix({ services, gateways }: Props) {
   return (
     <div className="flex flex-col gap-6">
       {corePace.length > 0 && (
-        <div className="flex justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="outline" size="sm" className="h-8 gap-1.5">
-                  <Settings2 className="size-3.5" />
-                  Density
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Cell detail</DropdownMenuLabel>
-                {DENSITY_OPTIONS.map((o) => (
-                  <DropdownMenuCheckboxItem
-                    key={o.value}
-                    checked={density === o.value}
-                    onCheckedChange={(v) => v && setDensity(o.value)}
-                  >
-                    {o.label}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
-
-      {corePace.length > 0 && (
         <MatrixGridSection
           title="Gateways"
           services={corePace}
@@ -399,6 +360,7 @@ export function SiteMatrix({ services, gateways }: Props) {
           columnStandby={columnStandby}
           density={density}
           siteId={siteId}
+          isOperator={isOperator}
         />
       )}
       {coreLocal.length > 0 && (
@@ -430,6 +392,7 @@ interface SectionProps {
   columnStandby: Record<GatewayPace, boolean>
   density: Density
   siteId: number
+  isOperator?: boolean
 }
 
 interface GatewayLine {
@@ -473,6 +436,7 @@ function MatrixGridSection({
   columnStandby,
   density,
   siteId,
+  isOperator,
 }: SectionProps) {
   const [hover, setHover] = useState<{
     col: number | null
@@ -712,11 +676,10 @@ function MatrixGridSection({
           <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             {title}
           </h3>
-          <div className="rounded-lg border border-border bg-muted/50 p-3">
-            <div
-              className="grid gap-1.5 transition-[grid-template-columns] duration-200 ease-out"
-              style={{ gridTemplateColumns }}
-            >
+          <div
+            className="grid gap-1.5 px-3 transition-[grid-template-columns] duration-200 ease-out"
+            style={{ gridTemplateColumns }}
+          >
               <div />
               <div />
               <div />
@@ -731,7 +694,6 @@ function MatrixGridSection({
                   collapsed={collapsed[p]}
                 />
               ))}
-            </div>
           </div>
 
           {/* --- SVG overlay: gateway → PACE-header connectors --- */}
@@ -772,11 +734,7 @@ function MatrixGridSection({
               style={{ gridTemplateColumns }}
             >
               {/* Header row */}
-              <ColumnHeaderLabel
-                label="Service"
-                col={0}
-                hoveredCol={hover.col}
-              />
+              <div />
               <LocalHeaderPill
                 col={1}
                 hoveredCol={hover.col}
@@ -810,6 +768,7 @@ function MatrixGridSection({
                     row={rowIdx}
                     col={1}
                     hover={hover}
+                    isOperator={isOperator}
                   />
                   <div />
                   {GATEWAY_PACE_VALUES.map((p, i) => (
@@ -825,6 +784,7 @@ function MatrixGridSection({
                       row={rowIdx}
                       col={i + 3}
                       hover={hover}
+                      isOperator={isOperator}
                     />
                   ))}
                 </Fragment>
@@ -1263,6 +1223,7 @@ function LocalTile({
   row,
   col,
   hover,
+  isOperator,
 }: {
   service: Service
   /** True when this column is collapsed OR density is min — collapses the
@@ -1273,6 +1234,7 @@ function LocalTile({
   row: number
   col: number
   hover: Hover
+  isOperator?: boolean
 }) {
   const softTint = dotOnly
     ? tileTintStrong(service.status)
@@ -1311,15 +1273,24 @@ function LocalTile({
             allowedStatuses={service.allowed_statuses}
             className={CELL_PILL_CLASS}
           />
-          <span className="text-[10px] text-muted-foreground">
-            {service.validated_at ? (
-              <>
+          {service.validated_at ? (
+            <ValidationDetailsPopover
+              validatedAt={service.validated_at}
+              status={service.status}
+              validatedBy={service.validated_by_username}
+              subjectKind="service"
+              subjectId={service.id}
+              isOperator={isOperator}
+            >
+              <span className="text-[10px] text-muted-foreground hover:underline cursor-pointer">
                 validated <TimeAgo iso={service.validated_at} />
-              </>
-            ) : (
-              <span className="italic">never validated</span>
-            )}
-          </span>
+              </span>
+            </ValidationDetailsPopover>
+          ) : (
+            <span className="text-[10px] text-muted-foreground italic">
+              never validated
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -1336,6 +1307,7 @@ function PaceTile({
   row,
   col,
   hover,
+  isOperator,
 }: {
   service: Service
   pace: GatewayPace
@@ -1350,6 +1322,7 @@ function PaceTile({
   row: number
   col: number
   hover: Hover
+  isOperator?: boolean
 }) {
   const enabled = (service.enabled_pace ?? []).includes(pace)
   const localOverride = isLocalOverridden(service)
@@ -1533,15 +1506,25 @@ function PaceTile({
             allowedStatuses={service.allowed_statuses}
             className={CELL_PILL_CLASS}
           />
-          <span className="text-[10px] text-muted-foreground">
-            {best.cell.validated_at ? (
-              <>
+          {best.cell.validated_at ? (
+            <ValidationDetailsPopover
+              validatedAt={best.cell.validated_at}
+              status={cellStored}
+              validatedBy={best.cell.validated_by_username}
+              subjectKind="service_gateway"
+              subjectId={service.id}
+              secondSubjectId={best.gateway.id}
+              isOperator={isOperator}
+            >
+              <span className="text-[10px] text-muted-foreground hover:underline cursor-pointer">
                 validated <TimeAgo iso={best.cell.validated_at} />
-              </>
-            ) : (
-              <span className="italic">never validated</span>
-            )}
-          </span>
+              </span>
+            </ValidationDetailsPopover>
+          ) : (
+            <span className="text-[10px] text-muted-foreground italic">
+              never validated
+            </span>
+          )}
         </div>
       )}
     </div>

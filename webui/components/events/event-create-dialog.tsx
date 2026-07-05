@@ -62,6 +62,10 @@ function statusOptionsFor(kind: SubjectKind): AnyStatus[] {
       return FPCON_LEVELS
     case "site_emcon":
       return EMCON_LEVELS
+    case "personnel_location":
+      // Personnel events are created via the personnel check-in flow, not
+      // here — but the switch has to be exhaustive.
+      return []
     case "system":
     case "mission":
     case "exercise":
