@@ -41,7 +41,10 @@ import {
 import { formatZulu } from "@/lib/time"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
 import { QuickCheckInButton } from "@/components/personnel/quick-checkin-button"
+import { QuickCheckOutButton } from "@/components/personnel/quick-checkout-button"
+import { PersonnelSelectionActions } from "@/components/personnel/personnel-selection-actions"
 import { SiteCheckInDialog } from "@/components/personnel/site-checkin-dialog"
+import { RollCallDialog } from "@/components/personnel/roll-call-dialog"
 import type {
   Gateway,
   Personnel,
@@ -425,16 +428,30 @@ function SitePersonnelTab({
           Personnel assigned to {site.name}, plus anyone currently signed in
           on-site.
         </p>
-        {canEdit && <SiteCheckInDialog site={site} personnel={personnel} />}
+        {canEdit && (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <RollCallDialog site={site} personnel={personnel} />
+            <SiteCheckInDialog
+              site={site}
+              personnel={personnel}
+              initialMode="out"
+            />
+            <SiteCheckInDialog
+              site={site}
+              personnel={personnel}
+              initialMode="in"
+            />
+          </div>
+        )}
       </div>
 
       {empty ? (
         <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-center">
           <p className="text-sm font-medium">No personnel here yet</p>
           <p className="text-xs text-muted-foreground">
-            Use <span className="font-medium">Check someone in</span> above to
-            log a visitor, assign someone to this site from their detail page,
-            or add a new person from{" "}
+            Use <span className="font-medium">Check in</span> above to log a
+            visitor, assign someone to this site from their detail page, or add
+            a new person from{" "}
             <Link href={w("/personnel")} className="underline">
               Personnel
             </Link>
@@ -455,14 +472,24 @@ function SitePersonnelTab({
               canEdit={canEdit}
               linkFrom={linkFrom}
               emptyMessage="No one is assigned to this site."
+              enableSelection={canEdit}
+              renderSelectionActions={
+                canEdit
+                  ? (ids, clear) => (
+                      <PersonnelSelectionActions
+                        site={site}
+                        ids={ids}
+                        onDone={clear}
+                      />
+                    )
+                  : undefined
+              }
               rowAction={
                 canEdit
                   ? (p) =>
                       p.current_status === "on_site" &&
                       p.current_site_id === site.id ? (
-                        <span className="text-xs text-muted-foreground">
-                          On station
-                        </span>
+                        <QuickCheckOutButton personId={p.id} />
                       ) : (
                         <QuickCheckInButton personId={p.id} siteId={site.id} />
                       )
@@ -482,6 +509,23 @@ function SitePersonnelTab({
                 sites={sites}
                 canEdit={canEdit}
                 linkFrom={linkFrom}
+                enableSelection={canEdit}
+                renderSelectionActions={
+                  canEdit
+                    ? (ids, clear) => (
+                        <PersonnelSelectionActions
+                          site={site}
+                          ids={ids}
+                          onDone={clear}
+                        />
+                      )
+                    : undefined
+                }
+                rowAction={
+                  canEdit
+                    ? (p) => <QuickCheckOutButton personId={p.id} />
+                    : undefined
+                }
               />
             </section>
           )}

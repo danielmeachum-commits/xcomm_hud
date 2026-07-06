@@ -414,7 +414,7 @@ const ALL_COLUMN_KEYS: ColumnKey[] = ["local", ...GATEWAY_PACE_VALUES]
 
 const COLLAPSED_TRACK = "72px"
 const LOCAL_TRACK = "110px"
-const PACE_TRACK = "minmax(180px, 1fr)"
+const PACE_TRACK = "minmax(180px, 280px)"
 const COLUMN_TRANSITION_MS = 220
 
 const DEFAULT_COLLAPSED: Record<ColumnKey, boolean> = Object.fromEntries(
@@ -609,14 +609,22 @@ function MatrixGridSection({
     [recomputeLines],
   )
 
-  const toggleColumn = useCallback(
-    (key: ColumnKey) => {
-      hasUserModifiedRef.current = true
-      setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
-      trackTransition(COLUMN_TRANSITION_MS)
-    },
-    [trackTransition],
-  )
+  // Re-measure on every change to which columns are collapsed. The collapsed
+  // PACE tracks use 1fr, so freed width is redistributed to the sibling PACE
+  // columns rather than shrinking the container — the ResizeObserver above
+  // never fires. Driving trackTransition from the `collapsed` state (instead
+  // of only from the toggle handlers) keeps the connectors aligned on every
+  // path that changes it: user toggles, localStorage restore, and the mount
+  // auto-collapse. Without this, restored/auto-collapsed columns leave the
+  // lines pinned to the old expanded-layout positions.
+  useEffect(() => {
+    trackTransition(COLUMN_TRANSITION_MS)
+  }, [collapsed, trackTransition])
+
+  const toggleColumn = useCallback((key: ColumnKey) => {
+    hasUserModifiedRef.current = true
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
+  }, [])
 
   const anyExpanded = ALL_COLUMN_KEYS.some((k) => !collapsed[k])
   const toggleAll = useCallback(() => {
@@ -626,8 +634,7 @@ function MatrixGridSection({
         ALL_COLUMN_KEYS.map((k) => [k, anyExpanded]),
       ) as Record<ColumnKey, boolean>,
     )
-    trackTransition(COLUMN_TRANSITION_MS)
-  }, [anyExpanded, trackTransition])
+  }, [anyExpanded])
 
   return (
     <section className="flex flex-col gap-2">

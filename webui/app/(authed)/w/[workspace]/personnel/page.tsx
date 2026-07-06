@@ -25,7 +25,7 @@ export default async function PersonnelListPage() {
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs items={[{ label: "Personnel" }]} />
       <PersonnelListClient
-        personnel={personnel}
+        personnel={personnel.filter((p) => !p.is_guest)}
         workCenters={workCenters}
         units={units}
         teams={teams}

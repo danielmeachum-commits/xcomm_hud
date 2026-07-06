@@ -887,6 +887,9 @@ class TeamOut(_ORM):
 
 class PersonnelIn(BaseModel):
     personnel_type: PersonnelType = "military"
+    is_guest: bool = False
+    affiliation: Optional[str] = None
+    escort: Optional[str] = None
     branch: Optional[Branch] = "air_force"
     rank: Optional[str] = None
     last_name: str
@@ -906,6 +909,9 @@ class PersonnelIn(BaseModel):
 
 class PersonnelPatch(BaseModel):
     personnel_type: Optional[PersonnelType] = None
+    is_guest: Optional[bool] = None
+    affiliation: Optional[str] = None
+    escort: Optional[str] = None
     branch: Optional[Branch] = None
     rank: Optional[str] = None
     last_name: Optional[str] = None
@@ -927,6 +933,9 @@ class PersonnelOut(_ORM):
     id: int
     workspace_id: int
     personnel_type: PersonnelType
+    is_guest: bool = False
+    affiliation: Optional[str] = None
+    escort: Optional[str] = None
     branch: Optional[Branch] = None
     rank: Optional[str] = None
     last_name: str
@@ -966,6 +975,32 @@ class PersonnelCheckInIn(BaseModel):
     note: Optional[str] = None
     expected_return_at: Optional[datetime.datetime] = None
     changed_at: Optional[datetime.datetime] = None  # override; defaults to now
+
+
+class PersonnelCheckInBulkIn(BaseModel):
+    """Apply one status to many people at once (multi check-in/out, roll call).
+
+    `site_id` is required when `status` is on_site/traveling and ignored
+    otherwise, matching the single check-in. Ids not in the workspace are
+    silently skipped.
+    """
+
+    person_ids: list[int]
+    status: PersonnelStatusValue
+    site_id: Optional[int] = None
+    note: Optional[str] = None
+    expected_return_at: Optional[datetime.datetime] = None
+    changed_at: Optional[datetime.datetime] = None
+
+
+class PersonnelResetIn(BaseModel):
+    """End-of-day reset: send the whole workspace roster to `status`."""
+
+    status: PersonnelStatusValue = "unknown"
+
+
+class PersonnelResetOut(BaseModel):
+    reset: int
 
 
 class PersonnelLocationEventOut(_ORM):

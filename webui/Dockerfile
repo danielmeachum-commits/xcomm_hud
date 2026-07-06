@@ -9,7 +9,11 @@ EXPOSE 3000
 
 FROM base AS dev
 
-CMD ["sh", "-c", "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ]; then npm install; fi && npm run dev"]
+# Always run install so newly added deps land in the node_modules volume — it's
+# a near-noop when package-lock is unchanged. (The old conditional skipped
+# install whenever the anonymous node_modules volume was non-empty, so a new
+# dependency added to package.json never got installed on an existing volume.)
+CMD ["sh", "-c", "npm install && npm run dev"]
 
 
 FROM base AS prod

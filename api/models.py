@@ -654,6 +654,13 @@ class Personnel(Base):
     personnel_type: Mapped[str] = mapped_column(
         String(16), nullable=False, default="military"
     )
+    # Guests / visitors are flagged so they can be signed in and tracked like
+    # anyone else (on-site list, accountability, check-out) while staying out of
+    # the permanent roster. `affiliation` is their org/unit, `escort` the on-site
+    # point of contact hosting them.
+    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     rank: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     last_name: Mapped[str] = mapped_column(String(64), nullable=False)

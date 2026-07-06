@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 
+import { EndOfDayButton } from "@/components/personnel/end-of-day-button"
 import { PersonnelCsvImport } from "@/components/personnel/personnel-csv-import"
 import { PersonnelForm } from "@/components/personnel/personnel-form"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
@@ -76,6 +77,7 @@ export function PersonnelListClient({
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
+            <EndOfDayButton />
             <PersonnelCsvImport />
             <PersonnelForm
               workCenters={workCenters}

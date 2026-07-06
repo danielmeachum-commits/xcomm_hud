@@ -31,6 +31,7 @@ from models import (
 )
 from pubsub import notify
 from schemas import (
+    PersonnelCheckInBulkIn,
     PersonnelCheckInIn,
     PersonnelCsvImportIn,
     PersonnelCsvImportOut,
@@ -38,6 +39,8 @@ from schemas import (
     PersonnelLocationEventOut,
     PersonnelOut,
     PersonnelPatch,
+    PersonnelResetIn,
+    PersonnelResetOut,
 )
 
 router = APIRouter(prefix="/personnel", tags=["personnel"])
@@ -49,6 +52,9 @@ def _to_out(p: Personnel) -> dict:
         "id": p.id,
         "workspace_id": p.workspace_id,
         "personnel_type": p.personnel_type,
+        "is_guest": p.is_guest,
+        "affiliation": p.affiliation,
+        "escort": p.escort,
         "branch": p.branch,
         "rank": p.rank,
         "last_name": p.last_name,
@@ -72,6 +78,78 @@ def _to_out(p: Personnel) -> dict:
         "created_at": p.created_at,
         "updated_at": p.updated_at,
     }
+
+
+def _resolve_checkin_site(
+    db: Session, workspace: Workspace, stat: str, site_id: int | None
+) -> int | None:
+    """on_site/traveling carry a site (required + must be in-workspace); every
+    other status is site-less, so drop any site the client sent."""
+    if stat in ("on_site", "traveling"):
+        if site_id is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"site_id is required when status is {stat}",
+            )
+        site = db.get(Site, site_id)
+        if site is None or site.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Site not found"
+            )
+        return site_id
+    return None
+
+
+def _apply_location_change(
+    db: Session,
+    p: Personnel,
+    *,
+    stat: str,
+    site_id: int | None,
+    note: str | None,
+    expected_return_at,
+    when,
+    user_id: int | None,
+    write_feed: bool = True,
+) -> None:
+    """Append a PersonnelLocationEvent (append-only history) and update the
+    denormalized current_* fields on the person. When `write_feed` is set, also
+    append a workspace Event so the Events page reflects the change — bulk
+    resets skip the feed to avoid flooding it with one row per person.
+    """
+    prev_status = p.current_status
+    db.add(
+        PersonnelLocationEvent(
+            personnel_id=p.id,
+            status=stat,
+            site_id=site_id,
+            note=note,
+            expected_return_at=expected_return_at,
+            changed_at=when,
+            changed_by_user_id=user_id,
+        )
+    )
+    if write_feed:
+        db.add(
+            Event(
+                event_type="validation",
+                validated_at=when,
+                subject_kind="personnel_location",
+                subject_id=p.id,
+                second_subject_id=site_id,
+                subject_label=f"{p.last_name}, {p.first_name}",
+                prev_status=prev_status,
+                status=stat,
+                source="manual",
+                validated_by_user_id=user_id,
+                note=note,
+            )
+        )
+    p.current_status = stat
+    p.current_site_id = site_id
+    p.current_status_since = when
+    p.current_status_note = note
+    p.expected_return_at = expected_return_at
 
 
 def _load(db: Session, pid: int, workspace: Workspace) -> Personnel:
@@ -254,63 +332,100 @@ def checkin_personnel(
     the denormalized current_* fields on the Personnel row.
     """
     p = _load(db, pid, workspace)
-    # on_site carries the present location; traveling carries the destination.
-    # Both require a site; every other status is site-less.
-    if body.status in ("on_site", "traveling"):
-        if body.site_id is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                f"site_id is required when status is {body.status}",
-            )
-        site = db.get(Site, body.site_id)
-        if site is None or site.workspace_id != workspace.id:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "Site not found"
-            )
-        target_site_id: int | None = body.site_id
-    else:
-        # Site-less status drops the site link even if the client sent one —
-        # keeps history honest.
-        target_site_id = None
+    target_site_id = _resolve_checkin_site(db, workspace, body.status, body.site_id)
     when = body.changed_at or datetime.datetime.now(datetime.timezone.utc)
-    prev_status = p.current_status
-    db.add(
-        PersonnelLocationEvent(
-            personnel_id=p.id,
-            status=body.status,
-            site_id=target_site_id,
-            note=body.note,
-            expected_return_at=body.expected_return_at,
-            changed_at=when,
-            changed_by_user_id=current_user.id,
-        )
+    _apply_location_change(
+        db,
+        p,
+        stat=body.status,
+        site_id=target_site_id,
+        note=body.note,
+        expected_return_at=body.expected_return_at,
+        when=when,
+        user_id=current_user.id,
     )
-    # Also append to the workspace event feed so the Events page reflects
-    # sign-in/out changes alongside every other status change. The person
-    # detail page still reads its own history from personnel_location_event.
-    db.add(
-        Event(
-            event_type="validation",
-            validated_at=when,
-            subject_kind="personnel_location",
-            subject_id=p.id,
-            second_subject_id=target_site_id,
-            subject_label=f"{p.last_name}, {p.first_name}",
-            prev_status=prev_status,
-            status=body.status,
-            source="manual",
-            validated_by_user_id=current_user.id,
-            note=body.note,
-        )
-    )
-    p.current_status = body.status
-    p.current_site_id = target_site_id
-    p.current_status_since = when
-    p.current_status_note = body.note
-    p.expected_return_at = body.expected_return_at
     db.flush()
     notify(background_tasks)
     return _to_out(p)
+
+
+@router.post("/checkin-bulk", response_model=list[PersonnelOut])
+def checkin_bulk(
+    body: PersonnelCheckInBulkIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+):
+    """Apply the same status to many people in one transaction. Powers multi
+    check-in / check-out and roll-call musters. Silently ignores ids that
+    aren't in this workspace so a stale client list doesn't fail the batch.
+    """
+    target_site_id = _resolve_checkin_site(db, workspace, body.status, body.site_id)
+    when = body.changed_at or datetime.datetime.now(datetime.timezone.utc)
+    people = (
+        db.query(Personnel)
+        .filter(
+            Personnel.workspace_id == workspace.id,
+            Personnel.id.in_(body.person_ids),
+        )
+        .all()
+        if body.person_ids
+        else []
+    )
+    for p in people:
+        _apply_location_change(
+            db,
+            p,
+            stat=body.status,
+            site_id=target_site_id,
+            note=body.note,
+            expected_return_at=body.expected_return_at,
+            when=when,
+            user_id=current_user.id,
+        )
+    db.flush()
+    notify(background_tasks)
+    return [_to_out(p) for p in people]
+
+
+@router.post("/reset", response_model=PersonnelResetOut)
+def reset_statuses(
+    body: PersonnelResetIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    """End-of-day reset: set every person in the workspace to `status`
+    (default 'unknown'), clearing site and expected-return. Skips people
+    already at the target status, and skips the workspace event feed so a
+    daily reset doesn't flood the Events page (history rows are still written).
+    """
+    when = datetime.datetime.now(datetime.timezone.utc)
+    people = (
+        db.query(Personnel)
+        .filter(
+            Personnel.workspace_id == workspace.id,
+            Personnel.current_status != body.status,
+        )
+        .all()
+    )
+    for p in people:
+        _apply_location_change(
+            db,
+            p,
+            stat=body.status,
+            site_id=None,
+            note=None,
+            expected_return_at=None,
+            when=when,
+            user_id=current_user.id,
+            write_feed=False,
+        )
+    db.flush()
+    notify(background_tasks)
+    return {"reset": len(people)}
 
 
 @router.get(

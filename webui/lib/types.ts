@@ -408,6 +408,9 @@ export interface Personnel {
   id: number
   workspace_id: number
   personnel_type: PersonnelType
+  is_guest: boolean
+  affiliation: string | null
+  escort: string | null
   branch: Branch | null
   rank: string | null
   last_name: string

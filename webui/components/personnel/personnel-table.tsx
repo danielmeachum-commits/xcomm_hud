@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Columns3 } from "lucide-react"
 
 import { PersonnelStatusPill } from "@/components/personnel/personnel-status-pill"
 import { RankInsignia } from "@/components/personnel/rank-insignia"
+import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Popover,
@@ -42,6 +43,16 @@ interface Props {
    * Return null to leave a row's action blank. Adds a right-aligned column.
    */
   rowAction?: (person: Personnel) => React.ReactNode
+  /** Adds a leading checkbox column for multi-row selection. */
+  enableSelection?: boolean
+  /**
+   * Rendered in a bar above the table when rows are selected. Receives the
+   * selected ids and a `clear` callback to reset the selection.
+   */
+  renderSelectionActions?: (
+    ids: number[],
+    clear: () => void,
+  ) => React.ReactNode
 }
 
 type SortDir = "asc" | "desc"
@@ -55,8 +66,11 @@ export function PersonnelTable({
   emptyMessage = "No personnel.",
   linkFrom,
   rowAction,
+  enableSelection = false,
+  renderSelectionActions,
 }: Props) {
   const { w } = useWorkspace()
+  const [selected, setSelected] = useState<Set<number>>(new Set())
 
   const wcById = useMemo(
     () => new Map(workCenters.map((wc) => [wc.id, wc])),
@@ -157,13 +171,21 @@ export function PersonnelTable({
               size={20}
               className="shrink-0"
             />
-            <span className="text-sm">
+            <span className="text-[13px]">
               {p.rank ? (
                 <span className="text-muted-foreground">{p.rank} </span>
               ) : null}
               <span className="font-medium text-foreground">
                 {p.last_name}, {p.first_name}
               </span>
+              {p.is_guest && (
+                <Badge
+                  variant="secondary"
+                  className="ml-1.5 px-1.5 py-0 text-[10px] uppercase tracking-wide"
+                >
+                  Guest
+                </Badge>
+              )}
             </span>
           </Link>
         )
@@ -198,15 +220,59 @@ export function PersonnelTable({
     return `${base}?${params.toString()}`
   }
 
+  const allSelected = sorted.length > 0 && sorted.every((p) => selected.has(p.id))
+  const someSelected = sorted.some((p) => selected.has(p.id))
+  const clearSelection = () => setSelected(new Set())
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(sorted.map((p) => p.id)))
+  }
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  // A hidden leading column for selection shifts every colSpan by one.
+  const leadCols = enableSelection ? 1 : 0
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-h-8">
+          {enableSelection && selected.size > 0 && renderSelectionActions && (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2 py-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                {selected.size} selected
+              </span>
+              {renderSelectionActions([...selected], clearSelection)}
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-xs text-muted-foreground underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
         <ColumnsMenu visible={visibleSet} onToggle={toggleColumn} />
       </div>
       <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
+              {enableSelection && (
+                <th className="w-8 px-3 py-2">
+                  <Checkbox
+                    checked={allSelected}
+                    indeterminate={someSelected && !allSelected}
+                    onCheckedChange={toggleAll}
+                    aria-label="Select all"
+                  />
+                </th>
+              )}
               {columns.map((c) => (
                 <th key={c.key} className="px-3 py-2">
                   {c.sortable ? (
@@ -243,7 +309,7 @@ export function PersonnelTable({
             {sorted.length === 0 && (
               <tr>
                 <td
-                  colSpan={columns.length + (rowAction ? 1 : 0)}
+                  colSpan={columns.length + (rowAction ? 1 : 0) + leadCols}
                   className="px-3 py-6 text-center text-xs text-muted-foreground"
                 >
                   {emptyMessage}
@@ -251,7 +317,22 @@ export function PersonnelTable({
               </tr>
             )}
             {sorted.map((p) => (
-              <tr key={p.id} className="border-t hover:bg-muted/20">
+              <tr
+                key={p.id}
+                className={cn(
+                  "border-t hover:bg-muted/20",
+                  selected.has(p.id) && "bg-primary/5",
+                )}
+              >
+                {enableSelection && (
+                  <td className="px-3 py-2">
+                    <Checkbox
+                      checked={selected.has(p.id)}
+                      onCheckedChange={() => toggleOne(p.id)}
+                      aria-label={`Select ${p.last_name}, ${p.first_name}`}
+                    />
+                  </td>
+                )}
                 {columns.map((c) => (
                   <td
                     key={c.key}
