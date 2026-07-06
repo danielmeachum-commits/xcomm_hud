@@ -12,6 +12,7 @@ import type {
   Site,
   SiteProperty,
   SitePropertyTemplate,
+  Team,
   Unit,
   WorkCenter,
 } from "@/lib/types"
@@ -44,6 +45,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
     personnel,
     workCenters,
     units,
+    teams,
   ] = await Promise.all([
     apiGet<Service[]>(`/services`).catch(() => [] as Service[]),
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
@@ -60,6 +62,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
     apiGet<Personnel[]>(`/personnel`).catch(() => [] as Personnel[]),
     apiGet<WorkCenter[]>(`/work-centers`).catch(() => [] as WorkCenter[]),
     apiGet<Unit[]>(`/units`).catch(() => [] as Unit[]),
+    apiGet<Team[]>(`/teams`).catch(() => [] as Team[]),
   ])
 
   const siteServices = allServices.filter((s) => s.site_id === siteId)
@@ -76,6 +79,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
       personnel={personnel}
       workCenters={workCenters}
       units={units}
+      teams={teams}
       userRole={me.role}
     />
   )

@@ -131,6 +131,7 @@ const KIND_OPTIONS: MultiSelectOption[] = [
 const EVENT_TYPE_TABS: { value: EventType | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "validation", label: "Validation" },
+  { value: "personnel", label: "Personnel" },
   { value: "general", label: "General" },
 ]
 
@@ -389,6 +390,10 @@ export function EventsTable({
     () => filtered.filter((v) => v.event_type === "validation"),
     [filtered],
   )
+  const personnelRows = useMemo(
+    () => filtered.filter((v) => v.event_type === "personnel"),
+    [filtered],
+  )
   const generalRows = useMemo(
     () => filtered.filter((v) => v.event_type === "general"),
     [filtered],
@@ -619,6 +624,7 @@ export function EventsTable({
         {eventTypeFilter === "all" ? (
           <div className="flex flex-col gap-4">
             {renderTableSection(validationRows, "Validation")}
+            {renderTableSection(personnelRows, "Personnel")}
             {renderTableSection(generalRows, "General")}
           </div>
         ) : (

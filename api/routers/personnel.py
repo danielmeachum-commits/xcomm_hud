@@ -132,7 +132,7 @@ def _apply_location_change(
     if write_feed:
         db.add(
             Event(
-                event_type="validation",
+                event_type="personnel",
                 validated_at=when,
                 subject_kind="personnel_location",
                 subject_id=p.id,

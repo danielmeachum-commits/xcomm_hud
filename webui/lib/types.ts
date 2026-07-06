@@ -76,7 +76,7 @@ export type SubjectKind =
   | "mission"
   | "exercise"
 
-export type EventType = "validation" | "general"
+export type EventType = "validation" | "general" | "personnel"
 
 export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
   "service",
@@ -86,6 +86,9 @@ export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
   "site_fpcon",
   "site_emcon",
   "site_status",
+]
+
+export const PERSONNEL_SUBJECT_KINDS: readonly SubjectKind[] = [
   "personnel_location",
 ]
 

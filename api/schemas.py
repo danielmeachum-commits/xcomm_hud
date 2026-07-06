@@ -50,7 +50,7 @@ SubjectKind = Literal[
     "mission",
     "exercise",
 ]
-EventType = Literal["validation", "general"]
+EventType = Literal["validation", "general", "personnel"]
 
 # Which subject_kinds belong to which event_type. Used for validation on both
 # create and list endpoints.
@@ -62,8 +62,8 @@ VALIDATION_SUBJECT_KINDS = {
     "site_fpcon",
     "site_emcon",
     "site_status",
-    "personnel_location",
 }
+PERSONNEL_SUBJECT_KINDS = {"personnel_location"}
 GENERAL_SUBJECT_KINDS = {"system", "mission", "exercise"}
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]

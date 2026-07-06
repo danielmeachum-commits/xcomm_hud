@@ -34,6 +34,7 @@ from schemas import (
     EventOut,
     EventType,
     GENERAL_SUBJECT_KINDS,
+    PERSONNEL_SUBJECT_KINDS,
     SubjectKind,
     VALIDATION_SUBJECT_KINDS,
 )
@@ -106,13 +107,15 @@ def _enrich(db: Session, v: Event) -> EventOut:
 
 
 def _resolve_subject(db: Session, subject_kind: str, subject_id: int):
-    """Return the current row for a validation-kind subject, or raise 404."""
+    """Return the current row for a validation- or personnel-kind subject, or raise 404."""
     if subject_kind == "service":
         obj = db.get(Service, subject_id)
     elif subject_kind == "gateway":
         obj = db.get(Gateway, subject_id)
     elif subject_kind in ("site", "site_fpcon", "site_emcon"):
         obj = db.get(Site, subject_id)
+    elif subject_kind == "personnel_location":
+        obj = db.get(Personnel, subject_id)
     else:
         obj = None
     if obj is None:
@@ -165,11 +168,14 @@ def create_event(
 ):
     """Manually append an event.
 
-    Two event_type flows:
+    Three event_type flows:
 
     - ``validation``: requires ``subject_id`` referencing a live entity
       (service/gateway/site) and a ``status``. Does not change the subject's
       live status; use the subject-specific validate endpoint for that.
+    - ``personnel``: requires ``subject_id`` referencing a personnel row and
+      a ``status``. Normally written by the personnel check-in/out flow, not
+      through this endpoint.
     - ``general``: for system/mission/exercise notes. ``subject_label`` is
       free text; ``status`` is optional.
     """
@@ -188,6 +194,23 @@ def create_event(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "status is required for a validation event",
+            )
+        _resolve_subject(db, body.subject_kind, body.subject_id)
+    elif body.event_type == "personnel":
+        if body.subject_kind not in PERSONNEL_SUBJECT_KINDS:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"subject_kind '{body.subject_kind}' is not valid for a personnel event",
+            )
+        if body.subject_id is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "subject_id is required for a personnel event",
+            )
+        if body.status is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "status is required for a personnel event",
             )
         _resolve_subject(db, body.subject_kind, body.subject_id)
     else:
@@ -284,19 +307,22 @@ def revert_event(
             status.HTTP_403_FORBIDDEN,
             "Only the author or an admin can revert this event",
         )
-    if row.subject_kind not in VALIDATION_SUBJECT_KINDS or row.subject_id is None:
+    if (
+        row.subject_kind not in VALIDATION_SUBJECT_KINDS
+        and row.subject_kind not in PERSONNEL_SUBJECT_KINDS
+    ) or row.subject_id is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Only validation events with a known subject can be reverted",
         )
 
-    # Confirm this is the most recent non-hidden validation for this subject.
+    # Confirm this is the most recent non-hidden event of this type for this subject.
     q = (
         db.query(Event)
         .filter(
             Event.subject_kind == row.subject_kind,
             Event.subject_id == row.subject_id,
-            Event.event_type == "validation",
+            Event.event_type == row.event_type,
             Event.hidden_at.is_(None),
         )
     )
@@ -321,7 +347,7 @@ def revert_event(
         .filter(
             Event.subject_kind == row.subject_kind,
             Event.subject_id == row.subject_id,
-            Event.event_type == "validation",
+            Event.event_type == row.event_type,
             Event.hidden_at.is_(None),
             Event.id != row.id,
         )
@@ -336,13 +362,13 @@ def revert_event(
 
 
 def _is_most_recent_for_subject(db: Session, row: Event) -> bool:
-    """True when `row` is the latest non-hidden validation for its subject."""
+    """True when `row` is the latest non-hidden event of its type for its subject."""
     q = (
         db.query(Event)
         .filter(
             Event.subject_kind == row.subject_kind,
             Event.subject_id == row.subject_id,
-            Event.event_type == "validation",
+            Event.event_type == row.event_type,
             Event.hidden_at.is_(None),
         )
     )

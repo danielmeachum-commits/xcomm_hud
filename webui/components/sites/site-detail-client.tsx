@@ -19,13 +19,17 @@ import { LocalTime } from "@/components/time-display"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import { useWorkspace } from "@/lib/workspace"
 import {
+  Activity,
+  Building2,
   ClipboardList,
   Info,
+  Layers,
   LayoutGrid,
   Network,
   Package,
   Table as TableIcon,
   Users,
+  UsersRound,
   Waypoints,
 } from "lucide-react"
 import {
@@ -39,6 +43,7 @@ import {
   serviceIcon,
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
+import { PERSONNEL_STATUSES, PERSONNEL_STATUS_LABELS } from "@/lib/personnel-data"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
 import { QuickCheckInButton } from "@/components/personnel/quick-checkin-button"
 import { QuickCheckOutButton } from "@/components/personnel/quick-checkout-button"
@@ -55,6 +60,7 @@ import type {
   Site,
   SiteProperty,
   SitePropertyTemplate,
+  Team,
   Unit,
   WorkCenter,
 } from "@/lib/types"
@@ -70,6 +76,7 @@ interface Props {
   personnel: Personnel[]
   workCenters: WorkCenter[]
   units: Unit[]
+  teams: Team[]
   userRole?: Role
 }
 
@@ -96,6 +103,7 @@ export function SiteDetailClient({
   personnel,
   workCenters,
   units,
+  teams,
   userRole,
 }: Props) {
   const { w } = useWorkspace()
@@ -189,6 +197,7 @@ export function SiteDetailClient({
           sites={sites}
           workCenters={workCenters}
           units={units}
+          teams={teams}
           canEdit={userRole !== "viewer"}
         />
       ) : tab === "equipment" ? (
@@ -391,12 +400,21 @@ function PlaceholderTab({
   )
 }
 
+type PersonnelGroupMode = "group" | "status" | "work_center" | "team"
+
+interface PersonnelGroup {
+  key: string
+  label: string
+  people: Personnel[]
+}
+
 function SitePersonnelTab({
   site,
   personnel,
   sites,
   workCenters,
   units,
+  teams,
   canEdit,
 }: {
   site: Site
@@ -404,9 +422,11 @@ function SitePersonnelTab({
   sites: Site[]
   workCenters: WorkCenter[]
   units: Unit[]
+  teams: Team[]
   canEdit: boolean
 }) {
   const { w } = useWorkspace()
+  const [groupMode, setGroupMode] = useState<PersonnelGroupMode>("group")
   const assigned = personnel.filter((p) => p.assigned_site_id === site.id)
   // People signed in on-site right now — regardless of assignment. Useful for
   // seeing who is physically present including TDY visitors.
@@ -415,11 +435,68 @@ function SitePersonnelTab({
   )
   const assignedIds = new Set(assigned.map((p) => p.id))
   const visitors = currentlyOnSite.filter((p) => !assignedIds.has(p.id))
+  // Everyone relevant to this site — assigned here, or currently signed in
+  // here — deduplicated (visitors already excludes anyone already assigned).
+  const relevant = [...assigned, ...visitors]
 
   // Return link so opening a person from here breadcrumbs back to this tab.
   const linkFrom = { path: `${w(`/sites/${site.id}`)}?tab=personnel`, label: site.name }
 
   const empty = assigned.length === 0 && visitors.length === 0
+
+  const rowAction = canEdit
+    ? (p: Personnel) =>
+        p.current_status === "on_site" && p.current_site_id === site.id ? (
+          <QuickCheckOutButton personId={p.id} />
+        ) : (
+          <QuickCheckInButton personId={p.id} siteId={site.id} />
+        )
+    : undefined
+
+  const renderSelectionActions = canEdit
+    ? (ids: number[], clear: () => void) => (
+        <PersonnelSelectionActions site={site} ids={ids} onDone={clear} />
+      )
+    : undefined
+
+  const groups: PersonnelGroup[] =
+    groupMode === "status"
+      ? PERSONNEL_STATUSES.map((status) => ({
+          key: status,
+          label: PERSONNEL_STATUS_LABELS[status],
+          people: relevant.filter((p) => p.current_status === status),
+        })).filter((g) => g.people.length > 0)
+      : groupMode === "work_center"
+        ? (() => {
+            const withWc = workCenters
+              .map((wc) => ({
+                key: `wc-${wc.id}`,
+                label: wc.name,
+                people: relevant.filter((p) => p.work_center_id === wc.id),
+              }))
+              .filter((g) => g.people.length > 0)
+              .sort((a, b) => a.label.localeCompare(b.label))
+            const none = relevant.filter((p) => p.work_center_id == null)
+            return none.length > 0
+              ? [...withWc, { key: "none", label: "No work center", people: none }]
+              : withWc
+          })()
+        : groupMode === "team"
+          ? (() => {
+              const withTeam = teams
+                .map((t) => ({
+                  key: `team-${t.id}`,
+                  label: t.name,
+                  people: relevant.filter((p) => p.team_ids.includes(t.id)),
+                }))
+                .filter((g) => g.people.length > 0)
+                .sort((a, b) => a.label.localeCompare(b.label))
+              const none = relevant.filter((p) => p.team_ids.length === 0)
+              return none.length > 0
+                ? [...withTeam, { key: "none", label: "No team", people: none }]
+                : withTeam
+            })()
+          : []
 
   return (
     <div className="flex flex-col gap-4">
@@ -460,74 +537,76 @@ function SitePersonnelTab({
         </div>
       ) : (
         <>
-          <section className="space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Assigned ({assigned.length})
-            </h2>
-            <PersonnelTable
-              personnel={assigned}
-              workCenters={workCenters}
-              units={units}
-              sites={sites}
-              canEdit={canEdit}
-              linkFrom={linkFrom}
-              emptyMessage="No one is assigned to this site."
-              enableSelection={canEdit}
-              renderSelectionActions={
-                canEdit
-                  ? (ids, clear) => (
-                      <PersonnelSelectionActions
-                        site={site}
-                        ids={ids}
-                        onDone={clear}
-                      />
-                    )
-                  : undefined
-              }
-              rowAction={
-                canEdit
-                  ? (p) =>
-                      p.current_status === "on_site" &&
-                      p.current_site_id === site.id ? (
-                        <QuickCheckOutButton personId={p.id} />
-                      ) : (
-                        <QuickCheckInButton personId={p.id} siteId={site.id} />
-                      )
-                  : undefined
-              }
-            />
-          </section>
-          {visitors.length > 0 && (
-            <section className="space-y-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                On-site now ({visitors.length})
-              </h2>
-              <PersonnelTable
-                personnel={visitors}
-                workCenters={workCenters}
-                units={units}
-                sites={sites}
-                canEdit={canEdit}
-                linkFrom={linkFrom}
-                enableSelection={canEdit}
-                renderSelectionActions={
-                  canEdit
-                    ? (ids, clear) => (
-                        <PersonnelSelectionActions
-                          site={site}
-                          ids={ids}
-                          onDone={clear}
-                        />
-                      )
-                    : undefined
-                }
-                rowAction={
-                  canEdit
-                    ? (p) => <QuickCheckOutButton personId={p.id} />
-                    : undefined
-                }
-              />
-            </section>
+          <ViewTabs<PersonnelGroupMode>
+            value={groupMode}
+            onChange={setGroupMode}
+            options={[
+              { value: "group", label: "Site", icon: Layers },
+              { value: "status", label: "Status", icon: Activity },
+              { value: "work_center", label: "Work Center", icon: Building2 },
+              { value: "team", label: "Team", icon: UsersRound },
+            ]}
+          />
+
+          {groupMode === "group" ? (
+            <>
+              <section className="space-y-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Assigned ({assigned.length})
+                </h2>
+                <PersonnelTable
+                  personnel={assigned}
+                  workCenters={workCenters}
+                  units={units}
+                  sites={sites}
+                  canEdit={canEdit}
+                  linkFrom={linkFrom}
+                  emptyMessage="No one is assigned to this site."
+                  enableSelection={canEdit}
+                  renderSelectionActions={renderSelectionActions}
+                  rowAction={rowAction}
+                />
+              </section>
+              {visitors.length > 0 && (
+                <section className="space-y-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    On-site now ({visitors.length})
+                  </h2>
+                  <PersonnelTable
+                    personnel={visitors}
+                    workCenters={workCenters}
+                    units={units}
+                    sites={sites}
+                    canEdit={canEdit}
+                    linkFrom={linkFrom}
+                    enableSelection={canEdit}
+                    renderSelectionActions={renderSelectionActions}
+                    rowAction={rowAction}
+                  />
+                </section>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {groups.map((g) => (
+                <section key={g.key} className="space-y-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {g.label} ({g.people.length})
+                  </h2>
+                  <PersonnelTable
+                    personnel={g.people}
+                    workCenters={workCenters}
+                    units={units}
+                    sites={sites}
+                    canEdit={canEdit}
+                    linkFrom={linkFrom}
+                    enableSelection={canEdit}
+                    renderSelectionActions={renderSelectionActions}
+                    rowAction={rowAction}
+                  />
+                </section>
+              ))}
+            </div>
           )}
         </>
       )}
