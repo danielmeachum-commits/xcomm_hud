@@ -1,7 +1,7 @@
 """CRUD, duplicate, and export/import for site property templates.
 
 Templates are workspace-scoped and hold a list of typed property
-`definitions` (text/number/phone/email/url/date/bool/long_text).
+`definitions` (text/number/phone/email/url/date/bool/long_text/personnel).
 Applying a template copies its definitions onto a site — see
 `sites.apply_property_template` for that flow.
 """

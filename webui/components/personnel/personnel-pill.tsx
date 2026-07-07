@@ -1,5 +1,6 @@
 import Link from "next/link"
 
+import { CommanderStar } from "@/components/personnel/commander-star"
 import { RankInsignia } from "@/components/personnel/rank-insignia"
 import { branchColor } from "@/lib/personnel-data"
 import type { Personnel } from "@/lib/types"
@@ -9,7 +10,8 @@ interface Props {
   person: Pick<
     Personnel,
     "id" | "personnel_type" | "branch" | "rank" | "last_name" | "first_name"
-  >
+  > &
+    Partial<Pick<Personnel, "is_commander">>
   /** When set, wrap the pill in a link to the workspace-relative detail page. */
   href?: string
   size?: "sm" | "md"
@@ -60,6 +62,9 @@ export function PersonnelPill({
         <span className="text-muted-foreground">{rankLabel}</span>
       )}
       <span className="truncate">{name}</span>
+      {person.is_commander && (
+        <CommanderStar size={size === "sm" ? 11 : 12} />
+      )}
     </span>
   )
 

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import get_current_workspace, requires
-from models import Site, SiteProperty, SitePropertyTemplate, Workspace
+from models import Personnel, Site, SiteProperty, SitePropertyTemplate, Workspace
 from pubsub import notify
 from schemas import (
     SiteApplyTemplateIn,
@@ -128,6 +128,20 @@ def set_property_value(
     """
     site = _load_site(db, site_id, workspace)
     p = _load_property(db, site, property_id)
+    # Personnel-typed values are references, not freeform data — reject ids
+    # that don't resolve to someone in this workspace.
+    if p.type == "personnel" and body.value is not None:
+        pid = (
+            body.value
+            if isinstance(body.value, int) and not isinstance(body.value, bool)
+            else None
+        )
+        person = db.get(Personnel, pid) if pid is not None else None
+        if person is None or person.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Personnel record not found in this workspace",
+            )
     p.value = body.value
     db.flush()
     notify(background_tasks)

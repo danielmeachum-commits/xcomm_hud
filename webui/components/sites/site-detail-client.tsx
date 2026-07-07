@@ -218,6 +218,7 @@ export function SiteDetailClient({
           siteId={site.id}
           properties={properties}
           templates={propertyTemplates}
+          personnel={personnel}
           userRole={userRole}
         />
       ) : (
@@ -583,6 +584,7 @@ function SitePersonnelTab({
                 highlightIds={relevant.map((p) => p.id)}
                 contextLabel={site.name}
                 sites={sites}
+                units={units}
                 canEdit={canEdit}
                 linkFrom={linkFrom}
               />

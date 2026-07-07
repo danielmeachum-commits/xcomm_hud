@@ -292,6 +292,9 @@ export type SitePropertyType =
   | "url"
   | "date"
   | "bool"
+  /** Holds a workspace personnel id — for roles like a site's OIC/NCOIC.
+   *  Rendered as a person pill. */
+  | "personnel"
 
 export type SitePropertySource = "template" | "custom"
 
@@ -425,6 +428,9 @@ export interface Personnel {
   workspace_id: number
   personnel_type: PersonnelType
   is_guest: boolean
+  /** Unit commander/OIC — at most one per unit, officers only, requires a
+   *  unit; rendered with a gold star beside the name everywhere. */
+  is_commander: boolean
   affiliation: string | null
   escort: string | null
   branch: Branch | null

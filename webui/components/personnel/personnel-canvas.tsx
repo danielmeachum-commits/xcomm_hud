@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react"
 import { Settings2 } from "lucide-react"
 
+import { CommanderStar } from "@/components/personnel/commander-star"
 import { PersonnelStatusPill } from "@/components/personnel/personnel-status-pill"
 import { RankInsignia } from "@/components/personnel/rank-insignia"
 import { Button } from "@/components/ui/button"
@@ -29,7 +30,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { branchColor, rankGrade, rankSeniority } from "@/lib/personnel-data"
+import {
+  branchColor,
+  isFirstSergeantRank,
+  isOfficerGrade,
+  rankGrade,
+  rankSeniority,
+} from "@/lib/personnel-data"
 import type { PersonnelGroup } from "@/lib/personnel-grouping"
 import type { Personnel, Site, Team, Unit, WorkCenter } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -136,6 +143,7 @@ function PersonCanvasNode({ data }: NodeProps) {
         )}
         {person.last_name}, {person.first_name}
       </a>
+      {person.is_commander && <CommanderStar size={12} />}
       {badge && (
         <span className="shrink-0 rounded border border-border bg-muted/60 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
           {badge}
@@ -260,6 +268,9 @@ type Props = {
       people: Personnel[]
       /** When set, people outside this set render faded. */
       highlightIds?: ReadonlySet<number>
+      /** When set, a unit filter dropdown overlays the canvas, starting on
+       *  the workspace default unit (falling back to all). */
+      units?: Unit[]
     }
   | {
       mode: "team-tree"
@@ -577,7 +588,9 @@ function buildUnitTree(
  * Officers (and warrant officers) chart in their own section beside the
  * enlisted force — everyone formally rolls up under the commander, but the
  * chart reads better split by tier. Supervisor links that cross the split
- * simply make the report a root of its own section.
+ * simply make the report a root of its own section. Leadership sits in its
+ * own centered, headed stack above both sections: the unit commander on top,
+ * the chiefs (E-9s) beneath, the first sergeant(s) beneath them.
  */
 function buildOrgTree(
   people: Personnel[],
@@ -701,15 +714,25 @@ function buildOrgTree(
     return x
   }
 
-  const isOfficer = (p: Personnel) => {
-    const grade = rankGrade(p.personnel_type, p.branch, p.rank)
-    return (
-      grade != null &&
-      (grade === "Special" || grade.startsWith("O-") || grade.startsWith("W-"))
-    )
-  }
-  const officers = people.filter(isOfficer)
-  const rest = people.filter((p) => !isOfficer(p))
+  const isOfficer = (p: Personnel) =>
+    isOfficerGrade(p.personnel_type, p.branch, p.rank)
+  // Leadership stack above the sections — commander on top, the chiefs
+  // (E-9s) beneath, the first sergeant(s) beneath them. A chief who is also
+  // the first sergeant charts as first sergeant (the more specific role).
+  const isChief = (p: Personnel) =>
+    rankGrade(p.personnel_type, p.branch, p.rank) === "E-9"
+  const isShirt = (p: Personnel) =>
+    isFirstSergeantRank(p.personnel_type, p.branch, p.rank)
+  const nonCommanders = people.filter((p) => !p.is_commander)
+  const leadershipRows = [
+    people.filter((p) => p.is_commander).sort(bySeniority),
+    nonCommanders.filter((p) => isChief(p) && !isShirt(p)).sort(bySeniority),
+    nonCommanders.filter(isShirt).sort(bySeniority),
+  ].filter((row) => row.length > 0)
+  const leadershipCount = leadershipRows.reduce((n, row) => n + row.length, 0)
+  const troops = nonCommanders.filter((p) => !isChief(p) && !isShirt(p))
+  const officers = troops.filter(isOfficer)
+  const rest = troops.filter((p) => !isOfficer(p))
   const sections = [
     { key: "officers", label: "Officers", people: officers },
     {
@@ -721,23 +744,63 @@ function buildOrgTree(
     },
   ].filter((s) => s.people.length > 0)
 
-  // With a single populated section the header is noise — skip it.
+  // With a single populated section the header is noise — skip it (the
+  // leadership stack always carries its header so the role is unmistakable).
   const withHeaders = sections.length > 1
-  const forestTop = withHeaders ? TOP + HEADER_HEIGHT + HEADER_TO_PEOPLE : TOP
-  let x = 40
+  // Reserve the leadership header + stacked rows above the sections.
+  const sectionTop =
+    TOP +
+    (leadershipRows.length > 0
+      ? HEADER_HEIGHT +
+        HEADER_TO_PEOPLE +
+        leadershipRows.length * (PERSON_HEIGHT + PERSON_GAP) -
+        PERSON_GAP +
+        LEVEL_GAP
+      : 0)
+  const forestTop = withHeaders
+    ? sectionTop + HEADER_HEIGHT + HEADER_TO_PEOPLE
+    : sectionTop
+  const LEFT = 40
+  let x = LEFT
   for (const [i, s] of sections.entries()) {
     if (i > 0) x += UNGROUPED_GAP - TREE_SIBLING_GAP
     if (withHeaders) {
       nodes.push({
         id: `group-org-${s.key}`,
         type: "groupHeader",
-        position: { x, y: TOP },
+        position: { x, y: sectionTop },
         data: { label: s.label, count: s.people.length, color: null },
         draggable: false,
         selectable: false,
       })
     }
     x = layoutForest(s.people, x, forestTop)
+  }
+
+  // Center the leadership stack over everything below it: header, then one
+  // row per tier — commander / chiefs / first sergeant — each row centered.
+  if (leadershipRows.length > 0) {
+    const totalWidth = Math.max(x - TREE_SIBLING_GAP - LEFT, NODE_WIDTH)
+    const centerX = (w: number) => LEFT + (totalWidth - w) / 2
+    nodes.push({
+      id: "group-org-leadership",
+      type: "groupHeader",
+      position: { x: centerX(NODE_WIDTH), y: TOP },
+      data: { label: "Leadership", count: leadershipCount, color: null },
+      draggable: false,
+      selectable: false,
+    })
+    let y = TOP + HEADER_HEIGHT + HEADER_TO_PEOPLE
+    for (const row of leadershipRows) {
+      const rowWidth =
+        row.length * NODE_WIDTH + (row.length - 1) * TREE_SIBLING_GAP
+      let cx = centerX(rowWidth)
+      for (const c of row) {
+        nodes.push(personNode(c, cx, y, "org", ctx))
+        cx += NODE_WIDTH + TREE_SIBLING_GAP
+      }
+      y += PERSON_HEIGHT + PERSON_GAP
+    }
   }
 
   return { nodes, edges }
@@ -928,6 +991,13 @@ function PersonnelCanvasInner(props: Props) {
 
   const highlightIds =
     props.mode === "org-tree" ? props.highlightIds : undefined
+  const orgUnits = props.mode === "org-tree" ? props.units : undefined
+  // Unit scope for the org chart — starts on the workspace default unit so
+  // the chart opens on the org the user actually runs.
+  const [unitFilter, setUnitFilter] = useState<string>(() => {
+    const def = orgUnits?.find((u) => u.is_default)
+    return def ? def.id.toString() : "all"
+  })
   const { nodes, edges } = useMemo(() => {
     const ctx: PersonCtx = {
       sites,
@@ -948,8 +1018,17 @@ function PersonnelCanvasInner(props: Props) {
         return buildLanes(props.groups, ctx, tiers)
       case "unit-tree":
         return buildUnitTree(props.units, props.people, ctx, tiers)
-      case "org-tree":
-        return buildOrgTree(props.people, ctx)
+      case "org-tree": {
+        const scoped =
+          unitFilter === "all"
+            ? props.people
+            : unitFilter === "none"
+              ? props.people.filter((p) => p.unit_id == null)
+              : props.people.filter(
+                  (p) => p.unit_id === Number(unitFilter),
+                )
+        return buildOrgTree(scoped, ctx)
+      }
       case "team-tree":
         return buildTeamTree(props.teams, props.workCenters, props.people, ctx)
     }
@@ -962,6 +1041,7 @@ function PersonnelCanvasInner(props: Props) {
     props.mode === "team-tree" ? props.workCenters : null,
     props.mode !== "lanes" ? props.people : null,
     highlightIds,
+    unitFilter,
     linkFrom,
     sites,
     canEdit,
@@ -983,6 +1063,27 @@ function PersonnelCanvasInner(props: Props) {
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
       <Controls showInteractive={false} />
+      {orgUnits && orgUnits.length > 0 && (
+        <Panel position="top-right">
+          <select
+            value={unitFilter}
+            onChange={(e) => setUnitFilter(e.target.value)}
+            aria-label="Filter by unit"
+            className="h-8 rounded-md border border-input bg-background/90 px-2 text-xs shadow-sm backdrop-blur"
+          >
+            <option value="all">All units</option>
+            {orgUnits.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+            {props.mode === "org-tree" &&
+              props.people.some((p) => p.unit_id == null) && (
+                <option value="none">No unit</option>
+              )}
+          </select>
+        </Panel>
+      )}
       {/* Tier ordering only applies to the stack renderings — the org tree
           IS the supervisor structure, and team stacks pin the lead instead. */}
       {(props.mode === "lanes" || props.mode === "unit-tree") && (

@@ -7,6 +7,7 @@ import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { CopyField } from "@/components/personnel/copy-field"
 import { RankInsignia } from "@/components/personnel/rank-insignia"
 import { PersonnelCheckInDialog } from "@/components/personnel/personnel-checkin-dialog"
+import { CommanderStar } from "@/components/personnel/commander-star"
 import { PersonnelForm } from "@/components/personnel/personnel-form"
 import { PersonnelPill } from "@/components/personnel/personnel-pill"
 import { PersonnelStatusBadge } from "@/components/personnel/personnel-status-badge"
@@ -137,9 +138,12 @@ export function PersonnelDetailClient({
             />
           </div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">
-              {person.rank ? `${person.rank} ` : ""}
-              {person.last_name}, {person.first_name}
+            <h1 className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+              <span>
+                {person.rank ? `${person.rank} ` : ""}
+                {person.last_name}, {person.first_name}
+              </span>
+              {person.is_commander && <CommanderStar size={16} />}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <PersonnelStatusPill

@@ -33,6 +33,7 @@ const TYPES: SitePropertyType[] = [
   "url",
   "date",
   "bool",
+  "personnel",
 ]
 
 const TYPE_LABEL: Record<SitePropertyType, string> = {
@@ -44,6 +45,7 @@ const TYPE_LABEL: Record<SitePropertyType, string> = {
   url: "URL",
   date: "Date",
   bool: "Yes/No",
+  personnel: "Person",
 }
 
 const UNGROUPED = "__ungrouped__"

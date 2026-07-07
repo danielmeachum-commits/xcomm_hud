@@ -21,6 +21,7 @@ import {
   DEFAULT_BRANCH,
   defaultSkillLevel,
   groupedRanks,
+  isOfficerGrade,
   rankOptionLabel,
   SKILL_LEVELS,
   SKILL_LEVEL_LABELS,
@@ -39,6 +40,8 @@ import type {
 import { cn } from "@/lib/utils"
 import { Check, CheckCircle2, Plus } from "lucide-react"
 
+import { CommanderStar } from "@/components/personnel/commander-star"
+
 interface Draft {
   personnel_type: PersonnelType
   branch: Branch | ""
@@ -54,6 +57,7 @@ interface Draft {
   work_center_id: string
   unit_id: string
   supervisor_id: string
+  is_commander: boolean
   assigned_site_id: string
   room_number: string
   team_ids: Set<number>
@@ -80,6 +84,7 @@ function makeDraft(person?: Personnel | null, defaultUnit?: Unit | null): Draft 
     work_center_id: person?.work_center_id?.toString() ?? "",
     unit_id: person?.unit_id?.toString() ?? seedUnit?.id.toString() ?? "",
     supervisor_id: person?.supervisor_id?.toString() ?? "",
+    is_commander: person?.is_commander ?? false,
     assigned_site_id: person?.assigned_site_id?.toString() ?? "",
     room_number: person?.room_number?.toString() ?? "",
     team_ids: new Set(person?.team_ids ?? []),
@@ -282,6 +287,27 @@ export function PersonnelForm({
     [teams, extraTeams],
   )
 
+  // Commander is a per-unit slot, held by an officer. The toggle only shows
+  // when this person is an officer with a unit picked and nobody else holds
+  // that unit's slot — otherwise a hint explains who does.
+  const officer = isOfficerGrade(
+    draft.personnel_type,
+    draft.branch || null,
+    draft.rank || null,
+  )
+  const existingCommander = draft.unit_id
+    ? supervisors.find(
+        (s) =>
+          s.is_commander &&
+          s.unit_id === Number(draft.unit_id) &&
+          (!person || s.id !== person.id),
+      ) ?? null
+    : null
+  const commanderEligible = officer && !!draft.unit_id && !existingCommander
+  // What actually gets saved — a stale checked box (e.g. after switching to a
+  // unit that already has a commander) must never reach the API.
+  const isCommander = commanderEligible && draft.is_commander
+
   const rankGroups = useMemo(
     () => groupedRanks(draft.personnel_type, draft.branch || null),
     [draft.personnel_type, draft.branch],
@@ -378,6 +404,7 @@ export function PersonnelForm({
         supervisor_id: draft.supervisor_id
           ? Number(draft.supervisor_id)
           : null,
+        is_commander: isCommander,
         assigned_site_id: draft.assigned_site_id
           ? Number(draft.assigned_site_id)
           : null,
@@ -482,6 +509,9 @@ export function PersonnelForm({
       rows: [
         { label: "Work center", value: wcName },
         { label: "Supervisor", value: supervisorName },
+        ...(isCommander
+          ? [{ label: "Commander", value: unitName ?? "Yes" }]
+          : []),
         {
           label: "Teams",
           value: teamNames.length > 0 ? teamNames.join(", ") : null,
@@ -825,6 +855,46 @@ export function PersonnelForm({
                         ))}
                     </select>
                   </div>
+
+                  {/* Commander/OIC — officers only, one slot per unit. Non-
+                      officers see nothing; officers see the toggle or a hint
+                      naming whoever holds their unit's slot. */}
+                  {officer && commanderEligible && (
+                    <label className="flex items-center gap-2 rounded-md border border-input px-3 py-2.5 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={draft.is_commander}
+                        onChange={(e) =>
+                          setDraft({ ...draft, is_commander: e.target.checked })
+                        }
+                        disabled={pending}
+                      />
+                      <CommanderStar size={14} />
+                      <span className="font-medium">Commander</span>
+                      <span className="text-xs text-muted-foreground">
+                        {unitName
+                          ? `Commands ${unitName} — marked with a gold star.`
+                          : "One per unit — marked with a gold star."}
+                      </span>
+                    </label>
+                  )}
+                  {officer && !draft.unit_id && (
+                    <p className="text-xs text-muted-foreground">
+                      Pick a unit on the Person step to designate a commander.
+                    </p>
+                  )}
+                  {officer && existingCommander && (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <CommanderStar size={12} />
+                      {existingCommander.rank
+                        ? `${existingCommander.rank} `
+                        : ""}
+                      {existingCommander.last_name},{" "}
+                      {existingCommander.first_name} is the commander of{" "}
+                      {unitName ?? "this unit"} — unassign them first to
+                      designate someone else.
+                    </p>
+                  )}
 
                   <div className="space-y-1.5">
                     <Label>Teams</Label>

@@ -681,6 +681,12 @@ class Personnel(Base):
     # the permanent roster. `affiliation` is their org/unit, `escort` the on-site
     # point of contact hosting them.
     is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Unit commander/OIC — at most one per unit (partial unique index), and
+    # only meaningful with a unit set (the API rejects a unitless commander).
+    # Marked with a gold star wherever the person's name is rendered.
+    is_commander: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)

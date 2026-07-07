@@ -53,6 +53,7 @@ def _to_out(p: Personnel) -> dict:
         "workspace_id": p.workspace_id,
         "personnel_type": p.personnel_type,
         "is_guest": p.is_guest,
+        "is_commander": p.is_commander,
         "affiliation": p.affiliation,
         "escort": p.escort,
         "branch": p.branch,
@@ -201,6 +202,35 @@ def _validate_refs(
             )
 
 
+def _ensure_commander_slot(
+    db: Session, unit_id: int | None, keep_id: int | None
+) -> None:
+    """A commander must belong to a unit, and each unit has at most one.
+    The UI hides the toggle when the slot is taken, and a partial unique
+    index backstops the rule, but this turns a race into a readable error
+    instead of an IntegrityError."""
+    if unit_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "A commander must belong to a unit — pick a unit first.",
+        )
+    q = db.query(Personnel).filter(
+        Personnel.unit_id == unit_id,
+        Personnel.is_commander.is_(True),
+    )
+    if keep_id is not None:
+        q = q.filter(Personnel.id != keep_id)
+    existing = q.first()
+    if existing is not None:
+        unit = db.get(Unit, unit_id)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{existing.last_name}, {existing.first_name} is already the "
+            f"commander of {unit.name if unit else 'that unit'} — unassign "
+            "them first.",
+        )
+
+
 def _resolve_teams(
     db: Session, workspace: Workspace, team_ids: list[int]
 ) -> list[Team]:
@@ -251,6 +281,8 @@ def create_personnel(
         assigned_site_id=body.assigned_site_id,
         self_id=None,
     )
+    if body.is_commander:
+        _ensure_commander_slot(db, body.unit_id, keep_id=None)
     teams = _resolve_teams(db, workspace, body.team_ids)
     data = body.model_dump(exclude={"team_ids"})
     p = Personnel(workspace_id=workspace.id, **data)
@@ -291,6 +323,15 @@ def patch_personnel(
         assigned_site_id=data.get("assigned_site_id", p.assigned_site_id),
         self_id=p.id,
     )
+    # Re-check the commander slot whenever the person will be a commander and
+    # either the flag or their unit is changing (moving units carries command
+    # into the new unit, which may already have one).
+    if data.get("is_commander", p.is_commander) and (
+        "is_commander" in data or "unit_id" in data
+    ):
+        _ensure_commander_slot(
+            db, data.get("unit_id", p.unit_id), keep_id=p.id
+        )
     team_ids = data.pop("team_ids", None)
     for k, v in data.items():
         setattr(p, k, v)

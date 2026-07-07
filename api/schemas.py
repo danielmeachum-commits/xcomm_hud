@@ -636,8 +636,18 @@ class IngestAck(BaseModel):
 
 # --- Site property templates ---
 
+# "personnel" holds a workspace personnel id — for roles like a site's
+# OIC/NCOIC. Rendered as a person pill in the UI.
 SitePropertyType = Literal[
-    "text", "long_text", "number", "phone", "email", "url", "date", "bool"
+    "text",
+    "long_text",
+    "number",
+    "phone",
+    "email",
+    "url",
+    "date",
+    "bool",
+    "personnel",
 ]
 SitePropertySource = Literal["template", "custom"]
 
@@ -917,6 +927,7 @@ class TeamOut(_ORM):
 class PersonnelIn(BaseModel):
     personnel_type: PersonnelType = "military"
     is_guest: bool = False
+    is_commander: bool = False
     affiliation: Optional[str] = None
     escort: Optional[str] = None
     branch: Optional[Branch] = "air_force"
@@ -940,6 +951,7 @@ class PersonnelIn(BaseModel):
 class PersonnelPatch(BaseModel):
     personnel_type: Optional[PersonnelType] = None
     is_guest: Optional[bool] = None
+    is_commander: Optional[bool] = None
     affiliation: Optional[str] = None
     escort: Optional[str] = None
     branch: Optional[Branch] = None
@@ -965,6 +977,7 @@ class PersonnelOut(_ORM):
     workspace_id: int
     personnel_type: PersonnelType
     is_guest: bool = False
+    is_commander: bool = False
     affiliation: Optional[str] = None
     escort: Optional[str] = None
     branch: Optional[Branch] = None

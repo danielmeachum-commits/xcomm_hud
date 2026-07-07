@@ -14,9 +14,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { PersonnelPill } from "@/components/personnel/personnel-pill"
 import { Textarea } from "@/components/ui/textarea"
+import { personLabel } from "@/lib/personnel-data"
 import { cn } from "@/lib/utils"
+import { useWorkspace } from "@/lib/workspace"
 import type {
+  Personnel,
   Role,
   SiteProperty,
   SitePropertyTemplate,
@@ -33,6 +37,7 @@ const TYPES: SitePropertyType[] = [
   "url",
   "date",
   "bool",
+  "personnel",
 ]
 
 const TYPE_LABEL: Record<SitePropertyType, string> = {
@@ -44,16 +49,25 @@ const TYPE_LABEL: Record<SitePropertyType, string> = {
   url: "URL",
   date: "Date",
   bool: "Yes/No",
+  personnel: "Person",
 }
 
 interface Props {
   siteId: number
   properties: SiteProperty[]
   templates: SitePropertyTemplate[]
+  /** Roster for personnel-typed properties (picker + pill rendering). */
+  personnel: Personnel[]
   userRole?: Role
 }
 
-export function SiteDetailsTab({ siteId, properties, templates, userRole }: Props) {
+export function SiteDetailsTab({
+  siteId,
+  properties,
+  templates,
+  personnel,
+  userRole,
+}: Props) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -144,6 +158,7 @@ export function SiteDetailsTab({ siteId, properties, templates, userRole }: Prop
                     key={p.id}
                     siteId={siteId}
                     property={p}
+                    personnel={personnel}
                     groupSuggestions={groupSuggestions}
                     editing={editing}
                     onChanged={() => router.refresh()}
@@ -175,10 +190,26 @@ export function SiteDetailsTab({ siteId, properties, templates, userRole }: Prop
   )
 }
 
-function ReadOnlyValue({ property }: { property: SiteProperty }) {
+function ReadOnlyValue({
+  property,
+  personnel,
+}: {
+  property: SiteProperty
+  personnel: Personnel[]
+}) {
+  const { w } = useWorkspace()
   const v = property.value
   if (v == null || v === "") return <span className="text-muted-foreground">—</span>
   if (property.type === "bool") return <span>{v === true ? "Yes" : "No"}</span>
+  if (property.type === "personnel") {
+    const person = personnel.find((p) => p.id === Number(v))
+    // The referenced person may have been deleted since being assigned.
+    if (!person)
+      return <span className="text-muted-foreground">Not on the roster</span>
+    return (
+      <PersonnelPill person={person} href={w(`/personnel/${person.id}`)} size="sm" />
+    )
+  }
   if (property.type === "long_text")
     return <span className="whitespace-pre-wrap">{String(v)}</span>
   return <span>{String(v)}</span>
@@ -187,12 +218,14 @@ function ReadOnlyValue({ property }: { property: SiteProperty }) {
 function PropertyRow({
   siteId,
   property,
+  personnel,
   groupSuggestions,
   editing,
   onChanged,
 }: {
   siteId: number
   property: SiteProperty
+  personnel: Personnel[]
   groupSuggestions: string[]
   editing: boolean
   onChanged: () => void
@@ -252,10 +285,11 @@ function PropertyRow({
             <ValueEditor
               siteId={siteId}
               property={property}
+              personnel={personnel}
               onChanged={onChanged}
             />
           ) : (
-            <ReadOnlyValue property={property} />
+            <ReadOnlyValue property={property} personnel={personnel} />
           )}
         </div>
         {editing && (
@@ -279,10 +313,12 @@ function PropertyRow({
 function ValueEditor({
   siteId,
   property,
+  personnel,
   onChanged,
 }: {
   siteId: number
   property: SiteProperty
+  personnel: Personnel[]
   onChanged: () => void
 }) {
   const [value, setValue] = useState<SitePropertyValue>(property.value)
@@ -357,6 +393,42 @@ function ValueEditor({
         </span>
         {error && <span className="text-xs text-destructive">{error}</span>}
       </label>
+    )
+  }
+  if (property.type === "personnel") {
+    // Roster members only (guests come and go), but keep a saved guest —
+    // or any out-of-roster pick — selectable so the value doesn't blank.
+    const selectedId = value == null ? null : Number(value)
+    const selectedPerson =
+      selectedId != null ? personnel.find((p) => p.id === selectedId) : undefined
+    const options = personnel
+      .filter((p) => !p.is_guest || p.id === selectedId)
+      .sort((a, b) => personLabel(a).localeCompare(personLabel(b)))
+    return (
+      <div>
+        <select
+          {...commonProps}
+          value={selectedId == null ? "" : String(selectedId)}
+          onChange={(e) => {
+            const next = e.target.value === "" ? null : Number(e.target.value)
+            setValue(next)
+            void save(next)
+          }}
+        >
+          <option value="">— None —</option>
+          {selectedId != null && !selectedPerson && (
+            <option value={selectedId} disabled>
+              Not on the roster
+            </option>
+          )}
+          {options.map((p) => (
+            <option key={p.id} value={p.id}>
+              {personLabel(p)}
+            </option>
+          ))}
+        </select>
+        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      </div>
     )
   }
   const type =

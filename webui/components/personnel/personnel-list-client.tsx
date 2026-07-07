@@ -219,6 +219,7 @@ export function PersonnelListClient({
           <PersonnelCanvas
             mode="org-tree"
             people={filtered}
+            units={units}
             sites={sites}
             canEdit={canEdit}
             linkFrom={linkFrom}

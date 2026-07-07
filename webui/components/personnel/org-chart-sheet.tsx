@@ -13,7 +13,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import type { Personnel, Site } from "@/lib/types"
+import type { Personnel, Site, Unit } from "@/lib/types"
 
 interface Props {
   /** The full workspace roster — the chart needs complete supervisor chains. */
@@ -23,6 +23,8 @@ interface Props {
   /** Where the chart is being opened from, e.g. a site name. */
   contextLabel: string
   sites: Site[]
+  /** Feeds the chart's unit filter dropdown. */
+  units: Unit[]
   canEdit: boolean
   linkFrom?: { path: string; label: string }
 }
@@ -37,6 +39,7 @@ export function OrgChartSheet({
   highlightIds,
   contextLabel,
   sites,
+  units,
   canEdit,
   linkFrom,
 }: Props) {
@@ -65,6 +68,7 @@ export function OrgChartSheet({
             mode="org-tree"
             people={personnel}
             highlightIds={highlight}
+            units={units}
             sites={sites}
             canEdit={canEdit}
             linkFrom={linkFrom}

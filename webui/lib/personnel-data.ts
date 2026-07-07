@@ -377,6 +377,33 @@ export function rankGrade(
   return /^(?:E|O|W|GS)-\d+$/.test(rank) ? rank : null
 }
 
+/** Commissioned/warrant officers (grade O-x, W-x, or a five-star Special).
+ *  Gates commander eligibility and the org chart's officer section. */
+export function isOfficerGrade(
+  personnelType: PersonnelType,
+  branch: Branch | null,
+  rank: string | null,
+): boolean {
+  const grade = rankGrade(personnelType, branch, rank)
+  return (
+    grade != null &&
+    (grade === "Special" || grade.startsWith("O-") || grade.startsWith("W-"))
+  )
+}
+
+/** First sergeants — the AF diamond special-duty variants ("MSgt ◆" …) or
+ *  the branches where First Sergeant is itself a rank (Army 1SG, Marine
+ *  1stSgt). Matched via the catalog's full rank name. */
+export function isFirstSergeantRank(
+  personnelType: PersonnelType,
+  branch: Branch | null,
+  rank: string | null,
+): boolean {
+  if (!rank) return false
+  const entry = ranksFor(personnelType, branch).find((r) => r.short === rank)
+  return entry?.full.includes("First Sergeant") ?? false
+}
+
 /** Skill levels only apply to Air Force enlisted members. */
 export function skillLevelApplies(
   personnelType: PersonnelType,

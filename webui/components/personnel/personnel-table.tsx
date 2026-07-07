@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Columns3 } from "lucide-react"
 
+import { CommanderStar } from "@/components/personnel/commander-star"
 import { PersonnelStatusPill } from "@/components/personnel/personnel-status-pill"
 import { RankInsignia } from "@/components/personnel/rank-insignia"
 import { Badge } from "@/components/ui/badge"
@@ -178,6 +179,9 @@ export function PersonnelTable({
               <span className="font-medium text-foreground">
                 {p.last_name}, {p.first_name}
               </span>
+              {p.is_commander && (
+                <CommanderStar size={13} className="ml-1 align-[-2px]" />
+              )}
               {p.is_guest && (
                 <Badge
                   variant="secondary"
