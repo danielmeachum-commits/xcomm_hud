@@ -57,6 +57,7 @@ def _to_out(p: Personnel) -> dict:
         "escort": p.escort,
         "branch": p.branch,
         "rank": p.rank,
+        "skill_level": p.skill_level,
         "last_name": p.last_name,
         "first_name": p.first_name,
         "cellphone": p.cellphone,

@@ -820,17 +820,24 @@ PersonnelStatusValue = Literal[
     "sick",
     "training",
 ]
+# AFSC skill level (Air Force enlisted): 1 Helper, 3 Apprentice, 5 Journeyman,
+# 7 Craftsman, 9 Superintendent.
+SkillLevel = Literal[1, 3, 5, 7, 9]
 
 
 class UnitIn(BaseModel):
     name: str
     description: Optional[str] = None
+    branch: Optional[Branch] = None
+    is_default: bool = False
     parent_unit_id: Optional[int] = None
 
 
 class UnitPatch(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    branch: Optional[Branch] = None
+    is_default: Optional[bool] = None
     parent_unit_id: Optional[int] = None
 
 
@@ -839,6 +846,8 @@ class UnitOut(_ORM):
     workspace_id: int
     name: str
     description: Optional[str] = None
+    branch: Optional[Branch] = None
+    is_default: bool = False
     parent_unit_id: Optional[int] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -863,24 +872,44 @@ class WorkCenterOut(_ORM):
     updated_at: datetime.datetime
 
 
+class TeamLeadIn(BaseModel):
+    work_center_id: int
+    personnel_id: int
+
+
 class TeamIn(BaseModel):
     name: str
+    slug: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+    ncoic_id: Optional[int] = None
+    leads: list[TeamLeadIn] = []
 
 
 class TeamPatch(BaseModel):
     name: Optional[str] = None
+    slug: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+    ncoic_id: Optional[int] = None
+    # Omitted → untouched; provided → replaces the full lead set.
+    leads: Optional[list[TeamLeadIn]] = None
+
+
+class TeamLeadOut(_ORM):
+    work_center_id: int
+    personnel_id: int
 
 
 class TeamOut(_ORM):
     id: int
     workspace_id: int
     name: str
+    slug: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+    ncoic_id: Optional[int] = None
+    leads: list[TeamLeadOut] = []
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -892,6 +921,7 @@ class PersonnelIn(BaseModel):
     escort: Optional[str] = None
     branch: Optional[Branch] = "air_force"
     rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
     last_name: str
     first_name: str
     cellphone: Optional[str] = None
@@ -914,6 +944,7 @@ class PersonnelPatch(BaseModel):
     escort: Optional[str] = None
     branch: Optional[Branch] = None
     rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
     last_name: Optional[str] = None
     first_name: Optional[str] = None
     cellphone: Optional[str] = None
@@ -938,6 +969,7 @@ class PersonnelOut(_ORM):
     escort: Optional[str] = None
     branch: Optional[Branch] = None
     rank: Optional[str] = None
+    skill_level: Optional[int] = None
     last_name: str
     first_name: str
     cellphone: Optional[str] = None
@@ -1062,6 +1094,7 @@ class ExportedPersonnel(BaseModel):
     personnel_type: PersonnelType = "military"
     branch: Optional[Branch] = None
     rank: Optional[str] = None
+    skill_level: Optional[int] = None
     last_name: str
     first_name: str
     cellphone: Optional[str] = None

@@ -372,6 +372,10 @@ export interface Unit {
   workspace_id: number
   name: string
   description: string | null
+  /** Service branch of the org — prepopulates a new member's branch. */
+  branch: Branch | null
+  /** At most one per workspace — preselected when adding personnel. */
+  is_default: boolean
   parent_unit_id: number | null
   created_at: string
   updated_at: string
@@ -386,12 +390,21 @@ export interface WorkCenter {
   updated_at: string
 }
 
+export interface TeamLead {
+  work_center_id: number
+  personnel_id: number
+}
+
 export interface Team {
   id: number
   workspace_id: number
   name: string
+  /** Short code for compact display, e.g. "FCP1". */
+  slug: string | null
   description: string | null
   color: string | null
+  ncoic_id: number | null
+  leads: TeamLead[]
   created_at: string
   updated_at: string
 }
@@ -416,6 +429,7 @@ export interface Personnel {
   escort: string | null
   branch: Branch | null
   rank: string | null
+  skill_level: number | null
   last_name: string
   first_name: string
   cellphone: string | null

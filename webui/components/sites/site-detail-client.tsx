@@ -22,6 +22,7 @@ import {
   Activity,
   Building2,
   ClipboardList,
+  Flag,
   Info,
   Layers,
   LayoutGrid,
@@ -43,7 +44,12 @@ import {
   serviceIcon,
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
-import { PERSONNEL_STATUSES, PERSONNEL_STATUS_LABELS } from "@/lib/personnel-data"
+import {
+  buildPersonnelGroups,
+  type PersonnelGroup,
+} from "@/lib/personnel-grouping"
+import { OrgChartSheet } from "@/components/personnel/org-chart-sheet"
+import { PersonnelCanvas } from "@/components/personnel/personnel-canvas"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
 import { QuickCheckInButton } from "@/components/personnel/quick-checkin-button"
 import { QuickCheckOutButton } from "@/components/personnel/quick-checkout-button"
@@ -120,6 +126,11 @@ export function SiteDetailClient({
       const params = new URLSearchParams(searchParams.toString())
       if (next === "services") params.delete("tab")
       else params.set("tab", next)
+      // Personnel sub-tab state doesn't belong on other tabs' URLs.
+      if (next !== "personnel") {
+        params.delete("pgroup")
+        params.delete("pview")
+      }
       const qs = params.toString()
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
     },
@@ -400,13 +411,15 @@ function PlaceholderTab({
   )
 }
 
-type PersonnelGroupMode = "group" | "status" | "work_center" | "team"
+type PersonnelGroupMode = "group" | "status" | "work_center" | "team" | "unit"
 
-interface PersonnelGroup {
-  key: string
-  label: string
-  people: Personnel[]
-}
+const PERSONNEL_GROUP_MODES: PersonnelGroupMode[] = [
+  "group",
+  "status",
+  "work_center",
+  "team",
+  "unit",
+]
 
 function SitePersonnelTab({
   site,
@@ -426,7 +439,35 @@ function SitePersonnelTab({
   canEdit: boolean
 }) {
   const { w } = useWorkspace()
-  const [groupMode, setGroupMode] = useState<PersonnelGroupMode>("group")
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Grouping + view live in the URL (?pgroup=&pview=, alongside ?tab=) so the
+  // detail-page breadcrumb and the browser back button land on the same
+  // sub-tab. Defaults are omitted to keep URLs clean.
+  const groupParam = searchParams.get("pgroup") as PersonnelGroupMode | null
+  const groupMode: PersonnelGroupMode =
+    groupParam && PERSONNEL_GROUP_MODES.includes(groupParam)
+      ? groupParam
+      : "group"
+  const view: "list" | "graph" =
+    searchParams.get("pview") === "graph" ? "graph" : "list"
+  const setParam = useCallback(
+    (key: string, value: string | null) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (value == null) params.delete(key)
+      else params.set(key, value)
+      const qs = params.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams],
+  )
+  const setGroupMode = (next: PersonnelGroupMode) =>
+    setParam("pgroup", next === "group" ? null : next)
+  const setView = (next: "list" | "graph") =>
+    setParam("pview", next === "list" ? null : next)
+
   const assigned = personnel.filter((p) => p.assigned_site_id === site.id)
   // People signed in on-site right now — regardless of assignment. Useful for
   // seeing who is physically present including TDY visitors.
@@ -439,10 +480,33 @@ function SitePersonnelTab({
   // here — deduplicated (visitors already excludes anyone already assigned).
   const relevant = [...assigned, ...visitors]
 
-  // Return link so opening a person from here breadcrumbs back to this tab.
-  const linkFrom = { path: `${w(`/sites/${site.id}`)}?tab=personnel`, label: site.name }
+  // Return link so opening a person from here breadcrumbs back to this tab,
+  // including the active grouping/view.
+  const backParams = new URLSearchParams(searchParams.toString())
+  backParams.set("tab", "personnel")
+  const linkFrom = {
+    path: `${w(`/sites/${site.id}`)}?${backParams.toString()}`,
+    label: site.name,
+  }
 
   const empty = assigned.length === 0 && visitors.length === 0
+
+  // Headline counts: assigned split by whether they're signed in here right
+  // now, plus visitors (guests / other-site people currently on site).
+  const assignedOnSite = assigned.filter(
+    (p) => p.current_status === "on_site" && p.current_site_id === site.id,
+  ).length
+  const assignedAway = assigned.length - assignedOnSite
+  const summary = [
+    assigned.length === 0
+      ? "Nobody assigned"
+      : `${assigned.length} assigned: ${assignedOnSite} on site, ${assignedAway} off site`,
+    visitors.length > 0
+      ? `${visitors.length} visitor${visitors.length === 1 ? "" : "s"} on site`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(". ")
 
   const rowAction = canEdit
     ? (p: Personnel) =>
@@ -460,51 +524,14 @@ function SitePersonnelTab({
     : undefined
 
   const groups: PersonnelGroup[] =
-    groupMode === "status"
-      ? PERSONNEL_STATUSES.map((status) => ({
-          key: status,
-          label: PERSONNEL_STATUS_LABELS[status],
-          people: relevant.filter((p) => p.current_status === status),
-        })).filter((g) => g.people.length > 0)
-      : groupMode === "work_center"
-        ? (() => {
-            const withWc = workCenters
-              .map((wc) => ({
-                key: `wc-${wc.id}`,
-                label: wc.name,
-                people: relevant.filter((p) => p.work_center_id === wc.id),
-              }))
-              .filter((g) => g.people.length > 0)
-              .sort((a, b) => a.label.localeCompare(b.label))
-            const none = relevant.filter((p) => p.work_center_id == null)
-            return none.length > 0
-              ? [...withWc, { key: "none", label: "No work center", people: none }]
-              : withWc
-          })()
-        : groupMode === "team"
-          ? (() => {
-              const withTeam = teams
-                .map((t) => ({
-                  key: `team-${t.id}`,
-                  label: t.name,
-                  people: relevant.filter((p) => p.team_ids.includes(t.id)),
-                }))
-                .filter((g) => g.people.length > 0)
-                .sort((a, b) => a.label.localeCompare(b.label))
-              const none = relevant.filter((p) => p.team_ids.length === 0)
-              return none.length > 0
-                ? [...withTeam, { key: "none", label: "No team", people: none }]
-                : withTeam
-            })()
-          : []
+    groupMode === "group"
+      ? []
+      : buildPersonnelGroups(relevant, groupMode, { workCenters, units, teams })
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          Personnel assigned to {site.name}, plus anyone currently signed in
-          on-site.
-        </p>
+        <p className="text-xs text-muted-foreground">{summary}.</p>
         {canEdit && (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <RollCallDialog site={site} personnel={personnel} />
@@ -537,18 +564,55 @@ function SitePersonnelTab({
         </div>
       ) : (
         <>
-          <ViewTabs<PersonnelGroupMode>
-            value={groupMode}
-            onChange={setGroupMode}
-            options={[
-              { value: "group", label: "Site", icon: Layers },
-              { value: "status", label: "Status", icon: Activity },
-              { value: "work_center", label: "Work Center", icon: Building2 },
-              { value: "team", label: "Team", icon: UsersRound },
-            ]}
-          />
+          {/* View toggle on the left; list groupings on the right. The graph
+              is the team structure — the org chart needs the whole supervisor
+              chain, so it opens in a sheet charting the full workspace with
+              this site's people highlighted. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <ViewTabs<"list" | "graph">
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "list", label: "List", icon: LayoutGrid },
+                { value: "graph", label: "Graph", icon: Network },
+              ]}
+            />
+            {view === "graph" && (
+              <OrgChartSheet
+                personnel={personnel}
+                highlightIds={relevant.map((p) => p.id)}
+                contextLabel={site.name}
+                sites={sites}
+                canEdit={canEdit}
+                linkFrom={linkFrom}
+              />
+            )}
+            {view === "list" && (
+              <ViewTabs<PersonnelGroupMode>
+                value={groupMode}
+                onChange={setGroupMode}
+                options={[
+                  { value: "group", label: "Site", icon: Layers },
+                  { value: "status", label: "Status", icon: Activity },
+                  { value: "work_center", label: "Work Center", icon: Building2 },
+                  { value: "team", label: "Team", icon: UsersRound },
+                  { value: "unit", label: "Unit", icon: Flag },
+                ]}
+              />
+            )}
+          </div>
 
-          {groupMode === "group" ? (
+          {view === "graph" ? (
+            <PersonnelCanvas
+              mode="team-tree"
+              teams={teams}
+              workCenters={workCenters}
+              people={relevant}
+              sites={sites}
+              canEdit={canEdit}
+              linkFrom={linkFrom}
+            />
+          ) : groupMode === "group" ? (
             <>
               <section className="space-y-2">
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

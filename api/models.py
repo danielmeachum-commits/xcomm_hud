@@ -12,6 +12,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -559,6 +560,12 @@ class Unit(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Service branch of the organization — prepopulates a new member's branch
+    # in the personnel form once their unit is picked.
+    branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    # At most one per workspace (partial unique index) — preselected when
+    # adding personnel.
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     parent_unit_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("unit.id", ondelete="SET NULL"),
@@ -608,11 +615,14 @@ class Team(Base):
 
     Teams are ad-hoc — a person can belong to multiple teams. `color` is a
     hex string used by the UI for pill accents; null falls back to a neutral.
+    `slug` is a short code ("FCP1") for compact display; `ncoic_id` is the
+    team's NCOIC (SET NULL so a departing NCOIC doesn't remove the team).
     """
 
     __tablename__ = "team"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_team_workspace_name"),
+        UniqueConstraint("workspace_id", "slug", name="uq_team_workspace_slug"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -623,13 +633,25 @@ class Team(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    slug: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    ncoic_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("personnel.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    leads: Mapped[list["TeamWorkCenterLead"]] = relationship(
+        "TeamWorkCenterLead",
+        cascade="all, delete-orphan",
+        order_by="TeamWorkCenterLead.work_center_id",
     )
 
 
@@ -663,6 +685,10 @@ class Personnel(Base):
     escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     rank: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # AFSC skill level for Air Force enlisted members (1 Helper, 3 Apprentice,
+    # 5 Journeyman, 7 Craftsman, 9 Superintendent). Optional and only
+    # meaningful for enlisted ranks.
+    skill_level: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     last_name: Mapped[str] = mapped_column(String(64), nullable=False)
     first_name: Mapped[str] = mapped_column(String(64), nullable=False)
     cellphone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -781,4 +807,30 @@ class PersonnelTeam(Base):
         ForeignKey("team.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
+    )
+
+
+class TeamWorkCenterLead(Base):
+    """A team's designated lead for one work center.
+
+    Leads are scoped per team — FCP1's Tech Control lead can differ from
+    FCP2's. Rows cascade away with the team, the work center, or the person.
+    """
+
+    __tablename__ = "team_work_center_lead"
+
+    team_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("team.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    work_center_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("work_center.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    personnel_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("personnel.id", ondelete="CASCADE"),
+        nullable=False,
     )

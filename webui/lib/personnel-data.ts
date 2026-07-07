@@ -343,6 +343,90 @@ export function rankOptionLabel(r: RankEntry): string {
   return `${gradePrefix}${r.short} — ${r.full}`
 }
 
+// --- AFSC skill levels (Air Force enlisted) ---
+
+export const SKILL_LEVELS = [1, 3, 5, 7, 9] as const
+export type SkillLevel = (typeof SKILL_LEVELS)[number]
+
+export const SKILL_LEVEL_LABELS: Record<SkillLevel, string> = {
+  1: "Helper",
+  3: "Apprentice",
+  5: "Journeyman",
+  7: "Craftsman",
+  9: "Superintendent",
+}
+
+/** "7 — Craftsman" for display; null-safe for people without one. */
+export function skillLevelLabel(level: number | null): string | null {
+  if (level == null) return null
+  const name = SKILL_LEVEL_LABELS[level as SkillLevel]
+  return name ? `${level} — ${name}` : String(level)
+}
+
+/** Pay grade for a person's rank ("E-5", "O-3", …), from the branch catalog.
+ *  Falls back to parsing the rank string itself (covers civilian "GS-13" and
+ *  freeform CSV values shaped like a grade). */
+export function rankGrade(
+  personnelType: PersonnelType,
+  branch: Branch | null,
+  rank: string | null,
+): string | null {
+  if (!rank) return null
+  const entry = ranksFor(personnelType, branch).find((r) => r.short === rank)
+  if (entry) return entry.grade
+  return /^(?:E|O|W|GS)-\d+$/.test(rank) ? rank : null
+}
+
+/** Skill levels only apply to Air Force enlisted members. */
+export function skillLevelApplies(
+  personnelType: PersonnelType,
+  branch: Branch | null,
+  rank: string | null,
+): boolean {
+  if (personnelType !== "military" || branch !== "air_force") return false
+  return rankGrade(personnelType, branch, rank)?.startsWith("E-") ?? false
+}
+
+/** Typical skill level by grade: E-4 & below 5, E-5/E-6 7, E-7 & up 9.
+ *  A suggestion only — members in training hold 1/3, so the form lets the
+ *  user override. */
+export function defaultSkillLevel(
+  personnelType: PersonnelType,
+  branch: Branch | null,
+  rank: string | null,
+): SkillLevel | null {
+  if (!skillLevelApplies(personnelType, branch, rank)) return null
+  const grade = rankGrade(personnelType, branch, rank)
+  const n = Number(grade?.slice(2))
+  if (!Number.isFinite(n)) return null
+  if (n <= 4) return 5
+  if (n <= 6) return 7
+  return 9
+}
+
+/** Sort key for rank seniority — higher is more senior. Officers over
+ *  warrants over enlisted; SES/SL/ST over GS; unknown ranks sort last. */
+export function rankSeniority(
+  personnelType: PersonnelType,
+  branch: Branch | null,
+  rank: string | null,
+): number {
+  const grade = rankGrade(personnelType, branch, rank)
+  if (!grade) return 0
+  if (grade === "Special") return 311 // five-star, above O-10
+  // Senior civilian tiers sit above the GS ladder but below military ranks.
+  if (grade === "SES") return 62
+  if (grade === "SL") return 61
+  if (grade === "ST") return 60
+  const n = Number(grade.slice(grade.indexOf("-") + 1))
+  if (!Number.isFinite(n)) return 0
+  if (grade.startsWith("O-")) return 300 + n
+  if (grade.startsWith("W-")) return 200 + n
+  if (grade.startsWith("E-")) return 100 + n
+  if (grade.startsWith("GS-")) return n // civilian ladder, below military
+  return 0
+}
+
 export function branchColor(
   branch: Branch | null,
   personnelType: PersonnelType,
@@ -430,6 +514,30 @@ export const PERSONNEL_STATUSES: PersonnelStatus[] = [
 
 /** Statuses that carry a site: on_site = present location, traveling = destination. */
 export const SITE_BEARING_STATUSES: PersonnelStatus[] = ["on_site", "traveling"]
+
+// Preset accent palette for teams — categorical slots in fixed order, chosen
+// so adjacent hues stay CVD-distinguishable and every value clears 3:1 on the
+// dark surface (team colors always render beside the team's name, never as
+// the only carrier of identity).
+export const TEAM_COLOR_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "#2a78d6", label: "Blue" },
+  { value: "#1baf7a", label: "Teal" },
+  { value: "#eda100", label: "Amber" },
+  { value: "#008300", label: "Green" },
+  { value: "#6d5fd0", label: "Violet" },
+  { value: "#e34948", label: "Red" },
+  { value: "#e87ba4", label: "Pink" },
+  { value: "#eb6834", label: "Orange" },
+]
+
+/** "TSgt Doe, Jane" — compact person label for selects and badges. */
+export function personLabel(p: {
+  rank: string | null
+  last_name: string
+  first_name: string
+}): string {
+  return `${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`
+}
 
 export const PERSONNEL_STATUS_LABELS: Record<PersonnelStatus, string> = {
   on_site: "On site",

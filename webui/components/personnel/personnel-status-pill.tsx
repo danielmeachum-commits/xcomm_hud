@@ -16,9 +16,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import {
   describeLocation,
   PERSONNEL_STATUS_LABELS,
+  type PersonnelStatus,
 } from "@/lib/personnel-data"
 import { formatLocal, formatZulu, timeAgo } from "@/lib/time"
 import type { Personnel, PersonnelLocationEvent, Site } from "@/lib/types"
@@ -30,6 +32,23 @@ interface Props {
   /** Operators/admins get an "Update location" action in the details dialog. */
   canEdit: boolean
   size?: "sm" | "md"
+  /** "dot" renders just the animated status indicator — hover popover and
+   *  click-for-details behavior are identical. Used in compact spots like
+   *  the personnel graph canvas. */
+  variant?: "pill" | "dot"
+}
+
+/** StatusIndicator state driving the pulse: live/transitioning statuses
+ *  animate, everything else sits still. Color itself comes from
+ *  describeLocation() via the `color` override. */
+function dotState(
+  status: PersonnelStatus,
+  overdue: boolean,
+): "active" | "setup" | "down" | "idle" {
+  if (overdue) return "down"
+  if (status === "on_site") return "active"
+  if (status === "traveling") return "setup"
+  return "idle"
 }
 
 /**
@@ -44,6 +63,7 @@ export function PersonnelStatusPill({
   sites,
   canEdit,
   size = "sm",
+  variant = "pill",
 }: Props) {
   const [hoverOpen, setHoverOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -91,7 +111,13 @@ export function PersonnelStatusPill({
     void fetchHistory()
   }
 
-  const badge = (
+  const badge = variant === "dot" ? (
+    <StatusIndicator
+      state={dotState(person.current_status, desc.overdue)}
+      color={desc.color}
+      size="sm"
+    />
+  ) : (
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-full border bg-background text-muted-foreground",

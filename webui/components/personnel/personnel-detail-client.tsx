@@ -12,7 +12,11 @@ import { PersonnelPill } from "@/components/personnel/personnel-pill"
 import { PersonnelStatusBadge } from "@/components/personnel/personnel-status-badge"
 import { PersonnelStatusPill } from "@/components/personnel/personnel-status-pill"
 import { Button } from "@/components/ui/button"
-import { BRANCH_LABELS, branchColor } from "@/lib/personnel-data"
+import {
+  BRANCH_LABELS,
+  branchColor,
+  skillLevelLabel,
+} from "@/lib/personnel-data"
 import type {
   Personnel,
   PersonnelLocationEvent,
@@ -23,7 +27,7 @@ import type {
   WorkCenter,
 } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
-import { formatLocal } from "@/lib/time"
+import { LocalTime } from "@/components/time-display"
 
 interface Props {
   person: Personnel
@@ -221,6 +225,14 @@ export function PersonnelDetailClient({
                     : "—"}
               </dd>
             </div>
+            {person.skill_level != null && (
+              <div>
+                <dt className="text-[10px] uppercase text-muted-foreground">
+                  Skill level
+                </dt>
+                <dd>{skillLevelLabel(person.skill_level)}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-[10px] uppercase text-muted-foreground">
                 Unit
@@ -370,7 +382,9 @@ export function PersonnelDetailClient({
                 {history.map((h) => (
                   <tr key={h.id} className="border-t">
                     <td className="whitespace-nowrap px-3 py-1.5">
-                      {formatLocal(h.changed_at)}
+                      {/* LocalTime defers to post-hydration — the server (UTC)
+                          and browser render different wall times otherwise. */}
+                      <LocalTime iso={h.changed_at} />
                     </td>
                     <td className="px-3 py-1.5">
                       <PersonnelStatusBadge status={h.status} />

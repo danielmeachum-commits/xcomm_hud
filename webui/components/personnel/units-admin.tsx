@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import type { Unit } from "@/lib/types"
+import { BRANCHES, BRANCH_LABELS } from "@/lib/personnel-data"
+import type { Branch, Unit } from "@/lib/types"
 
 interface Props {
   units: Unit[]
@@ -21,6 +22,8 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState("")
   const [desc, setDesc] = useState("")
+  const [branch, setBranch] = useState<Branch | "">("")
+  const [isDefault, setIsDefault] = useState(false)
   const [parentId, setParentId] = useState<string>("")
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +35,8 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
     setCreating(true)
     setName("")
     setDesc("")
+    setBranch("")
+    setIsDefault(false)
     setParentId("")
     setError(null)
   }
@@ -40,6 +45,8 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
     setEditing(u)
     setName(u.name)
     setDesc(u.description ?? "")
+    setBranch(u.branch ?? "")
+    setIsDefault(u.is_default)
     setParentId(u.parent_unit_id?.toString() ?? "")
     setError(null)
   }
@@ -55,6 +62,8 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
       const body = {
         name: name.trim(),
         description: desc || null,
+        branch: branch || null,
+        is_default: isDefault,
         parent_unit_id: parentId ? Number(parentId) : null,
       }
       const res = await fetch(
@@ -138,6 +147,41 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
                 ))}
               </select>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="unit-branch">Branch</Label>
+              <select
+                id="unit-branch"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value as Branch | "")}
+                disabled={pending}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">— None —</option>
+                {BRANCHES.map((b) => (
+                  <option key={b} value={b}>
+                    {BRANCH_LABELS[b]}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Prefills the branch when adding personnel to this unit.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="unit-default" className="block">
+                Default unit
+              </Label>
+              <label className="flex h-9 items-center gap-2 text-sm">
+                <input
+                  id="unit-default"
+                  type="checkbox"
+                  checked={isDefault}
+                  onChange={(e) => setIsDefault(e.target.checked)}
+                  disabled={pending}
+                />
+                Preselect for new personnel
+              </label>
+            </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="unit-desc">Description</Label>
               <Textarea
@@ -175,6 +219,7 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
           <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">Branch</th>
               <th className="px-3 py-2">Parent</th>
               <th className="px-3 py-2">Description</th>
               <th className="w-1 px-3 py-2 text-right">Actions</th>
@@ -184,7 +229,7 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
             {units.length === 0 && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-3 py-6 text-center text-xs text-muted-foreground"
                 >
                   Nothing here yet.
@@ -193,7 +238,19 @@ export function UnitsAdmin({ units, canEdit, canDelete }: Props) {
             )}
             {units.map((u) => (
               <tr key={u.id} className="border-t hover:bg-muted/20">
-                <td className="px-3 py-2 font-medium">{u.name}</td>
+                <td className="px-3 py-2 font-medium">
+                  <span className="flex items-center gap-2">
+                    {u.name}
+                    {u.is_default && (
+                      <span className="rounded border border-border bg-muted/60 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Default
+                      </span>
+                    )}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {u.branch ? BRANCH_LABELS[u.branch] : "—"}
+                </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {u.parent_unit_id
                     ? unitById.get(u.parent_unit_id)?.name ?? "—"

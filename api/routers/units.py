@@ -74,6 +74,17 @@ def _validate_parent(
         )
 
 
+def _clear_other_defaults(db: Session, workspace: Workspace, keep_id: int | None) -> None:
+    """Making a unit the default clears the flag everywhere else — at most one
+    default per workspace (also enforced by a partial unique index)."""
+    q = db.query(Unit).filter(
+        Unit.workspace_id == workspace.id, Unit.is_default.is_(True)
+    )
+    if keep_id is not None:
+        q = q.filter(Unit.id != keep_id)
+    q.update({"is_default": False}, synchronize_session="fetch")
+
+
 @router.post("", response_model=UnitOut, status_code=status.HTTP_201_CREATED)
 def create_unit(
     body: UnitIn,
@@ -89,6 +100,8 @@ def create_unit(
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Unit name already exists")
     _validate_parent(db, workspace, body.parent_unit_id, self_id=None)
+    if body.is_default:
+        _clear_other_defaults(db, workspace, keep_id=None)
     unit = Unit(workspace_id=workspace.id, **body.model_dump())
     db.add(unit)
     db.flush()
@@ -123,6 +136,8 @@ def patch_unit(
             )
     if "parent_unit_id" in data:
         _validate_parent(db, workspace, data["parent_unit_id"], self_id=unit.id)
+    if data.get("is_default"):
+        _clear_other_defaults(db, workspace, keep_id=unit.id)
     for k, v in data.items():
         setattr(unit, k, v)
     db.flush()

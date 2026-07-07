@@ -1,12 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import {
   Bell,
   ChevronRight,
   ChevronUp,
+  Flag,
   ListChecks,
   LogOut,
   MapPin,
@@ -14,6 +15,7 @@ import {
   Radio,
   Settings,
   Users,
+  UsersRound,
 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
@@ -50,8 +52,18 @@ import { useWorkspace } from "@/lib/workspace"
 
 const SECONDARY_NAV_ITEMS = [
   { path: "/services", label: "Services", icon: Radio },
-  { path: "/personnel", label: "Personnel", icon: Users },
   { path: "/events", label: "Events", icon: Bell },
+]
+
+// Quick links to the personnel structure graphs (?view=graph&graph=…).
+const PERSONNEL_SUB_ITEMS = [
+  { search: "?view=graph", graph: "org", label: "Org chart", icon: Flag },
+  {
+    search: "?view=graph&graph=teams",
+    graph: "teams",
+    label: "Teams",
+    icon: UsersRound,
+  },
 ]
 
 // Workspace-scoped admin items (gateways lives under the current workspace);
@@ -77,6 +89,7 @@ interface Props {
 export function AppSidebar({ user, sites }: Props) {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { w } = useWorkspace()
   const isAdmin = user.role === "admin"
   const sitesHref = w("/sites")
@@ -87,6 +100,22 @@ export function AppSidebar({ user, sites }: Props) {
   useEffect(() => {
     if (onSitesRoute) setSitesOpen(true)
   }, [onSitesRoute])
+
+  const personnelHref = w("/personnel")
+  const onPersonnelRoute =
+    pathname === personnelHref || pathname.startsWith(personnelHref + "/")
+  const [personnelOpen, setPersonnelOpen] = useState(onPersonnelRoute)
+
+  useEffect(() => {
+    if (onPersonnelRoute) setPersonnelOpen(true)
+  }, [onPersonnelRoute])
+
+  // Which structure graph the roster page is showing, if any — mirrors the
+  // page's URL params (?view=graph&graph=…, org when graph is omitted).
+  const activeGraph =
+    pathname === personnelHref && searchParams.get("view") === "graph"
+      ? (searchParams.get("graph") ?? "org")
+      : null
 
   async function handleLogout() {
     await fetch("/api/logout", { method: "POST" })
@@ -153,7 +182,67 @@ export function AppSidebar({ user, sites }: Props) {
                 )}
               </SidebarMenuItem>
 
-              {SECONDARY_NAV_ITEMS.map((item) => {
+              {SECONDARY_NAV_ITEMS.slice(0, 1).map((item) => {
+                const href = w(item.path)
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      isActive={isActive(href)}
+                      tooltip={item.label}
+                      render={<Link href={href} />}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={isActive(personnelHref)}
+                  tooltip="Personnel"
+                  render={<Link href={personnelHref} />}
+                >
+                  <Users />
+                  <span>Personnel</span>
+                </SidebarMenuButton>
+                <SidebarMenuAction
+                  onClick={() => setPersonnelOpen((v) => !v)}
+                  aria-label={
+                    personnelOpen
+                      ? "Collapse personnel views"
+                      : "Expand personnel views"
+                  }
+                  aria-expanded={personnelOpen}
+                >
+                  <ChevronRight
+                    className={cn(
+                      "transition-transform duration-150",
+                      personnelOpen && "rotate-90",
+                    )}
+                  />
+                </SidebarMenuAction>
+                {personnelOpen && (
+                  <SidebarMenuSub>
+                    {PERSONNEL_SUB_ITEMS.map((item) => (
+                      <SidebarMenuSubItem key={item.graph}>
+                        <SidebarMenuSubButton
+                          isActive={activeGraph === item.graph}
+                          render={
+                            <Link href={`${personnelHref}${item.search}`} />
+                          }
+                        >
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ))}
+                  </SidebarMenuSub>
+                )}
+              </SidebarMenuItem>
+
+              {SECONDARY_NAV_ITEMS.slice(1).map((item) => {
                 const href = w(item.path)
                 return (
                   <SidebarMenuItem key={item.path}>

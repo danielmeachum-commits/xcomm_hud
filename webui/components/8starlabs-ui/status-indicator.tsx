@@ -48,6 +48,7 @@ const getSizeClasses = (size: StatusIndicatorProps["size"]) => {
 
 const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   state = "idle",
+  color,
   label,
   className,
   size = "md",
@@ -72,6 +73,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
               sizeClasses.ping,
               colors.ping,
             )}
+            style={color ? { backgroundColor: color } : undefined}
           />
         )}
         <span
@@ -80,6 +82,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
             sizeClasses.dot,
             colors.dot,
           )}
+          style={color ? { backgroundColor: color } : undefined}
         />
       </div>
       {label && (
