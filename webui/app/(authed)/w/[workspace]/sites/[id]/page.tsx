@@ -4,6 +4,8 @@ import { requireSession } from "@/lib/auth"
 import { apiGet, ApiError } from "@/lib/api"
 import { SiteDetailClient } from "@/components/sites/site-detail-client"
 import type {
+  Event,
+  EventTypeDef,
   Gateway,
   Me,
   Personnel,
@@ -46,6 +48,8 @@ export default async function SiteDetailPage({ params }: PageProps) {
     workCenters,
     units,
     teams,
+    events,
+    eventTypes,
   ] = await Promise.all([
     apiGet<Service[]>(`/services`).catch(() => [] as Service[]),
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
@@ -63,6 +67,10 @@ export default async function SiteDetailPage({ params }: PageProps) {
     apiGet<WorkCenter[]>(`/work-centers`).catch(() => [] as WorkCenter[]),
     apiGet<Unit[]>(`/units`).catch(() => [] as Unit[]),
     apiGet<Team[]>(`/teams`).catch(() => [] as Team[]),
+    apiGet<Event[]>(`/events?site_id=${siteId}&limit=500`).catch(
+      () => [] as Event[],
+    ),
+    apiGet<EventTypeDef[]>(`/event-types`).catch(() => [] as EventTypeDef[]),
   ])
 
   const siteServices = allServices.filter((s) => s.site_id === siteId)
@@ -81,6 +89,9 @@ export default async function SiteDetailPage({ params }: PageProps) {
       units={units}
       teams={teams}
       userRole={me.role}
+      me={me}
+      events={events}
+      eventTypes={eventTypes}
     />
   )
 }

@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 from db import get_db
 from deps import get_current_workspace, requires
 from auth import get_current_user
+from rules_engine import emit_trigger
 from models import (
-    Event,
     Personnel,
     PersonnelLocationEvent,
     PersonnelTeam,
@@ -112,12 +112,13 @@ def _apply_location_change(
     expected_return_at,
     when,
     user_id: int | None,
-    write_feed: bool = True,
+    source_flow: str = "checkin",
 ) -> None:
-    """Append a PersonnelLocationEvent (append-only history) and update the
-    denormalized current_* fields on the person. When `write_feed` is set, also
-    append a workspace Event so the Events page reflects the change — bulk
-    resets skip the feed to avoid flooding it with one row per person.
+    """Append a PersonnelLocationEvent (append-only history), update the
+    denormalized current_* fields, and emit the location-changed trigger.
+    `source_flow` ("checkin" | "bulk" | "reset") rides on the trigger
+    payload so rules can distinguish flows — the seeded feed rule skips
+    "reset" to avoid flooding the Events page with one row per person.
     """
     prev_status = p.current_status
     db.add(
@@ -131,22 +132,22 @@ def _apply_location_change(
             changed_by_user_id=user_id,
         )
     )
-    if write_feed:
-        db.add(
-            Event(
-                event_type="personnel",
-                validated_at=when,
-                subject_kind="personnel_location",
-                subject_id=p.id,
-                second_subject_id=site_id,
-                subject_label=f"{p.last_name}, {p.first_name}",
-                prev_status=prev_status,
-                status=stat,
-                source="manual",
-                validated_by_user_id=user_id,
-                note=note,
-            )
-        )
+    emit_trigger(
+        db,
+        "personnel.location_changed",
+        {
+            "personnel_id": p.id,
+            "personnel_name": f"{p.last_name}, {p.first_name}",
+            "prev_status": prev_status,
+            "new_status": stat,
+            "site_id": site_id,
+            "source_flow": source_flow,
+            "note": note,
+            "user_id": user_id,
+            "occurred_at": when,
+        },
+        workspace_id=p.workspace_id,
+    )
     p.current_status = stat
     p.current_site_id = site_id
     p.current_status_since = when
@@ -425,6 +426,7 @@ def checkin_bulk(
             expected_return_at=body.expected_return_at,
             when=when,
             user_id=current_user.id,
+            source_flow="bulk",
         )
     db.flush()
     notify(background_tasks)
@@ -463,7 +465,7 @@ def reset_statuses(
             expected_return_at=None,
             when=when,
             user_id=current_user.id,
-            write_feed=False,
+            source_flow="reset",
         )
     db.flush()
     notify(background_tasks)

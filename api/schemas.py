@@ -49,8 +49,14 @@ SubjectKind = Literal[
     "system",
     "mission",
     "exercise",
+    "team",
+    "unit",
+    "work_center",
+    "workspace",
 ]
 EventType = Literal["validation", "general", "personnel"]
+RecordClass = Literal["log", "event"]
+Severity = Literal["info", "notice", "warning", "critical"]
 
 # Which subject_kinds belong to which event_type. Used for validation on both
 # create and list endpoints.
@@ -64,7 +70,16 @@ VALIDATION_SUBJECT_KINDS = {
     "site_status",
 }
 PERSONNEL_SUBJECT_KINDS = {"personnel_location"}
-GENERAL_SUBJECT_KINDS = {"system", "mission", "exercise"}
+GENERAL_SUBJECT_KINDS = {
+    "system",
+    "mission",
+    "exercise",
+    "site",
+    "team",
+    "unit",
+    "work_center",
+    "workspace",
+}
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]
 
@@ -550,6 +565,10 @@ class StatusRollupOut(BaseModel):
 class EventOut(_ORM):
     id: int
     event_type: EventType = "validation"
+    workspace_id: Optional[int] = None
+    record_class: RecordClass = "log"
+    severity: Severity = "info"
+    type_slug: Optional[str] = None
     validated_at: datetime.datetime
     subject_kind: SubjectKind
     subject_id: Optional[int] = None
@@ -577,6 +596,11 @@ class EventCreateIn(BaseModel):
     status: Optional[AnyStatusValue] = None
     prev_status: Optional[AnyStatusValue] = None
     note: Optional[str] = None
+    # Catalog type for declarable (general) events — resolves record_class,
+    # severity, and allowed scopes from EventTypeDef.
+    type_slug: Optional[str] = None
+    severity: Optional[Severity] = None
+    validated_at: Optional[datetime.datetime] = None
 
 
 class EventNotePatch(BaseModel):
@@ -591,6 +615,156 @@ class EventEditIn(BaseModel):
 
 class EventBulkIds(BaseModel):
     ids: list[int]
+
+
+# --- Event type catalog ---
+
+
+class EventTypeDefOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    slug: str
+    label: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    record_class: RecordClass = "event"
+    default_severity: Severity = "notice"
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    allowed_subject_kinds: list[SubjectKind] = Field(default_factory=list)
+    is_builtin: bool = False
+    is_system: bool = False
+    retired_at: Optional[datetime.datetime] = None
+    created_by_user_id: Optional[int] = None
+    created_at: datetime.datetime
+
+
+class EventTypeDefIn(BaseModel):
+    slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    label: str = Field(min_length=1, max_length=128)
+    description: Optional[str] = None
+    category: Optional[str] = Field(default=None, max_length=48)
+    record_class: RecordClass = "event"
+    default_severity: Severity = "notice"
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    allowed_subject_kinds: list[SubjectKind] = Field(default_factory=list)
+
+
+class EventTypeDefPatch(BaseModel):
+    label: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    description: Optional[str] = None
+    category: Optional[str] = Field(default=None, max_length=48)
+    record_class: Optional[RecordClass] = None
+    default_severity: Optional[Severity] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    allowed_subject_kinds: Optional[list[SubjectKind]] = None
+
+
+# --- Rules engine ---
+
+
+class RuleActionStep(BaseModel):
+    action: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuleComputedField(BaseModel):
+    """A derived field: template = {field} interpolation; expr = a value
+    expression tree (arithmetic, cat, coalesce, if, ...)."""
+
+    name: str = Field(min_length=1, max_length=48, pattern=r"^[a-z][a-z0-9_]*$")
+    kind: Literal["template", "expr"] = "template"
+    template: Optional[str] = None
+    expr: Optional[Any] = None
+
+
+class RuleOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    trigger: str
+    conditions: Optional[Any] = None
+    enrichers: list[str] = Field(default_factory=list)
+    computed: list[RuleComputedField] = Field(default_factory=list)
+    actions: list[RuleActionStep] = Field(default_factory=list)
+    enabled: bool = True
+    is_builtin: bool = False
+    on_error: Literal["abort", "skip"] = "skip"
+    priority: int = 100
+    created_by_user_id: Optional[int] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class RuleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: Optional[str] = None
+    trigger: str
+    conditions: Optional[Any] = None
+    enrichers: list[str] = Field(default_factory=list)
+    computed: list[RuleComputedField] = Field(default_factory=list)
+    actions: list[RuleActionStep] = Field(min_length=1)
+    enabled: bool = True
+    on_error: Literal["abort", "skip"] = "skip"
+    priority: int = 100
+
+
+class RulePatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    description: Optional[str] = None
+    trigger: Optional[str] = None
+    conditions: Optional[Any] = None
+    # Sentinel-free clearing: send conditions_clear=true to drop conditions.
+    conditions_clear: bool = False
+    enrichers: Optional[list[str]] = None
+    computed: Optional[list[RuleComputedField]] = None
+    actions: Optional[list[RuleActionStep]] = None
+    enabled: Optional[bool] = None
+    on_error: Optional[Literal["abort", "skip"]] = None
+    priority: Optional[int] = None
+
+
+class RuleTestIn(BaseModel):
+    """Dry-run a rule draft: computed fields + conditions evaluated against
+    a caller-supplied sample payload. Pure evaluation — no side effects."""
+
+    computed: list[RuleComputedField] = Field(default_factory=list)
+    conditions: Optional[Any] = None
+    sample: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuleTestOut(BaseModel):
+    computed_values: dict[str, Any]
+    matched: bool
+
+
+class RuleExecutionOut(_ORM):
+    id: int
+    rule_id: int
+    trigger: str
+    fired_at: datetime.datetime
+    status: str
+    error: Optional[str] = None
+    context: Optional[dict[str, Any]] = None
+
+
+class EventSummaryOut(BaseModel):
+    """Counts backing the events-page widget row."""
+
+    total_events: int
+    total_logs: int
+    events_today: int
+    by_severity: dict[str, int]
+    by_type: dict[str, int]
+    # 24 hourly buckets (oldest first) of event-class records — sparkline data.
+    activity_24h: list[int]
+    exercise_phase: Optional[str] = None
+    exercise_phase_at: Optional[datetime.datetime] = None
+    personnel_on_site: int = 0
+    services_down: int = 0
 
 
 # --- Enclave source / ingest ---

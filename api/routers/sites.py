@@ -5,9 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+import datetime
+
 from db import get_db
 from deps import get_current_workspace, requires
-from models import Event, Site, User, Workspace
+from models import Site, User, Workspace
+from rules_engine import emit_trigger
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
 from pubsub import notify
 from schemas import (
     SiteEmconIn,
@@ -102,20 +109,23 @@ def set_site_status(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    """Change a site's posture status and append an event row."""
+    """Change a site's posture status; rules react (record event, ...)."""
     site = _load_site_in_workspace(db, site_id, workspace)
-    kwargs = dict(
-        subject_kind="site_status",
-        subject_id=site.id,
-        prev_status=site.status,
-        status=body.status,
-        source="manual",
-        validated_by_user_id=current_user.id,
-        note=body.note,
+    emit_trigger(
+        db,
+        "site.status_changed",
+        {
+            "site_id": site.id,
+            "site_name": site.name,
+            "prev_status": site.status,
+            "new_status": body.status,
+            "note": body.note,
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "occurred_at": body.validated_at or _now(),
+        },
+        workspace_id=workspace.id,
     )
-    if body.validated_at is not None:
-        kwargs["validated_at"] = body.validated_at
-    db.add(Event(**kwargs))
     site.status = body.status
     db.flush()
     notify(background_tasks)
@@ -131,20 +141,23 @@ def set_site_fpcon(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    """Change a site's FPCON level and append a validation row to the event log."""
+    """Change a site's FPCON level; rules react (record event, ...)."""
     site = _load_site_in_workspace(db, site_id, workspace)
-    kwargs = dict(
-        subject_kind="site_fpcon",
-        subject_id=site.id,
-        prev_status=site.fpcon,
-        status=body.level,
-        source="manual",
-        validated_by_user_id=current_user.id,
-        note=body.note,
+    emit_trigger(
+        db,
+        "site.fpcon_changed",
+        {
+            "site_id": site.id,
+            "site_name": site.name,
+            "prev_status": site.fpcon,
+            "new_status": body.level,
+            "note": body.note,
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "occurred_at": body.validated_at or _now(),
+        },
+        workspace_id=workspace.id,
     )
-    if body.validated_at is not None:
-        kwargs["validated_at"] = body.validated_at
-    db.add(Event(**kwargs))
     site.fpcon = body.level
     db.flush()
     notify(background_tasks)
@@ -160,20 +173,23 @@ def set_site_emcon(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    """Change a site's EMCON level and append a validation row to the event log."""
+    """Change a site's EMCON level; rules react (record event, ...)."""
     site = _load_site_in_workspace(db, site_id, workspace)
-    kwargs = dict(
-        subject_kind="site_emcon",
-        subject_id=site.id,
-        prev_status=site.emcon,
-        status=body.level,
-        source="manual",
-        validated_by_user_id=current_user.id,
-        note=body.note,
+    emit_trigger(
+        db,
+        "site.emcon_changed",
+        {
+            "site_id": site.id,
+            "site_name": site.name,
+            "prev_status": site.emcon,
+            "new_status": body.level,
+            "note": body.note,
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "occurred_at": body.validated_at or _now(),
+        },
+        workspace_id=workspace.id,
     )
-    if body.validated_at is not None:
-        kwargs["validated_at"] = body.validated_at
-    db.add(Event(**kwargs))
     site.emcon = body.level
     db.flush()
     notify(background_tasks)

@@ -31,6 +31,13 @@ import {
   statusLabel,
   statusToIndicatorState,
 } from "@/lib/status"
+import { REGISTRY_TYPE_LABELS } from "@/lib/event-type-labels"
+import {
+  SEVERITY_LABELS,
+  SEVERITY_ORDER,
+  severityDotClass,
+  severityRank,
+} from "@/lib/severity"
 import { formatZulu } from "@/lib/time"
 import {
   emconClasses,
@@ -44,13 +51,20 @@ import type {
   Emcon,
   Event,
   EventType,
+  EventTypeDef,
   Fpcon,
   Gateway,
   Me,
   PersonnelStatus,
+  RecordClass,
   Service,
+  Severity,
   Site,
   SubjectKind,
+  Team,
+  Unit,
+  WorkCenter,
+  Workspace,
 } from "@/lib/types"
 
 import { ColumnsPopover } from "./columns-popover"
@@ -126,14 +140,16 @@ const KIND_OPTIONS: MultiSelectOption[] = [
   { value: "system", label: "System", group: "general" },
   { value: "mission", label: "Mission", group: "general" },
   { value: "exercise", label: "Exercise", group: "general" },
+  { value: "workspace", label: "Workspace", group: "general" },
+  { value: "team", label: "Team", group: "general" },
+  { value: "unit", label: "Unit", group: "general" },
+  { value: "work_center", label: "Work center", group: "general" },
 ]
 
-const EVENT_TYPE_TABS: { value: EventType | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "validation", label: "Validation" },
-  { value: "personnel", label: "Personnel" },
-  { value: "general", label: "General" },
-]
+const SEVERITY_OPTIONS: MultiSelectOption[] = SEVERITY_ORDER.map((s) => ({
+  value: s,
+  label: SEVERITY_LABELS[s],
+}))
 
 const STATUS_GROUPS: MultiSelectGroup[] = [
   { key: "operational", label: "Operational" },
@@ -178,11 +194,19 @@ const STATUS_OPTIONS: MultiSelectOption[] = [
   ...PERSONNEL_STATUS_OPTIONS,
 ]
 
-type SortKey = "validated_at" | "subject_kind" | "subject_name" | "site_name" | "status" | "operator"
+type SortKey =
+  | "validated_at"
+  | "severity"
+  | "subject_kind"
+  | "subject_name"
+  | "site_name"
+  | "status"
+  | "operator"
 type SortDir = "asc" | "desc"
 
 const SORT_BY_COLUMN: Partial<Record<ColumnKey, SortKey>> = {
   validated_at: "validated_at",
+  severity: "severity",
   subject_kind: "subject_kind",
   subject_name: "subject_name",
   site_name: "site_name",
@@ -200,6 +224,15 @@ interface Props {
   sites: Site[]
   services: Service[]
   gateways: Gateway[]
+  eventTypes: EventTypeDef[]
+  teams: Team[]
+  units: Unit[]
+  workCenters: WorkCenter[]
+  workspace: Workspace
+  /** Lock the view to one record class (Audit view uses "log"). */
+  fixedRecordClass?: RecordClass
+  /** Preselect this site in the log dialog (site detail tab). */
+  defaultSiteId?: number
 }
 
 export function EventsTable({
@@ -208,15 +241,23 @@ export function EventsTable({
   sites,
   services,
   gateways,
+  eventTypes,
+  teams,
+  units,
+  workCenters,
+  workspace,
+  fixedRecordClass,
+  defaultSiteId,
 }: Props) {
   const [events, setEvents] = useState(initialEvents)
   useEffect(() => setEvents(initialEvents), [initialEvents])
 
   const [search, setSearch] = useState("")
-  const [eventTypeFilter, setEventTypeFilter] = useState<EventType | "all">("all")
   const [siteFilter, setSiteFilter] = useState<Set<string>>(new Set())
   const [kindFilter, setKindFilter] = useState<Set<string>>(new Set())
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set())
+  const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
   const [sortKey, setSortKey] = useState<SortKey>("validated_at")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -254,11 +295,27 @@ export function EventsTable({
       .map(([value, label]) => ({ value, label }))
   }, [events])
 
+  // Type labels resolve through the catalog, then the registry-action map;
+  // unknown slugs fall back to the raw slug.
+  const typeLabels = useMemo(() => {
+    const m = new Map<string, string>(Object.entries(REGISTRY_TYPE_LABELS))
+    for (const t of eventTypes) m.set(t.slug, t.label)
+    return m
+  }, [eventTypes])
+
+  const typeOptions: MultiSelectOption[] = useMemo(() => {
+    const slugs = new Set<string>()
+    for (const v of events) if (v.type_slug) slugs.add(v.type_slug)
+    return Array.from(slugs)
+      .map((slug) => ({ value: slug, label: typeLabels.get(slug) ?? slug }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [events, typeLabels])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     let rows = events
-    if (eventTypeFilter !== "all") {
-      rows = rows.filter((v) => v.event_type === eventTypeFilter)
+    if (fixedRecordClass) {
+      rows = rows.filter((v) => v.record_class === fixedRecordClass)
     }
     if (siteFilter.size > 0) {
       rows = rows.filter((v) => v.site_id != null && siteFilter.has(String(v.site_id)))
@@ -268,6 +325,12 @@ export function EventsTable({
     }
     if (statusFilter.size > 0) {
       rows = rows.filter((v) => v.status != null && statusFilter.has(v.status))
+    }
+    if (severityFilter.size > 0) {
+      rows = rows.filter((v) => severityFilter.has(v.severity))
+    }
+    if (typeFilter.size > 0) {
+      rows = rows.filter((v) => v.type_slug != null && typeFilter.has(v.type_slug))
     }
     if (q) {
       rows = rows.filter((v) => {
@@ -289,6 +352,9 @@ export function EventsTable({
       switch (sortKey) {
         case "validated_at":
           cmp = new Date(a.validated_at).getTime() - new Date(b.validated_at).getTime()
+          break
+        case "severity":
+          cmp = severityRank(a.severity) - severityRank(b.severity)
           break
         case "subject_kind":
           cmp = compareStr(a.subject_kind, b.subject_kind)
@@ -312,10 +378,12 @@ export function EventsTable({
   }, [
     events,
     search,
-    eventTypeFilter,
+    fixedRecordClass,
     siteFilter,
     kindFilter,
     statusFilter,
+    severityFilter,
+    typeFilter,
     sortKey,
     sortDir,
   ])
@@ -385,19 +453,6 @@ export function EventsTable({
       return next
     })
   }
-
-  const validationRows = useMemo(
-    () => filtered.filter((v) => v.event_type === "validation"),
-    [filtered],
-  )
-  const personnelRows = useMemo(
-    () => filtered.filter((v) => v.event_type === "personnel"),
-    [filtered],
-  )
-  const generalRows = useMemo(
-    () => filtered.filter((v) => v.event_type === "general"),
-    [filtered],
-  )
 
   const renderTableSection = (rows: Event[], heading?: string) => (
     <div className="flex flex-col gap-1">
@@ -482,7 +537,7 @@ export function EventsTable({
                         key === "note" && "text-xs",
                       )}
                     >
-                      {renderCell(key, v)}
+                      {renderCell(key, v, typeLabels)}
                     </td>
                   ))}
                   <td className="px-3 py-2 text-right">
@@ -532,25 +587,8 @@ export function EventsTable({
   return (
     <>
       <div className="flex flex-col gap-3">
-        <div className="inline-flex w-fit rounded-md border border-input bg-muted/30 p-0.5 text-xs">
-          {EVENT_TYPE_TABS.map((t) => (
-            <button
-              key={t.value}
-              type="button"
-              onClick={() => setEventTypeFilter(t.value)}
-              className={cn(
-                "rounded-sm px-3 py-1 font-medium transition-colors",
-                eventTypeFilter === t.value
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,180px))_auto_auto_auto]">
-          <div className="relative">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-52 flex-1">
             <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
@@ -559,27 +597,50 @@ export function EventsTable({
               className="pl-7"
             />
           </div>
-          <MultiSelectFilter
-            label="Sites"
-            options={siteOptions}
-            searchable
-            selected={siteFilter}
-            onChange={setSiteFilter}
-          />
-          <MultiSelectFilter
-            label="Kind"
-            options={KIND_OPTIONS}
-            groups={KIND_GROUPS}
-            selected={kindFilter}
-            onChange={setKindFilter}
-          />
-          <MultiSelectFilter
-            label="Status"
-            options={STATUS_OPTIONS}
-            groups={STATUS_GROUPS}
-            selected={statusFilter}
-            onChange={setStatusFilter}
-          />
+          <div className="w-36">
+            <MultiSelectFilter
+              label="Sites"
+              options={siteOptions}
+              searchable
+              selected={siteFilter}
+              onChange={setSiteFilter}
+            />
+          </div>
+          <div className="w-36">
+            <MultiSelectFilter
+              label="Type"
+              options={typeOptions}
+              searchable
+              selected={typeFilter}
+              onChange={setTypeFilter}
+            />
+          </div>
+          <div className="w-36">
+            <MultiSelectFilter
+              label="Severity"
+              options={SEVERITY_OPTIONS}
+              selected={severityFilter}
+              onChange={setSeverityFilter}
+            />
+          </div>
+          <div className="w-36">
+            <MultiSelectFilter
+              label="Kind"
+              options={KIND_OPTIONS}
+              groups={KIND_GROUPS}
+              selected={kindFilter}
+              onChange={setKindFilter}
+            />
+          </div>
+          <div className="w-36">
+            <MultiSelectFilter
+              label="Status"
+              options={STATUS_OPTIONS}
+              groups={STATUS_GROUPS}
+              selected={statusFilter}
+              onChange={setStatusFilter}
+            />
+          </div>
           <ColumnsPopover
             visible={visibleCols}
             order={colOrder}
@@ -621,15 +682,7 @@ export function EventsTable({
           />
         )}
 
-        {eventTypeFilter === "all" ? (
-          <div className="flex flex-col gap-4">
-            {renderTableSection(validationRows, "Validation")}
-            {renderTableSection(personnelRows, "Personnel")}
-            {renderTableSection(generalRows, "General")}
-          </div>
-        ) : (
-          renderTableSection(filtered)
-        )}
+        {renderTableSection(filtered)}
       </div>
 
       <EventCreateDialog
@@ -638,6 +691,12 @@ export function EventsTable({
         sites={sites}
         services={services}
         gateways={gateways}
+        eventTypes={eventTypes}
+        teams={teams}
+        units={units}
+        workCenters={workCenters}
+        workspace={workspace}
+        defaultSiteId={defaultSiteId}
         onCreated={handleCreated}
       />
       <EventEditNoteDialog
@@ -726,12 +785,49 @@ function RowMenu({
   )
 }
 
-function renderCell(key: ColumnKey, v: Event): React.ReactNode {
+function renderCell(
+  key: ColumnKey,
+  v: Event,
+  typeLabels: Map<string, string>,
+): React.ReactNode {
   switch (key) {
     case "validated_at":
       return <LocalTime iso={v.validated_at} />
     case "zulu":
       return formatZulu(v.validated_at)
+    case "type_slug":
+      return v.type_slug ? (
+        <span className="rounded-md bg-muted/40 px-1.5 py-0.5 text-[10px] tracking-wide">
+          {typeLabels.get(v.type_slug) ?? v.type_slug}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    case "severity":
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs">
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              severityDotClass(v.severity as Severity),
+            )}
+          />
+          {SEVERITY_LABELS[v.severity as Severity] ?? v.severity}
+        </span>
+      )
+    case "record_class":
+      return (
+        <span
+          className={cn(
+            "rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider",
+            v.record_class === "event"
+              ? "bg-primary/10 text-primary"
+              : "bg-muted/40 text-muted-foreground",
+          )}
+        >
+          {v.record_class}
+        </span>
+      )
     case "subject_kind":
       return (
         <span className="rounded-md bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">

@@ -548,6 +548,7 @@ export function PersonnelForm({
         if (!v) close()
         else setOpen(true)
       }}
+      disablePointerDismissal
     >
       <DialogTrigger
         render={

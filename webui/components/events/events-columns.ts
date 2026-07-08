@@ -1,6 +1,9 @@
 export type ColumnKey =
   | "validated_at"
   | "zulu"
+  | "type_slug"
+  | "severity"
+  | "record_class"
   | "subject_kind"
   | "subject_name"
   | "site_name"
@@ -21,6 +24,9 @@ export interface ColumnDef {
 export const ALL_COLUMNS: ColumnDef[] = [
   { key: "validated_at", label: "Local", sortable: true, hideable: false },
   { key: "zulu", label: "Zulu", sortable: false, hideable: true },
+  { key: "type_slug", label: "Type", sortable: false, hideable: true },
+  { key: "severity", label: "Severity", sortable: true, hideable: true },
+  { key: "record_class", label: "Class", sortable: false, hideable: true },
   { key: "subject_kind", label: "Kind", sortable: true, hideable: true },
   { key: "subject_name", label: "Subject", sortable: true, hideable: true },
   { key: "site_name", label: "Site", sortable: true, hideable: true },
@@ -34,6 +40,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
 export const DEFAULT_VISIBLE: ColumnKey[] = [
   "validated_at",
   "zulu",
+  "severity",
   "subject_kind",
   "subject_name",
   "site_name",
@@ -45,7 +52,8 @@ export const DEFAULT_VISIBLE: ColumnKey[] = [
 
 export const DEFAULT_ORDER: ColumnKey[] = ALL_COLUMNS.map((c) => c.key)
 
-const STORAGE_KEY = "events.columns.v1"
+// v2: adds type/severity/class columns for the classified feed.
+const STORAGE_KEY = "events.columns.v2"
 
 interface ColumnPrefs {
   visible: ColumnKey[]

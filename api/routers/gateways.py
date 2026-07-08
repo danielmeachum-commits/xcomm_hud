@@ -7,12 +7,19 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy import case as sql_case
 
+import datetime
+
 from db import get_db
 from deps import get_current_workspace, requires
 from effective import reset_cells_for_gateway
-from models import Event, Gateway, Site, User, Workspace
+from models import Gateway, Service, Site, User, Workspace
 from pubsub import notify
+from rules_engine import emit_trigger
 from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
 
 router = APIRouter(tags=["gateways"])
 
@@ -144,31 +151,59 @@ def validate_gateway(
     current_user: User = Depends(requires("operator")),
 ):
     gw = _gateway_in_workspace(db, gateway_id, workspace)
-    prev = gw.status
-    kwargs = dict(
-        subject_kind="gateway",
-        subject_id=gw.id,
-        prev_status=prev,
-        status=body.status,
-        source="manual",
-        validated_by_user_id=current_user.id,
-        note=body.note,
+    when = body.validated_at or _now()
+    emit_trigger(
+        db,
+        "gateway.status_changed",
+        {
+            "gateway_id": gw.id,
+            "gateway_name": gw.name,
+            "prev_status": gw.status,
+            "new_status": body.status,
+            "note": body.note,
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "occurred_at": when,
+        },
+        workspace_id=workspace.id,
     )
-    if body.validated_at is not None:
-        kwargs["validated_at"] = body.validated_at
-    v = Event(**kwargs)
-    db.add(v)
-    db.flush()
     gw.status = body.status
-    gw.validated_at = v.validated_at
+    gw.validated_at = when
     gw.validated_by_user_id = current_user.id
     # R8/R9/R10 cascade — cell states for this gateway snap to the derived
     # value (unknown for active/degraded/setup, ready for ready, matching
     # down/offline). Skipped when the operator unchecked "cascade to cells"
-    # in the validation dialog — useful when just recording an intermediate
-    # gateway state without re-driving every cell.
+    # in the validation dialog. Cascades are transactional integrity logic,
+    # so they stay in code rather than in user-editable rules — but each
+    # cell that actually changed emits its own trigger (source_flow
+    # "cascade") so the audit trail covers cascaded changes too.
     if body.cascade:
-        reset_cells_for_gateway(db, gw.id, body.status)
+        changed = reset_cells_for_gateway(db, gw.id, body.status)
+        service_names = {
+            s.id: s.name
+            for s in db.query(Service).filter(
+                Service.id.in_({cell.service_id for cell, _, _ in changed})
+            )
+        } if changed else {}
+        for cell, prev, new in changed:
+            emit_trigger(
+                db,
+                "cell.status_changed",
+                {
+                    "service_id": cell.service_id,
+                    "gateway_id": gw.id,
+                    "service_name": service_names.get(cell.service_id),
+                    "gateway_name": gw.name,
+                    "prev_status": prev,
+                    "new_status": new,
+                    "source_flow": "cascade",
+                    "note": f"Cascaded from gateway validation ({gw.name} → {body.status})",
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "occurred_at": when,
+                },
+                workspace_id=workspace.id,
+            )
     db.flush()
     db.refresh(gw)
     notify(background_tasks)

@@ -14,8 +14,10 @@ import {
   Network,
   Radio,
   Settings,
+  Shapes,
   Users,
   UsersRound,
+  Workflow,
 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
@@ -69,6 +71,8 @@ const PERSONNEL_SUB_ITEMS = [
 // Workspace-scoped admin items (gateways lives under the current workspace);
 // truly global admin items follow with absolute paths.
 const WORKSPACE_ADMIN_ITEMS = [
+  { path: "/settings/event-types", label: "Event types", icon: Shapes },
+  { path: "/settings/rules", label: "Rules", icon: Workflow },
   { path: "/admin/gateways", label: "Gateways", icon: Network },
   { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
   { path: "/admin/work-centers", label: "Work centers", icon: Users },

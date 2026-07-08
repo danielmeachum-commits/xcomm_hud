@@ -1,0 +1,56 @@
+/** Severity labels + palette for event records.
+ *
+ * Severity is a reserved status palette (never reused for series colors):
+ * info = neutral, notice = blue, warning = amber, critical = red. Always
+ * rendered with a label beside the color, never color alone.
+ */
+
+import type { Severity } from "./types"
+
+export const SEVERITY_ORDER: readonly Severity[] = [
+  "critical",
+  "warning",
+  "notice",
+  "info",
+]
+
+export const SEVERITY_LABELS: Record<Severity, string> = {
+  info: "Info",
+  notice: "Notice",
+  warning: "Warning",
+  critical: "Critical",
+}
+
+/** Rank for sorting — lower is more severe. */
+export function severityRank(s: Severity | string): number {
+  const idx = SEVERITY_ORDER.indexOf(s as Severity)
+  return idx === -1 ? SEVERITY_ORDER.length : idx
+}
+
+/** Solid dot color for timeline rails and compact badges. */
+export function severityDotClass(s: Severity): string {
+  switch (s) {
+    case "info":
+      return "bg-slate-400 dark:bg-slate-500"
+    case "notice":
+      return "bg-sky-500"
+    case "warning":
+      return "bg-amber-500"
+    case "critical":
+      return "bg-red-500"
+  }
+}
+
+/** Subtle pill classes (bg/text/ring) for severity badges. */
+export function severityPillClasses(s: Severity): string {
+  switch (s) {
+    case "info":
+      return "bg-slate-500/10 text-slate-600 ring-slate-500/30 dark:text-slate-400"
+    case "notice":
+      return "bg-sky-500/10 text-sky-600 ring-sky-500/30 dark:text-sky-400"
+    case "warning":
+      return "bg-amber-500/10 text-amber-600 ring-amber-500/30 dark:text-amber-400"
+    case "critical":
+      return "bg-red-500/10 text-red-600 ring-red-500/30 dark:text-red-400"
+  }
+}

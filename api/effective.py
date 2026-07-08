@@ -202,7 +202,7 @@ def cell_status_from_gateway(new_gateway_status: str) -> Optional[str]:
 
 def reset_cells_for_gateway(
     db: Session, gateway_id: int, new_gateway_status: str
-) -> None:
+) -> list[tuple[ServiceGatewayStatus, str, str]]:
     """Snap every cell for this gateway to its post-status-change value.
 
     Wipes the cell's own validated_at / validated_by since the operator's
@@ -210,25 +210,33 @@ def reset_cells_for_gateway(
     the gateway validation endpoint when the "cascade to cells" checkbox
     is left checked. No-ops when `cell_status_from_gateway` returns None
     (currently: gateway → `ready`, which preserves cell state).
+
+    Returns (cell, prev_status, new_status) for every cell whose status
+    actually changed, so the caller can emit per-cell triggers — cascaded
+    changes belong in the audit trail just like operator validations.
     """
     new_cell_status = cell_status_from_gateway(new_gateway_status)
     if new_cell_status is None:
-        return
-    db.query(ServiceGatewayStatus).filter(
-        ServiceGatewayStatus.gateway_id == gateway_id
-    ).update(
-        {
-            ServiceGatewayStatus.status: new_cell_status,
-            ServiceGatewayStatus.validated_at: None,
-            ServiceGatewayStatus.validated_by_user_id: None,
-        },
-        synchronize_session=False,
+        return []
+    changed: list[tuple[ServiceGatewayStatus, str, str]] = []
+    cells = (
+        db.query(ServiceGatewayStatus)
+        .filter(ServiceGatewayStatus.gateway_id == gateway_id)
+        .all()
     )
+    for cell in cells:
+        prev = cell.status
+        cell.status = new_cell_status
+        cell.validated_at = None
+        cell.validated_by_user_id = None
+        if prev != new_cell_status:
+            changed.append((cell, prev, new_cell_status))
+    return changed
 
 
 def clamp_cells_for_service(
     db: Session, service_id: int, new_local_status: str
-) -> None:
+) -> list[tuple[ServiceGatewayStatus, str, str]]:
     """R10/R11 cascade when a local service status is validated downward.
 
     - Local `down`/`offline` (R10): force every cell for this service to
@@ -238,29 +246,36 @@ def clamp_cells_for_service(
 
     Cells at `unknown` are left alone in the R11 branch — unknown is not
     "worse than degraded", it's "no info", so it isn't upgraded either.
-    """
-    if new_local_status in ("down", "offline"):
-        db.query(ServiceGatewayStatus).filter(
-            ServiceGatewayStatus.service_id == service_id
-        ).update(
-            {ServiceGatewayStatus.status: new_local_status},
-            synchronize_session=False,
-        )
-        return
-    if new_local_status == "unknown":
-        return
 
-    local_rank = _rank(new_local_status)
+    Returns (cell, prev_status, new_status) for every cell whose status
+    actually changed, so the caller can emit per-cell triggers.
+    """
+    changed: list[tuple[ServiceGatewayStatus, str, str]] = []
+    if new_local_status == "unknown":
+        return changed
+
     cells = (
         db.query(ServiceGatewayStatus)
         .filter(ServiceGatewayStatus.service_id == service_id)
         .all()
     )
+    if new_local_status in ("down", "offline"):
+        for cell in cells:
+            prev = cell.status
+            cell.status = new_local_status
+            if prev != new_local_status:
+                changed.append((cell, prev, new_local_status))
+        return changed
+
+    local_rank = _rank(new_local_status)
     for cell in cells:
         if cell.status == "unknown":
             continue
         if _rank(cell.status) < local_rank:
+            prev = cell.status
             cell.status = new_local_status
+            changed.append((cell, prev, new_local_status))
+    return changed
 
 
 def materialize_cells(

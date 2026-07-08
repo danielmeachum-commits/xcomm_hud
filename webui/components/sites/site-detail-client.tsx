@@ -56,8 +56,12 @@ import { QuickCheckOutButton } from "@/components/personnel/quick-checkout-butto
 import { PersonnelSelectionActions } from "@/components/personnel/personnel-selection-actions"
 import { SiteCheckInDialog } from "@/components/personnel/site-checkin-dialog"
 import { RollCallDialog } from "@/components/personnel/roll-call-dialog"
+import { SiteEventsTab } from "@/components/events/site-events-tab"
 import type {
+  Event,
+  EventTypeDef,
   Gateway,
+  Me,
   Personnel,
   Role,
   Service,
@@ -84,6 +88,9 @@ interface Props {
   units: Unit[]
   teams: Team[]
   userRole?: Role
+  me: Me
+  events: Event[]
+  eventTypes: EventTypeDef[]
 }
 
 type Tab = "services" | "personnel" | "equipment" | "details" | "events"
@@ -111,6 +118,9 @@ export function SiteDetailClient({
   units,
   teams,
   userRole,
+  me,
+  events,
+  eventTypes,
 }: Props) {
   const { w } = useWorkspace()
   const router = useRouter()
@@ -222,7 +232,18 @@ export function SiteDetailClient({
           userRole={userRole}
         />
       ) : (
-        <PlaceholderTab title="Events" description="A site-scoped event log with select and CRUD will live here." />
+        <SiteEventsTab
+          site={site}
+          me={me}
+          events={events}
+          sites={sites}
+          services={services}
+          gateways={gateways}
+          eventTypes={eventTypes}
+          teams={teams}
+          units={units}
+          workCenters={workCenters}
+        />
       )}
     </div>
   )

@@ -60,8 +60,16 @@ SUBJECT_KINDS = (
     "system",
     "mission",
     "exercise",
+    "team",
+    "unit",
+    "work_center",
+    "workspace",
 )
-EVENT_TYPES = ("validation", "general")
+EVENT_TYPES = ("validation", "general", "personnel")
+# Every Event row is either a high-volume audit "log" or a briefing-worthy
+# "event" — the timeline shows events, the audit view shows everything.
+RECORD_CLASSES = ("log", "event")
+SEVERITIES = ("info", "notice", "warning", "critical")
 FPCON_LEVELS = ("normal", "alpha", "bravo", "charlie", "delta")
 EMCON_LEVELS = ("a", "b", "c", "d")
 SITE_PROPERTY_TYPES = (
@@ -507,6 +515,28 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(
         String(16), nullable=False, default="validation"
     )
+    # Workspace the record belongs to, denormalized at write time so the
+    # feed can be scoped without joining through the subject. Nullable for
+    # legacy rows whose subject no longer resolves.
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # "log" = routine audit record; "event" = significant occurrence worth
+    # surfacing on the timeline and in summaries.
+    record_class: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="log"
+    )
+    severity: Mapped[str] = mapped_column(
+        String(12), nullable=False, default="info"
+    )
+    # Specific action or catalog type that produced this row, e.g.
+    # "service.validate" (registry) or "exercise.startex" (EventTypeDef).
+    type_slug: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     validated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, index=True
     )
@@ -534,6 +564,146 @@ class Event(Base):
     hidden_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+
+
+class EventTypeDef(Base):
+    """A declarable event type users pick (or create) when logging manually.
+
+    Global rows (workspace_id NULL) are the seeded baseline vocabulary
+    (STARTEX, safety brief, ...) available in every workspace; workspace
+    rows are custom types defined in-app for one exercise. Retiring is a
+    soft-delete so historical events keep resolving their type.
+    """
+
+    __tablename__ = "event_type_def"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug", name="uq_event_type_def_ws_slug"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Free-form grouping for pickers and the management page ("Exercise",
+    # "Briefing", ...). Null renders under "Other".
+    category: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    record_class: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="event"
+    )
+    default_severity: Mapped[str] = mapped_column(
+        String(12), nullable=False, default="notice"
+    )
+    # Lucide icon name and hex accent color for timeline/badge rendering.
+    icon: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # Which subject_kinds an event of this type may attach to.
+    allowed_subject_kinds: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # System types are the vocabulary of automatic records (validations,
+    # sign-ins, posture changes) — shown in the catalog and pickable in
+    # rule actions, but hidden from the manual "Log event" type picker.
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class Rule(Base):
+    """An event-condition-action rule evaluated when a trigger fires.
+
+    Domain mutations emit typed triggers (service.status_changed, ...);
+    the engine (api/rules_engine.py) matches enabled rules by trigger,
+    enriches the payload with the rule's named enrichers, evaluates the
+    stored condition tree, and runs the action list — all synchronously
+    inside the mutation's transaction so effects commit (or roll back)
+    together. Global rows (workspace_id NULL, is_builtin) are the seeded
+    system behavior; workspace rows are user-defined.
+    """
+
+    __tablename__ = "rule"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trigger: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # jsonlogic-subset predicate tree; null = always fire.
+    conditions = mapped_column(JSONB, nullable=True)
+    # Named enrichers applied to the payload before condition evaluation.
+    enrichers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # Computed fields derived after enrichment, in order (later fields may
+    # reference earlier ones): [{"name", "kind": "template"|"expr",
+    # "template"?, "expr"?}, ...]. Available to conditions and actions.
+    computed = mapped_column(JSONB, nullable=False, default=list)
+    # Ordered [{"action": name, "params": {...}}, ...] — each receives the
+    # same enriched context (no inter-action piping in v1).
+    actions = mapped_column(JSONB, nullable=False, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # "abort" re-raises action errors (rolls back the whole mutation —
+    # used by the seeded record-keeping rules to preserve dual-write
+    # atomicity); "skip" logs the failure and lets the mutation commit.
+    on_error: Mapped[str] = mapped_column(String(8), nullable=False, default="skip")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class RuleExecution(Base):
+    """Per-fire audit of the rules engine, for debugging from the UI.
+
+    One row per rule whose trigger matched AND condition passed (condition
+    misses aren't logged — too chatty). `context` is a trimmed snapshot of
+    the enriched payload the actions received.
+    """
+
+    __tablename__ = "rule_execution"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("rule.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    trigger: Mapped[str] = mapped_column(String(64), nullable=False)
+    fired_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, index=True
+    )
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="ok")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    context = mapped_column(JSONB, nullable=True)
 
 
 class Unit(Base):

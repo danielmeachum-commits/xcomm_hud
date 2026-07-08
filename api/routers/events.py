@@ -20,11 +20,25 @@ from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from action_registry import lookup_catalog_type, record_action
 from db import get_db
-from deps import requires
-from models import Event, Gateway, Personnel, Service, ServiceGatewayStatus, Site, User
+from deps import get_current_workspace, requires
+from models import (
+    Event,
+    Gateway,
+    Personnel,
+    Service,
+    ServiceGatewayStatus,
+    Site,
+    Team,
+    Unit,
+    User,
+    WorkCenter,
+    Workspace,
+)
 from pubsub import broadcaster, notify
 from schemas import (
     EventBulkIds,
@@ -32,9 +46,12 @@ from schemas import (
     EventEditIn,
     EventNotePatch,
     EventOut,
+    EventSummaryOut,
     EventType,
     GENERAL_SUBJECT_KINDS,
     PERSONNEL_SUBJECT_KINDS,
+    RecordClass,
+    Severity,
     SubjectKind,
     VALIDATION_SUBJECT_KINDS,
 )
@@ -100,6 +117,22 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 if site:
                     out.site_id = site.id
                     out.site_name = site.name
+        elif v.subject_kind == "team":
+            team = db.get(Team, v.subject_id)
+            if team:
+                out.subject_name = team.name
+        elif v.subject_kind == "unit":
+            unit = db.get(Unit, v.subject_id)
+            if unit:
+                out.subject_name = unit.name
+        elif v.subject_kind == "work_center":
+            wc = db.get(WorkCenter, v.subject_id)
+            if wc:
+                out.subject_name = wc.name
+        elif v.subject_kind == "workspace":
+            ws = db.get(Workspace, v.subject_id)
+            if ws:
+                out.subject_name = ws.name
     # For general events, fall back to the free-text label as the display name.
     if out.subject_name is None and v.subject_label:
         out.subject_name = v.subject_label
@@ -107,15 +140,23 @@ def _enrich(db: Session, v: Event) -> EventOut:
 
 
 def _resolve_subject(db: Session, subject_kind: str, subject_id: int):
-    """Return the current row for a validation- or personnel-kind subject, or raise 404."""
+    """Return the current row for a known-entity subject kind, or raise 404."""
     if subject_kind == "service":
         obj = db.get(Service, subject_id)
     elif subject_kind == "gateway":
         obj = db.get(Gateway, subject_id)
-    elif subject_kind in ("site", "site_fpcon", "site_emcon"):
+    elif subject_kind in ("site", "site_fpcon", "site_emcon", "site_status"):
         obj = db.get(Site, subject_id)
     elif subject_kind == "personnel_location":
         obj = db.get(Personnel, subject_id)
+    elif subject_kind == "team":
+        obj = db.get(Team, subject_id)
+    elif subject_kind == "unit":
+        obj = db.get(Unit, subject_id)
+    elif subject_kind == "work_center":
+        obj = db.get(WorkCenter, subject_id)
+    elif subject_kind == "workspace":
+        obj = db.get(Workspace, subject_id)
     else:
         obj = None
     if obj is None:
@@ -129,19 +170,35 @@ def _resolve_subject(db: Session, subject_kind: str, subject_id: int):
 @router.get("", response_model=list[EventOut])
 def list_events(
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
     site_id: Optional[int] = Query(default=None),
     event_type: Optional[EventType] = Query(default=None),
+    record_class: Optional[RecordClass] = Query(default=None),
+    severity: Optional[list[Severity]] = Query(default=None),
+    type_slug: Optional[list[str]] = Query(default=None),
     subject_kind: Optional[SubjectKind] = Query(default=None),
     subject_id: Optional[int] = Query(default=None),
     second_subject_id: Optional[int] = Query(default=None),
     since: Optional[datetime.datetime] = Query(default=None),
+    until: Optional[datetime.datetime] = Query(default=None),
     include_hidden: bool = Query(default=False),
+    offset: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1, le=2000),
 ):
-    q = db.query(Event)
+    # Legacy rows created before workspace scoping keep a NULL workspace_id;
+    # they stay visible everywhere (matching pre-scoping behavior).
+    q = db.query(Event).filter(
+        (Event.workspace_id == workspace.id) | (Event.workspace_id.is_(None))
+    )
     if event_type:
         q = q.filter(Event.event_type == event_type)
+    if record_class:
+        q = q.filter(Event.record_class == record_class)
+    if severity:
+        q = q.filter(Event.severity.in_(severity))
+    if type_slug:
+        q = q.filter(Event.type_slug.in_(type_slug))
     if subject_kind:
         q = q.filter(Event.subject_kind == subject_kind)
     if subject_id:
@@ -150,9 +207,16 @@ def list_events(
         q = q.filter(Event.second_subject_id == second_subject_id)
     if since:
         q = q.filter(Event.validated_at >= since)
+    if until:
+        q = q.filter(Event.validated_at <= until)
     if not include_hidden:
         q = q.filter(Event.hidden_at.is_(None))
-    rows = q.order_by(Event.validated_at.desc()).limit(limit).all()
+    rows = (
+        q.order_by(Event.validated_at.desc(), Event.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     enriched = [_enrich(db, v) for v in rows]
     if site_id is not None:
@@ -160,10 +224,112 @@ def list_events(
     return enriched
 
 
+@router.get("/summary", response_model=EventSummaryOut)
+def events_summary(
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    """Aggregates backing the events-page widget row."""
+    scoped = db.query(Event).filter(
+        (Event.workspace_id == workspace.id) | (Event.workspace_id.is_(None)),
+        Event.hidden_at.is_(None),
+    )
+    events_q = scoped.filter(Event.record_class == "event")
+
+    now = _now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    total_events = events_q.count()
+    total_logs = scoped.filter(Event.record_class == "log").count()
+    events_today = events_q.filter(Event.validated_at >= today_start).count()
+
+    by_severity: dict[str, int] = {}
+    for sev, count in (
+        events_q.with_entities(Event.severity, func.count(Event.id))
+        .group_by(Event.severity)
+        .all()
+    ):
+        by_severity[sev] = count
+
+    by_type: dict[str, int] = {}
+    for slug, count in (
+        events_q.with_entities(Event.type_slug, func.count(Event.id))
+        .group_by(Event.type_slug)
+        .all()
+    ):
+        by_type[slug or "unclassified"] = count
+
+    # 24 hourly buckets, oldest first, of event-class records.
+    window_start = now - datetime.timedelta(hours=24)
+    activity = [0] * 24
+    for (ts,) in events_q.with_entities(Event.validated_at).filter(
+        Event.validated_at >= window_start
+    ):
+        bucket = int((ts - window_start).total_seconds() // 3600)
+        if 0 <= bucket < 24:
+            activity[bucket] += 1
+
+    # Latest exercise-lifecycle event decides the current phase.
+    phase_row = (
+        events_q.filter(Event.type_slug.like("exercise.%"))
+        .order_by(Event.validated_at.desc())
+        .first()
+    )
+    exercise_phase = None
+    exercise_phase_at = None
+    if phase_row is not None and phase_row.type_slug:
+        exercise_phase = phase_row.type_slug.split(".", 1)[1].upper()
+        exercise_phase_at = phase_row.validated_at
+
+    personnel_on_site = (
+        db.query(Personnel)
+        .filter(
+            Personnel.workspace_id == workspace.id,
+            Personnel.current_status == "on_site",
+        )
+        .count()
+    )
+    services_down = (
+        db.query(Service)
+        .join(Site, Site.id == Service.site_id)
+        .filter(Site.workspace_id == workspace.id, Service.status == "down")
+        .count()
+    )
+
+    return EventSummaryOut(
+        total_events=total_events,
+        total_logs=total_logs,
+        events_today=events_today,
+        by_severity=by_severity,
+        by_type=by_type,
+        activity_24h=activity,
+        exercise_phase=exercise_phase,
+        exercise_phase_at=exercise_phase_at,
+        personnel_on_site=personnel_on_site,
+        services_down=services_down,
+    )
+
+
+# Manual validation/personnel events reuse the registry classification of
+# the action that normally produces that subject_kind.
+_MANUAL_ACTION_SLUGS = {
+    "service": "service.validate",
+    "gateway": "gateway.validate",
+    "service_gateway": "cell.validate",
+    "site": "site.validate",
+    "site_status": "site.status",
+    "site_fpcon": "site.fpcon",
+    "site_emcon": "site.emcon",
+    "personnel_location": "personnel.checkin",
+}
+
+
 @router.post("", response_model=EventOut, status_code=status.HTTP_201_CREATED)
 def create_event(
     body: EventCreateIn,
     db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
     """Manually append an event.
@@ -176,9 +342,13 @@ def create_event(
     - ``personnel``: requires ``subject_id`` referencing a personnel row and
       a ``status``. Normally written by the personnel check-in/out flow, not
       through this endpoint.
-    - ``general``: for system/mission/exercise notes. ``subject_label`` is
-      free text; ``status`` is optional.
+    - ``general``: declarable events. ``type_slug`` picks an EventTypeDef
+      from the catalog (global or this workspace), which supplies
+      record_class/severity and constrains which scopes the event may attach
+      to. Subject is either a live entity (``subject_id``) or free text
+      (``subject_label``).
     """
+    action_slug: Optional[str] = None
     if body.event_type == "validation":
         if body.subject_kind not in VALIDATION_SUBJECT_KINDS:
             raise HTTPException(
@@ -196,6 +366,7 @@ def create_event(
                 "status is required for a validation event",
             )
         _resolve_subject(db, body.subject_kind, body.subject_id)
+        action_slug = _MANUAL_ACTION_SLUGS.get(body.subject_kind)
     elif body.event_type == "personnel":
         if body.subject_kind not in PERSONNEL_SUBJECT_KINDS:
             raise HTTPException(
@@ -213,6 +384,7 @@ def create_event(
                 "status is required for a personnel event",
             )
         _resolve_subject(db, body.subject_kind, body.subject_id)
+        action_slug = _MANUAL_ACTION_SLUGS.get(body.subject_kind)
     else:
         if body.subject_kind not in GENERAL_SUBJECT_KINDS:
             raise HTTPException(
@@ -224,21 +396,46 @@ def create_event(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "A subject label or subject_id is required",
             )
+        action_slug = body.type_slug or "note.general"
+        type_def = lookup_catalog_type(db, workspace.id, action_slug)
+        if body.type_slug and type_def is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Unknown event type '{body.type_slug}'",
+            )
+        if (
+            type_def is not None
+            and type_def.allowed_subject_kinds
+            and body.subject_kind not in type_def.allowed_subject_kinds
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Event type '{action_slug}' cannot attach to '{body.subject_kind}'",
+            )
+        # Entity-backed scopes must reference a live row; free-text scopes
+        # (system/mission/exercise) ride on subject_label alone.
+        if body.subject_id is not None and body.subject_kind not in (
+            "system",
+            "mission",
+            "exercise",
+        ):
+            _resolve_subject(db, body.subject_kind, body.subject_id)
 
-    row = Event(
-        event_type=body.event_type,
-        validated_at=_now(),
+    row = record_action(
+        db,
+        action_slug=action_slug or "note.general",
+        workspace_id=workspace.id,
         subject_kind=body.subject_kind,
         subject_id=body.subject_id,
         subject_label=body.subject_label,
         prev_status=body.prev_status,
         status=body.status,
-        source="manual",
-        validated_by_user_id=current_user.id,
+        user_id=current_user.id,
         note=body.note,
+        validated_at=body.validated_at,
+        event_type=body.event_type,
+        severity=body.severity,
     )
-    db.add(row)
-    db.flush()
     return _enrich(db, row)
 
 

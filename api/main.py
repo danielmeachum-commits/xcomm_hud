@@ -18,10 +18,12 @@ from routers import (
     auth,
     canvas,
     enclave_sources,
+    event_types,
     events,
     gateways,
     ingest,
     personnel,
+    rules,
     service_gateway_status,
     service_templates,
     services,
@@ -102,6 +104,8 @@ app.include_router(gateways.router)
 app.include_router(canvas.router)
 app.include_router(status_router.router)
 app.include_router(events.router)
+app.include_router(event_types.router)
+app.include_router(rules.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
 app.include_router(enclave_sources.router)

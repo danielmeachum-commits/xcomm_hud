@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -14,7 +16,6 @@ from effective import (
     materialize_cells,
 )
 from models import (
-    Event,
     Gateway,
     Service,
     ServiceGatewayStatus,
@@ -24,6 +25,7 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from rules_engine import emit_trigger
 from schemas import (
     ServiceGatewayStatusOut,
     ServiceIn,
@@ -33,6 +35,10 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/services", tags=["services"])
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
 
 
 def _service_out(db: Session, service: Service) -> ServiceOut:
@@ -192,31 +198,61 @@ def validate_service(
 ):
     service = _service_in_workspace(db, service_id, workspace)
 
-    prev = service.status
-    kwargs = dict(
-        subject_kind="service",
-        subject_id=service.id,
-        prev_status=prev,
-        status=body.status,
-        source="manual",
-        validated_by_user_id=current_user.id,
-        note=body.note,
+    when = body.validated_at or _now()
+    emit_trigger(
+        db,
+        "service.status_changed",
+        {
+            "service_id": service.id,
+            "service_name": service.name,
+            "prev_status": service.status,
+            "new_status": body.status,
+            "note": body.note,
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "occurred_at": when,
+        },
+        workspace_id=workspace.id,
     )
-    if body.validated_at is not None:
-        kwargs["validated_at"] = body.validated_at
-    v = Event(**kwargs)
-    db.add(v)
-    db.flush()
     service.status = body.status
-    service.validated_at = v.validated_at
+    service.validated_at = when
     service.validated_by_user_id = current_user.id
     # R10/R11 cascade to matrix cells. R10: local down/offline forces every
     # cell to match. R11: any cell better than the new local is clamped
     # down. Cascade is skipped when the operator unchecks "cascade to
     # cells" in the validation dialog — cells stay as they were. Upward
     # local moves never cascade (see effective.clamp_cells_for_service).
+    # Cascades are transactional integrity logic, so they stay in code
+    # rather than in user-editable rules — but each cell that actually
+    # changed emits its own trigger (source_flow "cascade") so the audit
+    # trail covers cascaded changes too.
     if body.cascade:
-        clamp_cells_for_service(db, service.id, body.status)
+        changed = clamp_cells_for_service(db, service.id, body.status)
+        gateway_names = {
+            g.id: g.name
+            for g in db.query(Gateway).filter(
+                Gateway.id.in_({cell.gateway_id for cell, _, _ in changed})
+            )
+        } if changed else {}
+        for cell, prev, new in changed:
+            emit_trigger(
+                db,
+                "cell.status_changed",
+                {
+                    "service_id": service.id,
+                    "gateway_id": cell.gateway_id,
+                    "service_name": service.name,
+                    "gateway_name": gateway_names.get(cell.gateway_id),
+                    "prev_status": prev,
+                    "new_status": new,
+                    "source_flow": "cascade",
+                    "note": f"Cascaded from service validation ({service.name} → {body.status})",
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "occurred_at": when,
+                },
+                workspace_id=workspace.id,
+            )
     db.flush()
     db.refresh(service)
     notify(background_tasks)

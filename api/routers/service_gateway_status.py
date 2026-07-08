@@ -12,11 +12,13 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+import datetime
+
 from db import get_db
 from deps import get_current_workspace, requires
 from effective import STATUS_RANK, effective_cell_status
+from rules_engine import emit_trigger
 from models import (
-    Event,
     Gateway,
     Service,
     ServiceGatewayStatus,
@@ -118,6 +120,10 @@ def _reject_invalid_write(
         )
 
 
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
 @router.post(
     "/{service_id}/gateways/{gateway_id}/validate",
     response_model=ServiceGatewayStatusOut,
@@ -144,37 +150,38 @@ def validate_cell(
     )
     prev = cell.status if cell else "unknown"
 
-    # Audit row lands first so the event id is stable even if the cell
-    # write fails. subject_label carries the pair since we're using the
-    # `service_gateway` subject_kind for cell-level events.
-    ev = Event(
-        subject_kind="service_gateway",
-        subject_id=service.id,
-        second_subject_id=gw.id,
-        subject_label=f"{service.name} via {gw.name}",
-        prev_status=prev,
-        status=body.status,
-        source="manual",
-        validated_by_user_id=current_user.id,
-        note=body.note,
+    when = body.validated_at or _now()
+    emit_trigger(
+        db,
+        "cell.status_changed",
+        {
+            "service_id": service.id,
+            "gateway_id": gw.id,
+            "service_name": service.name,
+            "gateway_name": gw.name,
+            "prev_status": prev,
+            "new_status": body.status,
+            "source_flow": "validate",
+            "note": body.note,
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "occurred_at": when,
+        },
+        workspace_id=workspace.id,
     )
-    if body.validated_at is not None:
-        ev.validated_at = body.validated_at
-    db.add(ev)
-    db.flush()
 
     if cell is None:
         cell = ServiceGatewayStatus(
             service_id=service.id,
             gateway_id=gw.id,
             status=body.status,
-            validated_at=ev.validated_at,
+            validated_at=when,
             validated_by_user_id=current_user.id,
         )
         db.add(cell)
     else:
         cell.status = body.status
-        cell.validated_at = ev.validated_at
+        cell.validated_at = when
         cell.validated_by_user_id = current_user.id
 
     db.flush()

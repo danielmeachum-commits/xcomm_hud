@@ -75,8 +75,23 @@ export type SubjectKind =
   | "system"
   | "mission"
   | "exercise"
+  | "team"
+  | "unit"
+  | "work_center"
+  | "workspace"
 
 export type EventType = "validation" | "general" | "personnel"
+
+export type RecordClass = "log" | "event"
+
+export type Severity = "info" | "notice" | "warning" | "critical"
+
+export const SEVERITIES: readonly Severity[] = [
+  "info",
+  "notice",
+  "warning",
+  "critical",
+]
 
 export const VALIDATION_SUBJECT_KINDS: readonly SubjectKind[] = [
   "service",
@@ -96,6 +111,11 @@ export const GENERAL_SUBJECT_KINDS: readonly SubjectKind[] = [
   "system",
   "mission",
   "exercise",
+  "site",
+  "team",
+  "unit",
+  "work_center",
+  "workspace",
 ]
 
 export interface Workspace {
@@ -264,6 +284,10 @@ export interface StatusRollup {
 export interface Event {
   id: number
   event_type: EventType
+  workspace_id: number | null
+  record_class: RecordClass
+  severity: Severity
+  type_slug: string | null
   validated_at: string
   subject_kind: SubjectKind
   subject_id: number | null
@@ -281,6 +305,112 @@ export interface Event {
   edited_at: string | null
   hidden_at: string | null
   hidden_by_user_id: number | null
+}
+
+export interface EventTypeDef {
+  id: number
+  workspace_id: number | null
+  slug: string
+  label: string
+  description: string | null
+  category: string | null
+  record_class: RecordClass
+  default_severity: Severity
+  icon: string | null
+  color: string | null
+  allowed_subject_kinds: SubjectKind[]
+  is_builtin: boolean
+  is_system: boolean
+  retired_at: string | null
+  created_by_user_id: number | null
+  created_at: string
+}
+
+export interface RuleActionStep {
+  action: string
+  params: Record<string, unknown>
+}
+
+export interface RuleComputedField {
+  name: string
+  kind: "template" | "expr"
+  template?: string | null
+  expr?: unknown
+}
+
+export interface Rule {
+  id: number
+  workspace_id: number | null
+  name: string
+  description: string | null
+  trigger: string
+  conditions: unknown
+  enrichers: string[]
+  computed: RuleComputedField[]
+  actions: RuleActionStep[]
+  enabled: boolean
+  is_builtin: boolean
+  on_error: "abort" | "skip"
+  priority: number
+  created_by_user_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RuleExecution {
+  id: number
+  rule_id: number
+  trigger: string
+  fired_at: string
+  status: string
+  error: string | null
+  context: Record<string, unknown> | null
+}
+
+export interface RuleFieldMeta {
+  key: string
+  label: string
+  type: string
+  values?: string[]
+}
+
+export interface RuleTriggerMeta {
+  key: string
+  label: string
+  fields: RuleFieldMeta[]
+  enrichers: string[]
+  event_type: EventType
+}
+
+export interface RuleEnricherMeta {
+  key: string
+  label: string
+  fields: RuleFieldMeta[]
+}
+
+export interface RuleActionMeta {
+  key: string
+  label: string
+  params: RuleFieldMeta[]
+}
+
+export interface RulesMeta {
+  triggers: RuleTriggerMeta[]
+  enrichers: RuleEnricherMeta[]
+  actions: RuleActionMeta[]
+}
+
+export interface EventSummary {
+  total_events: number
+  total_logs: number
+  events_today: number
+  by_severity: Record<string, number>
+  by_type: Record<string, number>
+  activity_24h: number[]
+  exercise_phase: string | null
+  exercise_phase_at: string | null
+  personnel_on_site: number
+  services_down: number
 }
 
 export type SitePropertyType =
