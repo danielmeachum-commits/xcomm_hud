@@ -38,17 +38,24 @@ export async function GET(
   const slug = explicitSlug ?? inferredSlug
   if (slug) headers["X-Workspace-Slug"] = slug
 
-  const upstream = await fetch(`${API}/documents/${id}/download`, {
-    method: "GET",
-    headers,
-    cache: "no-store",
-  })
+  // Forward the query string (e.g. ?inline=1) so the API can choose inline
+  // vs attachment disposition.
+  const upstream = await fetch(
+    `${API}/documents/${id}/download${req.nextUrl.search}`,
+    {
+      method: "GET",
+      headers,
+      cache: "no-store",
+    },
+  )
 
   const responseHeaders = new Headers()
   const contentType = upstream.headers.get("content-type")
   if (contentType) responseHeaders.set("Content-Type", contentType)
   const disposition = upstream.headers.get("content-disposition")
   if (disposition) responseHeaders.set("Content-Disposition", disposition)
+  const nosniff = upstream.headers.get("x-content-type-options")
+  if (nosniff) responseHeaders.set("X-Content-Type-Options", nosniff)
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
