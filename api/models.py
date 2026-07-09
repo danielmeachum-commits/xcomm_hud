@@ -1035,6 +1035,11 @@ class Document(Base):
     `storage_key` is the S3 key (unique — one object per row). Deleting a
     folder leaves its documents in place (folder_id SET NULL) so files are
     never silently lost with their container.
+
+    File columns (filename/content_type/size_bytes/storage_key) are
+    denormalized copies of the CURRENT version's fields; the full history
+    lives in `document_version` and `current_version_id` says which row is
+    live (not necessarily the newest — Restore repoints it).
     """
 
     __tablename__ = "document"
@@ -1066,6 +1071,13 @@ class Document(Base):
     storage_key: Mapped[str] = mapped_column(
         String(1024), nullable=False, unique=True
     )
+    # Soft cycle with document_version.document_id — nullable and set after
+    # flush, so inserts never deadlock on each other.
+    current_version_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("document_version.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_by: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
@@ -1074,6 +1086,43 @@ class Document(Base):
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class DocumentVersion(Base):
+    """One immutable uploaded file for a document.
+
+    Every upload — including the document's original — gets a row with a
+    sequential per-document `version_no` and its own unique `storage_key`.
+    Rows are never mutated; the document's denormalized file columns point
+    at whichever row `document.current_version_id` selects.
+    """
+
+    __tablename__ = "document_version"
+    __table_args__ = (
+        UniqueConstraint("document_id", "version_no", name="uq_document_version_no"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    document_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("document.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    storage_key: Mapped[str] = mapped_column(
+        String(1024), nullable=False, unique=True
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
     )
 
 

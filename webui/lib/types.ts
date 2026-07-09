@@ -633,6 +633,22 @@ export interface Document {
   created_by_username: string | null
   created_at: string
   updated_at: string
+  current_version_no: number | null
+  version_count: number
+}
+
+export interface DocumentVersion {
+  id: number
+  document_id: number
+  version_no: number
+  filename: string
+  content_type: string
+  size_bytes: number
+  note: string | null
+  created_by: number | null
+  created_by_username: string | null
+  created_at: string
+  is_current: boolean
 }
 
 export interface EnclaveSource {

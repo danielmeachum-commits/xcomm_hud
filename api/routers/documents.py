@@ -25,15 +25,23 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import storage
 from action_registry import record_action
 from db import get_db
 from deps import get_current_workspace, requires
-from models import MAX_UPLOAD_BYTES, Document, Folder, User, Workspace
+from models import (
+    MAX_UPLOAD_BYTES,
+    Document,
+    DocumentVersion,
+    Folder,
+    User,
+    Workspace,
+)
 from pubsub import notify
-from schemas import DocumentOut, DocumentPatch
+from schemas import DocumentOut, DocumentPatch, DocumentVersionOut
 
 log = logging.getLogger("xcomm_hud.documents")
 
@@ -62,6 +70,15 @@ def _load_document_in_workspace(
     if doc is None or doc.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
     return doc
+
+
+def _load_version_of_document(
+    db: Session, version_id: int, doc: Document
+) -> DocumentVersion:
+    version = db.get(DocumentVersion, version_id)
+    if version is None or version.document_id != doc.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Version not found")
+    return version
 
 
 def _check_folder_in_workspace(
@@ -104,10 +121,35 @@ def _record_document_event(
         log.warning("Failed to record %s for document %s", action_slug, doc.id)
 
 
-def _out(doc: Document, username: Optional[str]) -> DocumentOut:
+def _out(
+    doc: Document,
+    username: Optional[str],
+    current_version_no: Optional[int] = None,
+    version_count: int = 1,
+) -> DocumentOut:
     out = DocumentOut.model_validate(doc)
     out.created_by_username = username
+    out.current_version_no = current_version_no
+    out.version_count = version_count
     return out
+
+
+def _version_stats(db: Session, doc: Document) -> tuple[Optional[int], int]:
+    """(current version's number, total versions) for one document."""
+    current_no = None
+    if doc.current_version_id is not None:
+        current_no = (
+            db.query(DocumentVersion.version_no)
+            .filter(DocumentVersion.id == doc.current_version_id)
+            .scalar()
+        )
+    count = (
+        db.query(func.count(DocumentVersion.id))
+        .filter(DocumentVersion.document_id == doc.id)
+        .scalar()
+        or 0
+    )
+    return current_no, max(count, 1)
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -119,8 +161,9 @@ def list_documents(
     _=Depends(requires("viewer")),
 ):
     q = (
-        db.query(Document, User.username)
+        db.query(Document, User.username, DocumentVersion.version_no)
         .outerjoin(User, User.id == Document.created_by)
+        .outerjoin(DocumentVersion, DocumentVersion.id == Document.current_version_id)
         .filter(Document.workspace_id == workspace.id)
     )
     if site_id is None:
@@ -130,7 +173,20 @@ def list_documents(
     if folder_id is not None:
         q = q.filter(Document.folder_id == folder_id)
     rows = q.order_by(Document.created_at.desc()).all()
-    return [_out(doc, username) for doc, username in rows]
+
+    # One grouped query for the counts instead of a subquery per row.
+    counts: dict[int, int] = {}
+    if rows:
+        counts = dict(
+            db.query(DocumentVersion.document_id, func.count(DocumentVersion.id))
+            .filter(DocumentVersion.document_id.in_([doc.id for doc, _, _ in rows]))
+            .group_by(DocumentVersion.document_id)
+            .all()
+        )
+    return [
+        _out(doc, username, current_no, max(counts.get(doc.id, 0), 1))
+        for doc, username, current_no in rows
+    ]
 
 
 @router.post("", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
@@ -178,6 +234,18 @@ def create_document(
     )
     db.add(doc)
     db.flush()
+    version = DocumentVersion(
+        document_id=doc.id,
+        version_no=1,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=size,
+        storage_key=key,
+        created_by=current_user.id,
+    )
+    db.add(version)
+    db.flush()
+    doc.current_version_id = version.id
     _record_document_event(
         db,
         action_slug="document.uploaded",
@@ -186,7 +254,7 @@ def create_document(
         user_id=current_user.id,
     )
     notify(background_tasks)
-    return _out(doc, current_user.username)
+    return _out(doc, current_user.username, current_version_no=1, version_count=1)
 
 
 @router.patch("/{document_id}", response_model=DocumentOut)
@@ -211,7 +279,8 @@ def patch_document(
         u = db.get(User, doc.created_by)
         if u:
             username = u.username
-    return _out(doc, username)
+    current_no, count = _version_stats(db, doc)
+    return _out(doc, username, current_no, count)
 
 
 @router.get("/{document_id}/download")
@@ -237,6 +306,148 @@ def download_document(
     )
 
 
+@router.get("/{document_id}/versions", response_model=list[DocumentVersionOut])
+def list_document_versions(
+    document_id: int,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    doc = _load_document_in_workspace(db, document_id, workspace)
+    rows = (
+        db.query(DocumentVersion, User.username)
+        .outerjoin(User, User.id == DocumentVersion.created_by)
+        .filter(DocumentVersion.document_id == doc.id)
+        .order_by(DocumentVersion.version_no.desc())
+        .all()
+    )
+    out = []
+    for version, username in rows:
+        item = DocumentVersionOut.model_validate(version)
+        item.created_by_username = username
+        item.is_current = version.id == doc.current_version_id
+        out.append(item)
+    return out
+
+
+@router.post("/{document_id}/versions", response_model=DocumentOut)
+def add_document_version(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    note: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    doc = _load_document_in_workspace(db, document_id, workspace)
+
+    file.file.seek(0, os.SEEK_END)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit",
+        )
+
+    version_no = (
+        db.query(func.max(DocumentVersion.version_no))
+        .filter(DocumentVersion.document_id == doc.id)
+        .scalar()
+        or 0
+    ) + 1
+
+    filename = _sanitize_filename(file.filename or "")
+    content_type = file.content_type or "application/octet-stream"
+    key = (
+        f"workspaces/{workspace.id}/documents/{uuid.uuid4()}/v{version_no}/{filename}"
+    )
+    storage.put_stream(key, file.file, content_type, size)
+
+    version = DocumentVersion(
+        document_id=doc.id,
+        version_no=version_no,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=size,
+        storage_key=key,
+        note=note,
+        created_by=current_user.id,
+    )
+    db.add(version)
+    db.flush()
+
+    # updated_at refreshes via the model's onupdate hook on flush.
+    doc.filename = filename
+    doc.content_type = content_type
+    doc.size_bytes = size
+    doc.storage_key = key
+    doc.current_version_id = version.id
+    db.flush()
+
+    _record_document_event(
+        db,
+        action_slug="document.version_added",
+        workspace_id=workspace.id,
+        doc=doc,
+        user_id=current_user.id,
+    )
+    notify(background_tasks)
+    _, count = _version_stats(db, doc)
+    return _out(doc, current_user.username, version_no, count)
+
+
+@router.post("/{document_id}/versions/{version_id}/restore", response_model=DocumentOut)
+def restore_document_version(
+    document_id: int,
+    version_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    doc = _load_document_in_workspace(db, document_id, workspace)
+    version = _load_version_of_document(db, version_id, doc)
+
+    # updated_at refreshes via the model's onupdate hook on flush.
+    doc.filename = version.filename
+    doc.content_type = version.content_type
+    doc.size_bytes = version.size_bytes
+    doc.storage_key = version.storage_key
+    doc.current_version_id = version.id
+    db.flush()
+
+    _record_document_event(
+        db,
+        action_slug="document.version_restored",
+        workspace_id=workspace.id,
+        doc=doc,
+        user_id=current_user.id,
+    )
+    notify(background_tasks)
+    current_no, count = _version_stats(db, doc)
+    return _out(doc, current_user.username, current_no, count)
+
+
+@router.get("/{document_id}/versions/{version_id}/download")
+def download_document_version(
+    document_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    doc = _load_document_in_workspace(db, document_id, workspace)
+    version = _load_version_of_document(db, version_id, doc)
+    body = storage.open_stream(version.storage_key)
+    return StreamingResponse(
+        body.iter_chunks(),
+        media_type=version.content_type,
+        headers={"Content-Disposition": f'attachment; filename="{version.filename}"'},
+    )
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document(
     document_id: int,
@@ -246,10 +457,20 @@ def delete_document(
     current_user: User = Depends(requires("admin")),
 ):
     doc = _load_document_in_workspace(db, document_id, workspace)
-    try:
-        storage.delete(doc.storage_key)
-    except Exception:
-        log.warning("Failed to delete object %s from storage", doc.storage_key)
+    # Every version owns a distinct object; sweep them all (the document's
+    # own storage_key duplicates the current version's, hence the set).
+    keys = {
+        key
+        for (key,) in db.query(DocumentVersion.storage_key)
+        .filter(DocumentVersion.document_id == doc.id)
+        .all()
+    }
+    keys.add(doc.storage_key)
+    for key in keys:
+        try:
+            storage.delete(key)
+        except Exception:
+            log.warning("Failed to delete object %s from storage", key)
     _record_document_event(
         db,
         action_slug="document.deleted",

@@ -1305,6 +1305,22 @@ class DocumentOut(_ORM):
     created_by_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    current_version_no: Optional[int] = None
+    version_count: int = 1
+
+
+class DocumentVersionOut(_ORM):
+    id: int
+    document_id: int
+    version_no: int
+    filename: str
+    content_type: str
+    size_bytes: int
+    note: Optional[str] = None
+    created_by: Optional[int] = None
+    created_by_username: Optional[str] = None
+    created_at: datetime.datetime
+    is_current: bool = False
 
 
 # Portable export shapes — reference parents by name, no ids.
