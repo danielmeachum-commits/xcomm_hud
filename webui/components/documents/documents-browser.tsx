@@ -74,6 +74,29 @@ function triggerDownload(id: number) {
   a.remove()
 }
 
+// Types the API is willing to serve inline (Content-Disposition: inline) — kept
+// in sync with INLINE_CONTENT_TYPES in api/routers/documents.py. Others just
+// download, so we only offer "Open in new tab" for these.
+const PREVIEWABLE_TYPES = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "text/plain",
+])
+
+function isPreviewable(contentType: string): boolean {
+  return PREVIEWABLE_TYPES.has(contentType)
+}
+
+/** Open a previewable document inline in a new browser tab. */
+function openInTab(id: number) {
+  // Plain _blank (no "noreferrer") so the Referer still carries the workspace
+  // slug the proxy needs to scope the request.
+  window.open(`${downloadUrl(id)}?inline=1`, "_blank")
+}
+
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "—"
   if (n < 1024) return `${n} B`
@@ -534,26 +557,45 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
               <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 {g.category}
               </h2>
-              <div className="flex flex-wrap gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {g.types.map((d) => {
                   const Icon = docIcon(d.content_type)
+                  const previewable = isPreviewable(d.content_type)
                   return (
-                    <Attachment key={d.id} className="w-full sm:w-80">
+                    <Attachment key={d.id} className="w-full items-start py-2.5">
                       <AttachmentMedia variant="icon">
                         <Icon />
                       </AttachmentMedia>
                       <AttachmentContent>
-                        <AttachmentTitle>{d.title}</AttachmentTitle>
-                        <AttachmentDescription>
+                        <AttachmentTitle
+                          className="line-clamp-2 whitespace-normal"
+                          title={d.title}
+                        >
+                          {previewable ? (
+                            <button
+                              type="button"
+                              onClick={() => openInTab(d.id)}
+                              className="text-left hover:underline"
+                            >
+                              {d.title}
+                            </button>
+                          ) : (
+                            d.title
+                          )}
+                        </AttachmentTitle>
+                        <AttachmentDescription title={d.filename}>
                           {d.filename} · {formatBytes(d.size_bytes)}
                         </AttachmentDescription>
+                        {d.category && (
+                          <Badge
+                            variant="outline"
+                            className="mt-1.5 max-w-full truncate"
+                          >
+                            {d.category}
+                          </Badge>
+                        )}
                       </AttachmentContent>
-                      {d.category && (
-                        <Badge variant="outline" className="shrink-0">
-                          {d.category}
-                        </Badge>
-                      )}
-                      <AttachmentActions>
+                      <AttachmentActions className="self-start">
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -567,6 +609,11 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
                             }
                           />
                           <DropdownMenuContent align="end">
+                            {previewable && (
+                              <DropdownMenuItem onClick={() => openInTab(d.id)}>
+                                Open in new tab
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               onClick={() => triggerDownload(d.id)}
                             >
@@ -622,6 +669,7 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
               {docsHere.map((d) => {
                 const isChecked = selected.has(d.id)
                 const Icon = docIcon(d.content_type)
+                const previewable = isPreviewable(d.content_type)
                 return (
                   <tr
                     key={d.id}
@@ -640,7 +688,18 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
                     <td className="px-3 py-2">
                       <span className="inline-flex items-center gap-2">
                         <Icon className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="font-medium">{d.title}</span>
+                        {previewable ? (
+                          <button
+                            type="button"
+                            onClick={() => openInTab(d.id)}
+                            className="font-medium hover:underline"
+                            title="Open in new tab"
+                          >
+                            {d.title}
+                          </button>
+                        ) : (
+                          <span className="font-medium">{d.title}</span>
+                        )}
                         {d.version_count > 1 && d.current_version_no != null && (
                           <span className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
                             v{d.current_version_no}
@@ -681,6 +740,11 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
                           }
                         />
                         <DropdownMenuContent align="end">
+                          {previewable && (
+                            <DropdownMenuItem onClick={() => openInTab(d.id)}>
+                              Open in new tab
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem
                             onClick={() => triggerDownload(d.id)}
                           >

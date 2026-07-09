@@ -47,6 +47,21 @@ log = logging.getLogger("xcomm_hud.documents")
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
+# Content types we're willing to serve `Content-Disposition: inline` for, so the
+# browser renders them in a tab instead of downloading. Deliberately excludes
+# text/html and image/svg+xml — those execute scripts in our own origin and
+# would be an XSS vector. Everything else falls back to an attachment download.
+INLINE_CONTENT_TYPES = frozenset(
+    {
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "text/plain",
+    }
+)
+
 
 def _load_document_in_workspace(
     db: Session, document_id: int, workspace: Workspace
@@ -271,16 +286,23 @@ def patch_document(
 @router.get("/{document_id}/download")
 def download_document(
     document_id: int,
+    inline: bool = False,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
     doc = _load_document_in_workspace(db, document_id, workspace)
     body = storage.open_stream(doc.storage_key)
+    # Only render inline for a safe allowlist; anything else downloads.
+    serve_inline = inline and doc.content_type in INLINE_CONTENT_TYPES
+    disposition = "inline" if serve_inline else "attachment"
     return StreamingResponse(
         body.iter_chunks(),
         media_type=doc.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{doc.filename}"'},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{doc.filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
