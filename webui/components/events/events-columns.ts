@@ -1,12 +1,10 @@
+// Time, site, and severity are not listed here: they render in the fixed
+// leading gutter (detached from the configurable columns), like the timeline.
 export type ColumnKey =
-  | "validated_at"
-  | "zulu"
   | "type_slug"
-  | "severity"
   | "record_class"
   | "subject_kind"
   | "subject_name"
-  | "site_name"
   | "prev_status"
   | "status"
   | "operator"
@@ -22,38 +20,28 @@ export interface ColumnDef {
 }
 
 export const ALL_COLUMNS: ColumnDef[] = [
-  { key: "validated_at", label: "Local", sortable: true, hideable: false },
-  { key: "zulu", label: "Zulu", sortable: false, hideable: true },
-  { key: "type_slug", label: "Type", sortable: false, hideable: true },
-  { key: "severity", label: "Severity", sortable: true, hideable: true },
-  { key: "record_class", label: "Class", sortable: false, hideable: true },
+  { key: "subject_name", label: "Subject", sortable: true, hideable: false },
   { key: "subject_kind", label: "Kind", sortable: true, hideable: true },
-  { key: "subject_name", label: "Subject", sortable: true, hideable: true },
-  { key: "site_name", label: "Site", sortable: true, hideable: true },
   { key: "prev_status", label: "Previous", sortable: false, hideable: true },
   { key: "status", label: "Status", sortable: true, hideable: true },
   { key: "operator", label: "Operator", sortable: true, hideable: true },
+  { key: "type_slug", label: "Type", sortable: false, hideable: true },
+  { key: "record_class", label: "Class", sortable: false, hideable: true },
   { key: "source", label: "Source", sortable: false, hideable: true },
   { key: "note", label: "Note", sortable: false, hideable: true },
 ]
 
 export const DEFAULT_VISIBLE: ColumnKey[] = [
-  "validated_at",
-  "zulu",
-  "severity",
-  "subject_kind",
   "subject_name",
-  "site_name",
   "prev_status",
   "status",
-  "operator",
   "note",
 ]
 
 export const DEFAULT_ORDER: ColumnKey[] = ALL_COLUMNS.map((c) => c.key)
 
-// v2: adds type/severity/class columns for the classified feed.
-const STORAGE_KEY = "events.columns.v2"
+// v5: Site joins Time + Severity in the detached gutter, dropped from columns.
+const STORAGE_KEY = "events.columns.v5"
 
 interface ColumnPrefs {
   visible: ColumnKey[]

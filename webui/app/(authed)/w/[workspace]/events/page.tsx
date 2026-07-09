@@ -29,7 +29,9 @@ export default async function EventsPage() {
     workCenters,
   ] = await Promise.all([
     apiGet<EventSummary>("/events/summary").catch(() => null),
-    apiGet<Event[]>("/events?limit=500").catch(() => [] as Event[]),
+    apiGet<Event[]>("/events?limit=500&include_hidden=true").catch(
+      () => [] as Event[],
+    ),
     apiGet<Site[]>("/sites").catch(() => [] as Site[]),
     apiGet<Service[]>("/services").catch(() => [] as Service[]),
     apiGet<Gateway[]>("/gateways").catch(() => [] as Gateway[]),
@@ -42,14 +44,6 @@ export default async function EventsPage() {
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs items={[{ label: "Events" }]} />
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight">Events</h1>
-        <p className="text-xs text-muted-foreground">
-          Significant occurrences on the timeline; the full append-only audit
-          trail in the Audit view. Operators can log events and define new
-          event types.
-        </p>
-      </div>
       <EventsPageClient
         me={me}
         summary={summary}

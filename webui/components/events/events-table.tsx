@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   Download,
+  MapPin,
   MoreHorizontal,
   Plus,
   Search,
@@ -17,7 +18,7 @@ import {
   PERSONNEL_STATUS_LABELS,
   PERSONNEL_STATUSES,
 } from "@/lib/personnel-data"
-import { LocalTime } from "@/components/time-display"
+import { LocalClock, LocalTime } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -31,14 +32,17 @@ import {
   statusLabel,
   statusToIndicatorState,
 } from "@/lib/status"
-import { REGISTRY_TYPE_LABELS } from "@/lib/event-type-labels"
+import {
+  REGISTRY_TYPE_LABELS,
+  SUBJECT_KIND_LABELS,
+} from "@/lib/event-type-labels"
 import {
   SEVERITY_LABELS,
   SEVERITY_ORDER,
   severityDotClass,
   severityRank,
 } from "@/lib/severity"
-import { formatZulu } from "@/lib/time"
+import { formatZulu, formatZuluTime, zuluDayGroup } from "@/lib/time"
 import {
   emconClasses,
   emconLabel,
@@ -82,10 +86,12 @@ import {
 import { downloadCsv, toCsv } from "./events-csv"
 import { FloatingActionBar } from "./floating-action-bar"
 import {
-  MultiSelectFilter,
+  FilterChips,
+  HeaderFilter,
+  type FilterBankItem,
   type MultiSelectGroup,
   type MultiSelectOption,
-} from "./multi-select-filter"
+} from "@/components/multi-select-filter"
 
 const FPCON_SET = new Set<string>(["normal", "alpha", "bravo", "charlie", "delta"])
 const EMCON_SET = new Set<string>(["a", "b", "c", "d"])
@@ -205,13 +211,29 @@ type SortKey =
 type SortDir = "asc" | "desc"
 
 const SORT_BY_COLUMN: Partial<Record<ColumnKey, SortKey>> = {
-  validated_at: "validated_at",
-  severity: "severity",
   subject_kind: "subject_kind",
   subject_name: "subject_name",
-  site_name: "site_name",
   status: "status",
   operator: "operator",
+}
+
+/** Panel treatment for the data columns of a row: a floating, severity-tinted
+ *  card detached from the bare time/severity gutter — the table echo of the
+ *  timeline's severity-encoded card elevation. */
+function severityPanel(s: Severity): { bg: string; border: string } {
+  switch (s) {
+    case "notice":
+      return { bg: "bg-card", border: "border-border" }
+    case "warning":
+      return { bg: "bg-amber-500/5", border: "border-amber-500/30" }
+    case "critical":
+      return {
+        bg: "bg-red-500/10 dark:bg-red-500/15",
+        border: "border-red-500/40",
+      }
+    default:
+      return { bg: "bg-muted/25 dark:bg-muted/15", border: "border-border/50" }
+  }
 }
 
 function compareStr(a: string | null | undefined, b: string | null | undefined): number {
@@ -229,8 +251,12 @@ interface Props {
   units: Unit[]
   workCenters: WorkCenter[]
   workspace: Workspace
-  /** Lock the view to one record class (Audit view uses "log"). */
+  /** Lock the view to one record class (e.g. "log"). */
   fixedRecordClass?: RecordClass
+  /** Include soft-hidden records (dimmed) instead of filtering them out. */
+  showHidden?: boolean
+  /** Hide the toolbar's create button when a header-level one already exists. */
+  hideCreateButton?: boolean
   /** Preselect this site in the log dialog (site detail tab). */
   defaultSiteId?: number
 }
@@ -247,6 +273,8 @@ export function EventsTable({
   workCenters,
   workspace,
   fixedRecordClass,
+  showHidden = false,
+  hideCreateButton = false,
   defaultSiteId,
 }: Props) {
   const [events, setEvents] = useState(initialEvents)
@@ -314,6 +342,9 @@ export function EventsTable({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     let rows = events
+    if (!showHidden) {
+      rows = rows.filter((v) => !v.hidden_at)
+    }
     if (fixedRecordClass) {
       rows = rows.filter((v) => v.record_class === fixedRecordClass)
     }
@@ -379,6 +410,7 @@ export function EventsTable({
     events,
     search,
     fixedRecordClass,
+    showHidden,
     siteFilter,
     kindFilter,
     statusFilter,
@@ -405,6 +437,22 @@ export function EventsTable({
     () => colOrder.filter((k) => visibleCols.has(k)),
     [colOrder, visibleCols],
   )
+
+  // Group rows into Zulu-day sections — but only while sorted by time, where
+  // day bands are meaningful. Any other sort renders a single flat section.
+  const groups = useMemo(() => {
+    if (sortKey !== "validated_at") {
+      return [{ key: "all", label: null as string | null, rows: filtered }]
+    }
+    const out: { key: string; label: string | null; rows: Event[] }[] = []
+    for (const v of filtered) {
+      const { key, label } = zuluDayGroup(v.validated_at)
+      const last = out[out.length - 1]
+      if (last && last.key === key) last.rows.push(v)
+      else out.push({ key, label, rows: [v] })
+    }
+    return out
+  }, [filtered, sortKey])
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) {
@@ -445,49 +493,256 @@ export function EventsTable({
   }
 
   function handleHidden(updated: Event[]) {
-    const hiddenIds = new Set(updated.map((v) => v.id))
-    setEvents((prev) => prev.filter((v) => !hiddenIds.has(v.id)))
+    // Patch in place (not remove) so the rows stay available when the
+    // "show hidden" toggle is on; the filter handles visibility.
+    const map = new Map(updated.map((v) => [v.id, v]))
+    setEvents((prev) => prev.map((v) => map.get(v.id) ?? v))
     setSelected((prev) => {
       const next = new Set(prev)
-      for (const id of hiddenIds) next.delete(id)
+      for (const id of map.keys()) next.delete(id)
       return next
     })
   }
 
-  const renderTableSection = (rows: Event[], heading?: string) => (
-    <div className="flex flex-col gap-1">
-      {heading && (
-        <div className="flex items-baseline justify-between px-1">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {heading}
-          </h2>
-          <span className="text-[10px] text-muted-foreground">
-            {rows.length} event{rows.length === 1 ? "" : "s"}
-          </span>
-        </div>
-      )}
-      <div className="overflow-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-xs uppercase tracking-wider">
-            <tr>
-              <th className="w-10 px-3 py-2 text-left">
-                <Checkbox
-                  checked={
-                    rows.length > 0 && rows.every((v) => selected.has(v.id))
-                  }
-                  indeterminate={
-                    rows.some((v) => selected.has(v.id)) &&
-                    !rows.every((v) => selected.has(v.id))
-                  }
-                  onCheckedChange={() => toggleSectionSelected(rows)}
-                  aria-label="Select all visible"
+  async function handleUnhide(id: number) {
+    try {
+      const res = await fetch(`/api/be/events/${id}/unhide`, { method: "POST" })
+      if (!res.ok) throw new Error(`Unhide failed (${res.status})`)
+      const updated = (await res.json()) as Event
+      setEvents((prev) => prev.map((v) => (v.id === updated.id ? updated : v)))
+    } catch {
+      // Surfaced by the row staying hidden; keep the table quiet on failure.
+    }
+  }
+
+  // Total column span (checkbox · time · site · severity gutter + data cols +
+  // actions) for the full-width date bands and empty state.
+  const totalCols = orderedVisibleCols.length + 5
+  const grouped = sortKey === "validated_at"
+
+  // Inline column filters — each filterable column exposes a funnel in its
+  // header; the same sets drive the active-filter chips below the toolbar.
+  const filterBank: FilterBankItem[] = [
+    { key: "site", label: "Site", options: siteOptions, searchable: true, selected: siteFilter, onChange: setSiteFilter },
+    { key: "severity", label: "Severity", options: SEVERITY_OPTIONS, selected: severityFilter, onChange: setSeverityFilter },
+    { key: "type", label: "Type", options: typeOptions, searchable: true, selected: typeFilter, onChange: setTypeFilter },
+    { key: "kind", label: "Kind", options: KIND_OPTIONS, groups: KIND_GROUPS, selected: kindFilter, onChange: setKindFilter },
+    { key: "status", label: "Status", options: STATUS_OPTIONS, groups: STATUS_GROUPS, selected: statusFilter, onChange: setStatusFilter },
+  ]
+
+  // Which configurable column each bank sits under (gutter columns render
+  // their own funnel directly). Panel funnels align to the right edge so
+  // right-hand columns don't push the panel off-screen.
+  const PANEL_FILTER_BANK: Partial<Record<ColumnKey, string>> = {
+    type_slug: "type",
+    subject_kind: "kind",
+    status: "status",
+  }
+  const columnFilterFor = (key: ColumnKey) => {
+    const bankKey = PANEL_FILTER_BANK[key]
+    if (!bankKey) return null
+    const f = filterBank.find((b) => b.key === bankKey)!
+    return (
+      <HeaderFilter
+        label={f.label}
+        options={f.options}
+        groups={f.groups}
+        searchable={f.searchable}
+        selected={f.selected}
+        onChange={f.onChange}
+        align="end"
+      />
+    )
+  }
+
+  const renderRow = (v: Event) => {
+    const isChecked = selected.has(v.id)
+    const severity = v.severity as Severity
+    const panel = isChecked
+      ? { bg: "bg-primary/5", border: "border-primary/40" }
+      : severityPanel(severity)
+    // Every data cell carries the panel bg + top/bottom border; the first and
+    // the trailing actions cell cap it with a left/right border + rounding so
+    // the run of cells reads as one floating card.
+    const panelCell = cn(panel.bg, panel.border, "border-y")
+    return (
+      <tr key={v.id} className={cn(v.hidden_at && "opacity-60")}>
+        {/* Gutter — bare, detached from the panel. */}
+        <td className="w-10 py-2 pl-1 pr-2 align-middle">
+          <Checkbox
+            checked={isChecked}
+            onCheckedChange={() => toggleRowSelected(v.id)}
+            aria-label={`Select event ${v.id}`}
+          />
+        </td>
+        <td className="whitespace-nowrap py-2 pr-3 text-right align-middle">
+          <div className="flex flex-col items-end gap-0.5 font-mono text-[11px] leading-tight text-muted-foreground">
+            {grouped ? (
+              <>
+                <span className="text-foreground/80">
+                  {formatZuluTime(v.validated_at)}
+                </span>
+                <LocalClock
+                  iso={v.validated_at}
+                  className="text-muted-foreground/60"
                 />
-              </th>
-              {orderedVisibleCols.map((key) => {
-                const col = ALL_COLUMNS.find((c) => c.key === key)!
-                const sortableKey = SORT_BY_COLUMN[key]
-                return (
-                  <th key={key} className="px-3 py-2 text-left">
+              </>
+            ) : (
+              <>
+                <span className="text-foreground/80">
+                  {formatZulu(v.validated_at)}
+                </span>
+                <LocalTime
+                  iso={v.validated_at}
+                  className="text-muted-foreground/60"
+                />
+              </>
+            )}
+          </div>
+        </td>
+        <td className="whitespace-nowrap py-2 pr-4 align-middle">
+          <span className="flex h-4 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                severityDotClass(severity),
+              )}
+            />
+            {SEVERITY_LABELS[severity] ?? v.severity}
+          </span>
+        </td>
+        {/* Site — timeline pin treatment, detached in the gutter, right up
+            against the card edge. */}
+        <td className="py-2 pr-4 align-middle">
+          {v.site_name ? (
+            <span className="flex h-4 max-w-[9rem] items-center gap-1 text-[11px] leading-4 text-muted-foreground/80">
+              <MapPin className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{v.site_name}</span>
+            </span>
+          ) : (
+            <span className="flex h-4 items-center text-[11px] leading-4 text-muted-foreground/40">
+              —
+            </span>
+          )}
+        </td>
+        {/* Panel — the configurable data columns as one floating card. */}
+        {orderedVisibleCols.map((key, i) => (
+          <td
+            key={key}
+            className={cn(
+              "px-3 py-2 align-middle",
+              panelCell,
+              i === 0 && "rounded-l-lg border-l pl-3",
+              (key === "prev_status" || key === "status") &&
+                "whitespace-nowrap",
+              (key === "operator" ||
+                key === "note" ||
+                key === "source") &&
+                "text-muted-foreground",
+              key === "note" && "text-xs",
+            )}
+          >
+            {/* Block-level flex so cell content centers by box, not text
+                baseline — keeps pills level with the gutter's site/severity. */}
+            <div className="flex min-h-4 items-center">
+              {renderCell(key, v, typeLabels)}
+            </div>
+          </td>
+        ))}
+        <td
+          className={cn(
+            "w-10 py-2 pl-1 pr-2 text-right align-middle",
+            panelCell,
+            "rounded-r-lg border-r",
+            orderedVisibleCols.length === 0 && "rounded-l-lg border-l",
+          )}
+        >
+          <RowMenu
+            isOperator={isOperator}
+            isAdmin={isAdmin}
+            isAuthor={
+              v.validated_by_user_id != null &&
+              v.validated_by_user_id === me.user_id
+            }
+            isHidden={v.hidden_at != null}
+            onEdit={() => setEditingEvent(v)}
+            onHide={() => setConfirmHideIds([v.id])}
+            onUnhide={() => handleUnhide(v.id)}
+          />
+        </td>
+      </tr>
+    )
+  }
+
+  const renderTable = () => (
+    <div className="overflow-x-auto">
+      <table className="w-full border-separate border-spacing-y-1.5 text-sm">
+        <thead className="text-xs uppercase tracking-wider text-muted-foreground">
+          <tr>
+            <th className="w-10 pb-1 pl-1 pr-2 text-left align-bottom">
+              <Checkbox
+                checked={
+                  filtered.length > 0 &&
+                  filtered.every((v) => selected.has(v.id))
+                }
+                indeterminate={
+                  filtered.some((v) => selected.has(v.id)) &&
+                  !filtered.every((v) => selected.has(v.id))
+                }
+                onCheckedChange={() => toggleSectionSelected(filtered)}
+                aria-label="Select all visible"
+              />
+            </th>
+            <th className="pb-1 pr-3 text-right align-bottom">
+              <div className="flex justify-end">
+                <SortHeader
+                  active={sortKey === "validated_at"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("validated_at")}
+                  label="Time"
+                />
+              </div>
+            </th>
+            <th className="pb-1 pr-4 text-left align-bottom">
+              <div className="flex items-center gap-1">
+                <SortHeader
+                  active={sortKey === "severity"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("severity")}
+                  label="Severity"
+                />
+                <HeaderFilter
+                  label="Severity"
+                  options={SEVERITY_OPTIONS}
+                  selected={severityFilter}
+                  onChange={setSeverityFilter}
+                />
+              </div>
+            </th>
+            <th className="pb-1 pr-4 text-left align-bottom">
+              <div className="flex items-center gap-1">
+                <SortHeader
+                  active={sortKey === "site_name"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("site_name")}
+                  label="Site"
+                />
+                <HeaderFilter
+                  label="Site"
+                  options={siteOptions}
+                  searchable
+                  selected={siteFilter}
+                  onChange={setSiteFilter}
+                />
+              </div>
+            </th>
+            {orderedVisibleCols.map((key) => {
+              const col = ALL_COLUMNS.find((c) => c.key === key)!
+              const sortableKey = SORT_BY_COLUMN[key]
+              const filter = columnFilterFor(key)
+              return (
+                <th key={key} className="pb-1 pl-3 pr-3 text-left align-bottom">
+                  <div className="flex items-center gap-1">
                     {sortableKey ? (
                       <SortHeader
                         active={sortKey === sortableKey}
@@ -498,76 +753,50 @@ export function EventsTable({
                     ) : (
                       col.label
                     )}
-                  </th>
-                )
-              })}
-              <th className="w-10 px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((v) => {
-              const isChecked = selected.has(v.id)
-              return (
-                <tr
-                  key={v.id}
-                  className={cn(
-                    "border-t border-border",
-                    isChecked && "bg-primary/5",
-                  )}
-                >
-                  <td className="px-3 py-2">
-                    <Checkbox
-                      checked={isChecked}
-                      onCheckedChange={() => toggleRowSelected(v.id)}
-                      aria-label={`Select event ${v.id}`}
-                    />
-                  </td>
-                  {orderedVisibleCols.map((key) => (
-                    <td
-                      key={key}
-                      className={cn(
-                        "px-3 py-2",
-                        (key === "validated_at" || key === "zulu") &&
-                          "font-mono text-xs",
-                        (key === "site_name" ||
-                          key === "operator" ||
-                          key === "note" ||
-                          key === "source") &&
-                          "text-muted-foreground",
-                        key === "note" && "text-xs",
-                      )}
-                    >
-                      {renderCell(key, v, typeLabels)}
-                    </td>
-                  ))}
-                  <td className="px-3 py-2 text-right">
-                    <RowMenu
-                      isOperator={isOperator}
-                      isAdmin={isAdmin}
-                      isAuthor={
-                        v.validated_by_user_id != null &&
-                        v.validated_by_user_id === me.user_id
-                      }
-                      onEdit={() => setEditingEvent(v)}
-                      onHide={() => setConfirmHideIds([v.id])}
-                    />
-                  </td>
-                </tr>
+                    {filter}
+                  </div>
+                </th>
               )
             })}
-            {rows.length === 0 && (
-              <tr>
-                <td
-                  colSpan={orderedVisibleCols.length + 2}
-                  className="px-3 py-8 text-center text-xs text-muted-foreground"
-                >
-                  No {heading ? heading.toLowerCase() + " " : ""}events match the current filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            <th className="w-10 pb-1" />
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => (
+            <Fragment key={g.key}>
+              {g.label && (
+                <tr>
+                  <td colSpan={totalCols} className="pb-0.5 pt-3">
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        {g.label}
+                      </span>
+                      <span
+                        className="h-px flex-1 bg-border/60"
+                        aria-hidden
+                      />
+                      <span className="text-[10px] tabular-nums text-muted-foreground/60">
+                        {g.rows.length}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {g.rows.map(renderRow)}
+            </Fragment>
+          ))}
+          {filtered.length === 0 && (
+            <tr>
+              <td
+                colSpan={totalCols}
+                className="px-3 py-8 text-center text-xs text-muted-foreground"
+              >
+                No events match the current filters.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   )
 
@@ -597,50 +826,6 @@ export function EventsTable({
               className="pl-7"
             />
           </div>
-          <div className="w-36">
-            <MultiSelectFilter
-              label="Sites"
-              options={siteOptions}
-              searchable
-              selected={siteFilter}
-              onChange={setSiteFilter}
-            />
-          </div>
-          <div className="w-36">
-            <MultiSelectFilter
-              label="Type"
-              options={typeOptions}
-              searchable
-              selected={typeFilter}
-              onChange={setTypeFilter}
-            />
-          </div>
-          <div className="w-36">
-            <MultiSelectFilter
-              label="Severity"
-              options={SEVERITY_OPTIONS}
-              selected={severityFilter}
-              onChange={setSeverityFilter}
-            />
-          </div>
-          <div className="w-36">
-            <MultiSelectFilter
-              label="Kind"
-              options={KIND_OPTIONS}
-              groups={KIND_GROUPS}
-              selected={kindFilter}
-              onChange={setKindFilter}
-            />
-          </div>
-          <div className="w-36">
-            <MultiSelectFilter
-              label="Status"
-              options={STATUS_OPTIONS}
-              groups={STATUS_GROUPS}
-              selected={statusFilter}
-              onChange={setStatusFilter}
-            />
-          </div>
           <ColumnsPopover
             visible={visibleCols}
             order={colOrder}
@@ -656,7 +841,7 @@ export function EventsTable({
             <Download className="size-3.5" />
             Export CSV
           </Button>
-          {isOperator && (
+          {isOperator && !hideCreateButton && (
             <Button
               size="sm"
               onClick={() => setShowCreate(true)}
@@ -668,8 +853,11 @@ export function EventsTable({
           )}
         </div>
 
-        <div className="text-xs text-muted-foreground">
-          {filtered.length} of {events.length} events
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+          <span>
+            {filtered.length} of {events.length} events
+          </span>
+          <FilterChips bank={filterBank} />
         </div>
 
         {selected.size > 0 && (
@@ -682,7 +870,7 @@ export function EventsTable({
           />
         )}
 
-        {renderTableSection(filtered)}
+        {renderTable()}
       </div>
 
       <EventCreateDialog
@@ -744,14 +932,18 @@ function RowMenu({
   isOperator,
   isAdmin,
   isAuthor,
+  isHidden,
   onEdit,
   onHide,
+  onUnhide,
 }: {
   isOperator: boolean
   isAdmin: boolean
   isAuthor: boolean
+  isHidden: boolean
   onEdit: () => void
   onHide: () => void
+  onUnhide: () => void
 }) {
   const canEdit = isAdmin || (isOperator && isAuthor)
   if (!canEdit && !isAdmin) return null
@@ -772,14 +964,14 @@ function RowMenu({
         {canEdit && (
           <DropdownMenuItem onClick={onEdit}>Edit note</DropdownMenuItem>
         )}
-        {isAdmin && (
-          <DropdownMenuItem
-            onClick={onHide}
-            className="text-destructive"
-          >
-            Hide event
-          </DropdownMenuItem>
-        )}
+        {isAdmin &&
+          (isHidden ? (
+            <DropdownMenuItem onClick={onUnhide}>Unhide event</DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={onHide} className="text-destructive">
+              Hide event
+            </DropdownMenuItem>
+          ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -791,10 +983,6 @@ function renderCell(
   typeLabels: Map<string, string>,
 ): React.ReactNode {
   switch (key) {
-    case "validated_at":
-      return <LocalTime iso={v.validated_at} />
-    case "zulu":
-      return formatZulu(v.validated_at)
     case "type_slug":
       return v.type_slug ? (
         <span className="rounded-md bg-muted/40 px-1.5 py-0.5 text-[10px] tracking-wide">
@@ -802,18 +990,6 @@ function renderCell(
         </span>
       ) : (
         <span className="text-muted-foreground">—</span>
-      )
-    case "severity":
-      return (
-        <span className="inline-flex items-center gap-1.5 text-xs">
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              severityDotClass(v.severity as Severity),
-            )}
-          />
-          {SEVERITY_LABELS[v.severity as Severity] ?? v.severity}
-        </span>
       )
     case "record_class":
       return (
@@ -831,7 +1007,7 @@ function renderCell(
     case "subject_kind":
       return (
         <span className="rounded-md bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">
-          {v.subject_kind}
+          {SUBJECT_KIND_LABELS[v.subject_kind] ?? v.subject_kind}
         </span>
       )
     case "subject_name":
@@ -848,8 +1024,6 @@ function renderCell(
         )
       }
       return v.subject_name ?? `id ${v.subject_id}`
-    case "site_name":
-      return v.site_name ?? "—"
     case "prev_status":
       return renderStatusValue(v.prev_status, v.subject_kind)
     case "status":

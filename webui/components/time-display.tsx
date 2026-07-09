@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 
-import { formatLocal, timeAgo } from "@/lib/time"
+import { formatLocal, formatLocalTime, timeAgo } from "@/lib/time"
 
 interface Props {
   iso: string | null | undefined
@@ -19,6 +19,15 @@ export function LocalTime({ iso, placeholder = "—", className }: Props) {
   const [text, setText] = useState(placeholder)
   useEffect(() => {
     setText(formatLocal(iso))
+  }, [iso])
+  return <span className={className}>{text}</span>
+}
+
+/** Local clock time "18:25L", hydration-safe (placeholder until mount). */
+export function LocalClock({ iso, placeholder = "—", className }: Props) {
+  const [text, setText] = useState(placeholder)
+  useEffect(() => {
+    setText(formatLocalTime(iso))
   }, [iso])
   return <span className={className}>{text}</span>
 }

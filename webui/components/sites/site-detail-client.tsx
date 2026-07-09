@@ -49,6 +49,8 @@ import {
   buildPersonnelGroups,
   type PersonnelGroup,
 } from "@/lib/personnel-grouping"
+import { FilterBar, FilterChips } from "@/components/multi-select-filter"
+import { usePersonnelFilters } from "@/components/personnel/use-personnel-filters"
 import { OrgChartSheet } from "@/components/personnel/org-chart-sheet"
 import { PersonnelCanvas } from "@/components/personnel/personnel-canvas"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
@@ -524,6 +526,19 @@ function SitePersonnelTab({
   // here — deduplicated (visitors already excludes anyone already assigned).
   const relevant = [...assigned, ...visitors]
 
+  // Column filters — Status / Work Center / Unit (site is implied here). Applied
+  // to the displayed lists so grouping and the graph narrow together.
+  const { bank, apply } = usePersonnelFilters({
+    personnel: relevant,
+    workCenters,
+    units,
+    sites,
+    include: ["status", "work_center", "unit"],
+  })
+  const fAssigned = apply(assigned)
+  const fVisitors = apply(visitors)
+  const fRelevant = apply(relevant)
+
   // Return link so opening a person from here breadcrumbs back to this tab,
   // including the active grouping/view.
   const backParams = new URLSearchParams(searchParams.toString())
@@ -570,7 +585,7 @@ function SitePersonnelTab({
   const groups: PersonnelGroup[] =
     groupMode === "group"
       ? []
-      : buildPersonnelGroups(relevant, groupMode, { workCenters, units, teams })
+      : buildPersonnelGroups(fRelevant, groupMode, { workCenters, units, teams })
 
   return (
     <div className="flex flex-col gap-4">
@@ -647,12 +662,17 @@ function SitePersonnelTab({
             )}
           </div>
 
+          <div className="flex flex-col gap-2">
+            <FilterBar bank={bank} />
+            <FilterChips bank={bank} />
+          </div>
+
           {view === "graph" ? (
             <PersonnelCanvas
               mode="team-tree"
               teams={teams}
               workCenters={workCenters}
-              people={relevant}
+              people={fRelevant}
               sites={sites}
               canEdit={canEdit}
               linkFrom={linkFrom}
@@ -661,10 +681,10 @@ function SitePersonnelTab({
             <>
               <section className="space-y-2">
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Assigned ({assigned.length})
+                  Assigned ({fAssigned.length})
                 </h2>
                 <PersonnelTable
-                  personnel={assigned}
+                  personnel={fAssigned}
                   workCenters={workCenters}
                   units={units}
                   sites={sites}
@@ -676,13 +696,13 @@ function SitePersonnelTab({
                   rowAction={rowAction}
                 />
               </section>
-              {visitors.length > 0 && (
+              {fVisitors.length > 0 && (
                 <section className="space-y-2">
                   <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    On-site now ({visitors.length})
+                    On-site now ({fVisitors.length})
                   </h2>
                   <PersonnelTable
-                    personnel={visitors}
+                    personnel={fVisitors}
                     workCenters={workCenters}
                     units={units}
                     sites={sites}

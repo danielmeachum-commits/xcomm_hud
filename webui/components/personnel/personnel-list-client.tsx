@@ -8,6 +8,8 @@ import { PersonnelCanvas } from "@/components/personnel/personnel-canvas"
 import { PersonnelCsvImport } from "@/components/personnel/personnel-csv-import"
 import { PersonnelForm } from "@/components/personnel/personnel-form"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
+import { usePersonnelFilters } from "@/components/personnel/use-personnel-filters"
+import { FilterBar, FilterChips } from "@/components/multi-select-filter"
 import { Input } from "@/components/ui/input"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import {
@@ -117,7 +119,7 @@ export function PersonnelListClient({
     [units],
   )
 
-  const filtered = useMemo(() => {
+  const searched = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return personnel
     return personnel.filter((p) => {
@@ -136,14 +138,20 @@ export function PersonnelListClient({
     })
   }, [personnel, query, wcById, unitById])
 
-  // Search applies before grouping, so the graph shows only matches too.
-  const groups = useMemo(
-    () =>
-      groupMode === "all"
-        ? []
-        : buildPersonnelGroups(filtered, groupMode, { workCenters, units, teams }),
-    [groupMode, filtered, workCenters, units, teams],
-  )
+  // Column filters (Status / Work Center / Unit / Site) apply after search and
+  // before grouping, so every view — list, groups, graph — narrows together.
+  const { bank, apply } = usePersonnelFilters({
+    personnel,
+    workCenters,
+    units,
+    sites,
+  })
+  const filtered = apply(searched)
+
+  const groups =
+    groupMode === "all"
+      ? []
+      : buildPersonnelGroups(filtered, groupMode, { workCenters, units, teams })
 
   return (
     <>
@@ -171,12 +179,18 @@ export function PersonnelListClient({
         )}
       </div>
 
-      <div className="max-w-sm">
-        <Input
-          placeholder="Search by name, rank, work center, unit…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-52 max-w-sm flex-1">
+            <Input
+              placeholder="Search by name, rank, work center, unit…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <FilterBar bank={bank} />
+        </div>
+        <FilterChips bank={bank} />
       </div>
 
       {/* View toggle on the left; the right side switches with it — list

@@ -41,6 +41,37 @@ export function severityDotClass(s: Severity): string {
   }
 }
 
+/** Left-spine border color for severity-accented cards. */
+export function severityBorderClass(s: Severity): string {
+  switch (s) {
+    case "info":
+      return "border-l-slate-400/60 dark:border-l-slate-500/60"
+    case "notice":
+      return "border-l-sky-500"
+    case "warning":
+      return "border-l-amber-500"
+    case "critical":
+      return "border-l-red-500"
+  }
+}
+
+/** Card treatment for the vertical timeline, where elevation encodes
+ *  importance: routine (info) rows sit flat on the page, notable events lift
+ *  onto an elevated card, and critical fills a tinted card so it stands out
+ *  the way the important white cards do against the gray rows in the ref. */
+export function severityTimelineCardClasses(s: Severity): string {
+  switch (s) {
+    case "info":
+      return "bg-muted/30 dark:bg-muted/20"
+    case "notice":
+      return "bg-card shadow-sm"
+    case "warning":
+      return "bg-card shadow-sm ring-1 ring-inset ring-amber-500/25"
+    case "critical":
+      return "bg-red-500/10 shadow-sm ring-1 ring-inset ring-red-500/40 dark:bg-red-500/15"
+  }
+}
+
 /** Subtle pill classes (bg/text/ring) for severity badges. */
 export function severityPillClasses(s: Severity): string {
   switch (s) {

@@ -40,6 +40,46 @@ export function formatZulu(iso: string | null | undefined): string {
   return `${day}${hh}${mm}Z ${mon} ${year}`
 }
 
+/** Zulu calendar date, full month name: "08 July 2026". */
+export function formatZuluDate(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  const pad = (n: number) => n.toString().padStart(2, "0")
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ]
+  return `${pad(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
+
+/** Zulu day key (sortable YYYY-MM-DD) + DTG band label ("08 JUL 2026").
+ *  Shared by the timeline and log table so both group and label days the same. */
+export function zuluDayGroup(iso: string): { key: string; label: string } {
+  const d = new Date(iso)
+  const pad = (n: number) => n.toString().padStart(2, "0")
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
+  const key = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
+  const label = `${pad(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  return { key, label }
+}
+
+/** Zulu clock time: "22:25Z". */
+export function formatZuluTime(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  const pad = (n: number) => n.toString().padStart(2, "0")
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}Z`
+}
+
+/** Local clock time with the L (local) suffix: "18:25L". Browser-only —
+ *  render via <LocalClock> to stay hydration-safe. */
+export function formatLocalTime(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  const pad = (n: number) => n.toString().padStart(2, "0")
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}L`
+}
+
 /** Compact span between two instants, e.g. "45min", "1hr", "3hrs", "2days".
  *  Used for expected-duration labels like "Temporarily - 3hrs". */
 export function formatDurationShort(

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { GanttChart, Plus, ScrollText, Table2 } from "lucide-react"
+import { Eye, EyeOff, GanttChart, Plus, Table2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ViewTabs } from "@/components/ui/view-tabs"
@@ -24,12 +24,11 @@ import { EventTimeline } from "./event-timeline"
 import { EventWidgets } from "./event-widgets"
 import { EventsTable } from "./events-table"
 
-type View = "timeline" | "table" | "audit"
+type View = "timeline" | "table"
 
 const VIEW_OPTIONS = [
-  { value: "timeline" as View, label: "Timeline", icon: GanttChart },
-  { value: "table" as View, label: "Table", icon: Table2 },
-  { value: "audit" as View, label: "Audit", icon: ScrollText },
+  { value: "timeline" as View, label: "Event Timeline", icon: GanttChart },
+  { value: "table" as View, label: "Log Table", icon: Table2 },
 ]
 
 interface Props {
@@ -62,6 +61,7 @@ export function EventsPageClient({
   const searchParams = useSearchParams()
   const view = (searchParams.get("view") as View) || "timeline"
   const [showCreate, setShowCreate] = useState(false)
+  const [showHidden, setShowHidden] = useState(false)
 
   const isOperator = me.role === "operator" || me.role === "admin"
 
@@ -91,24 +91,57 @@ export function EventsPageClient({
 
   return (
     <div className="flex flex-col gap-4">
-      {summary && <EventWidgets summary={summary} />}
-
-      <div className="flex items-center justify-between gap-2">
-        <ViewTabs value={view} onChange={setView} options={VIEW_OPTIONS} />
-        {view === "timeline" && isOperator && (
-          <Button size="sm" onClick={() => setShowCreate(true)} className="h-8 gap-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">Events</h1>
+          <p className="text-xs text-muted-foreground">
+            Significant occurrences on the timeline; the full append-only audit
+            trail in the Log Table. Operators can log events and define new
+            event types.
+          </p>
+        </div>
+        {isOperator && (
+          <Button
+            size="sm"
+            onClick={() => setShowCreate(true)}
+            className="h-8 shrink-0 gap-1.5"
+          >
             <Plus className="size-3.5" />
             Log event
           </Button>
         )}
       </div>
 
+      {summary && <EventWidgets summary={summary} />}
+
+      <div className="flex items-center justify-between gap-2">
+        <ViewTabs value={view} onChange={setView} options={VIEW_OPTIONS} />
+        <Button
+          variant={showHidden ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setShowHidden((v) => !v)}
+          className="h-8 gap-1.5"
+          aria-pressed={showHidden}
+        >
+          {showHidden ? (
+            <Eye className="size-3.5" />
+          ) : (
+            <EyeOff className="size-3.5" />
+          )}
+          Hidden records
+        </Button>
+      </div>
+
       {view === "timeline" && (
-        <EventTimeline events={events} eventTypes={eventTypes} />
+        <EventTimeline
+          me={me}
+          events={events}
+          eventTypes={eventTypes}
+          showHidden={showHidden}
+        />
       )}
-      {view === "table" && <EventsTable {...tableProps} />}
-      {view === "audit" && (
-        <EventsTable {...tableProps} fixedRecordClass="log" />
+      {view === "table" && (
+        <EventsTable {...tableProps} showHidden={showHidden} hideCreateButton />
       )}
 
       <EventCreateDialog

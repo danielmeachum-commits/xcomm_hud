@@ -80,10 +80,11 @@ export function SiteEventsTab({
 
       {view === "timeline" ? (
         <EventTimeline
+          me={me}
           events={events}
           eventTypes={eventTypes}
           siteId={site.id}
-          logsView="Table"
+          logsView="Log Table"
         />
       ) : (
         <EventsTable
