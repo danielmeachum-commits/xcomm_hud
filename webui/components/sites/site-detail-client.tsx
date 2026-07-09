@@ -22,6 +22,7 @@ import {
   Activity,
   Building2,
   ClipboardList,
+  FileText,
   Flag,
   Info,
   Layers,
@@ -57,9 +58,12 @@ import { PersonnelSelectionActions } from "@/components/personnel/personnel-sele
 import { SiteCheckInDialog } from "@/components/personnel/site-checkin-dialog"
 import { RollCallDialog } from "@/components/personnel/roll-call-dialog"
 import { SiteEventsTab } from "@/components/events/site-events-tab"
+import { SiteDocumentsTab } from "@/components/documents/site-documents-tab"
 import type {
+  Document,
   Event,
   EventTypeDef,
+  Folder,
   Gateway,
   Me,
   Personnel,
@@ -91,14 +95,23 @@ interface Props {
   me: Me
   events: Event[]
   eventTypes: EventTypeDef[]
+  siteFolders: Folder[]
+  siteDocuments: Document[]
 }
 
-type Tab = "services" | "personnel" | "equipment" | "details" | "events"
+type Tab =
+  | "services"
+  | "personnel"
+  | "equipment"
+  | "documents"
+  | "details"
+  | "events"
 
 const TABS: readonly Tab[] = [
   "services",
   "personnel",
   "equipment",
+  "documents",
   "details",
   "events",
 ]
@@ -121,6 +134,8 @@ export function SiteDetailClient({
   me,
   events,
   eventTypes,
+  siteFolders,
+  siteDocuments,
 }: Props) {
   const { w } = useWorkspace()
   const router = useRouter()
@@ -197,6 +212,7 @@ export function SiteDetailClient({
           { value: "services", label: "Services", icon: Waypoints },
           { value: "personnel", label: "Personnel", icon: Users },
           { value: "equipment", label: "Equipment", icon: Package },
+          { value: "documents", label: "Documents", icon: FileText },
           { value: "details", label: "Details", icon: Info },
           { value: "events", label: "Events", icon: ClipboardList },
         ]}
@@ -223,6 +239,12 @@ export function SiteDetailClient({
         />
       ) : tab === "equipment" ? (
         <PlaceholderTab title="Equipment" description="Site equipment inventory will live here." />
+      ) : tab === "documents" ? (
+        <SiteDocumentsTab
+          siteId={site.id}
+          folders={siteFolders}
+          documents={siteDocuments}
+        />
       ) : tab === "details" ? (
         <SiteDetailsTab
           siteId={site.id}

@@ -607,6 +607,34 @@ export interface PersonnelCsvImportResult {
   errors: string[]
 }
 
+// --- Documents ---
+
+export interface Folder {
+  id: number
+  workspace_id: number
+  site_id: number | null
+  parent_id: number | null
+  name: string
+  created_at: string
+}
+
+export interface Document {
+  id: number
+  workspace_id: number
+  site_id: number | null
+  folder_id: number | null
+  title: string
+  description: string | null
+  category: string | null
+  filename: string
+  content_type: string
+  size_bytes: number
+  created_by: number | null
+  created_by_username: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface EnclaveSource {
   id: number
   name: string

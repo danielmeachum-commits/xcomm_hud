@@ -7,6 +7,7 @@ import {
   Bell,
   ChevronRight,
   ChevronUp,
+  FileText,
   Flag,
   ListChecks,
   LogOut,
@@ -55,6 +56,7 @@ import { useWorkspace } from "@/lib/workspace"
 const SECONDARY_NAV_ITEMS = [
   { path: "/services", label: "Services", icon: Radio },
   { path: "/events", label: "Events", icon: Bell },
+  { path: "/documents", label: "Documents", icon: FileText },
 ]
 
 // Quick links to the personnel structure graphs (?view=graph&graph=…).

@@ -64,6 +64,7 @@ SUBJECT_KINDS = (
     "unit",
     "work_center",
     "workspace",
+    "document",
 )
 EVENT_TYPES = ("validation", "general", "personnel")
 # Every Event row is either a high-volume audit "log" or a briefing-worthy
@@ -108,6 +109,8 @@ PERSONNEL_STATUS_VALUES = (
     "sick",
     "training",
 )
+# Hard cap on a single document upload (enforced by the documents router).
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 class Workspace(Base):
@@ -983,6 +986,94 @@ class PersonnelTeam(Base):
         ForeignKey("team.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
+    )
+
+
+class Folder(Base):
+    """A folder in the document library tree.
+
+    Folders are workspace-scoped; `site_id` NULL means the workspace-level
+    library, non-NULL scopes the folder to one site's document tab. The tree
+    shape lives entirely in `parent_id` — the API returns flat lists and the
+    UI assembles the hierarchy.
+    """
+
+    __tablename__ = "folder"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "site_id", "parent_id", "name", name="uq_folder_scope_name"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    site_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("folder.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class Document(Base):
+    """Metadata for one uploaded file; the bytes live in object storage.
+
+    `storage_key` is the S3 key (unique — one object per row). Deleting a
+    folder leaves its documents in place (folder_id SET NULL) so files are
+    never silently lost with their container.
+    """
+
+    __tablename__ = "document"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    site_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    folder_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("folder.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    storage_key: Mapped[str] = mapped_column(
+        String(1024), nullable=False, unique=True
+    )
+    created_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
 
