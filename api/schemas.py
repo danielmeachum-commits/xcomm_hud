@@ -53,6 +53,7 @@ SubjectKind = Literal[
     "unit",
     "work_center",
     "workspace",
+    "document",
 ]
 EventType = Literal["validation", "general", "personnel"]
 RecordClass = Literal["log", "event"]
@@ -1255,6 +1256,55 @@ class PersonnelCsvImportOut(BaseModel):
     created_work_centers: list[str] = Field(default_factory=list)
     created_units: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+
+
+# --- Documents / folders ---
+
+
+class FolderIn(BaseModel):
+    name: str
+    parent_id: Optional[int] = None
+    site_id: Optional[int] = None
+
+
+class FolderPatch(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[int] = None
+
+
+class FolderOut(_ORM):
+    id: int
+    workspace_id: int
+    site_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    name: str
+    created_at: datetime.datetime
+
+
+class DocumentPatch(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    # Explicit null moves the document back to the root (exclude_unset
+    # semantics distinguish "omitted" from "set to null").
+    folder_id: Optional[int] = None
+
+
+class DocumentOut(_ORM):
+    id: int
+    workspace_id: int
+    site_id: Optional[int] = None
+    folder_id: Optional[int] = None
+    title: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    filename: str
+    content_type: str
+    size_bytes: int
+    created_by: Optional[int] = None
+    created_by_username: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
 
 
 # Portable export shapes — reference parents by name, no ids.

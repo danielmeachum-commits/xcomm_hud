@@ -17,9 +17,11 @@ from models import User, Workspace
 from routers import (
     auth,
     canvas,
+    documents,
     enclave_sources,
     event_types,
     events,
+    folders,
     gateways,
     ingest,
     personnel,
@@ -105,6 +107,8 @@ app.include_router(canvas.router)
 app.include_router(status_router.router)
 app.include_router(events.router)
 app.include_router(event_types.router)
+app.include_router(folders.router)
+app.include_router(documents.router)
 app.include_router(rules.router)
 app.include_router(ingest.router)
 app.include_router(users.router)

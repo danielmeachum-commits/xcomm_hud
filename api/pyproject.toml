@@ -11,4 +11,6 @@ dependencies = [
     "argon2-cffi",
     "itsdangerous",
     "pydantic-settings",
+    "boto3",
+    "python-multipart",
 ]
