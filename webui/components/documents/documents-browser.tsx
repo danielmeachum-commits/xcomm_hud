@@ -54,10 +54,14 @@ import { ViewTabs } from "@/components/ui/view-tabs"
 import { LocalTime } from "@/components/time-display"
 import { groupByCategory } from "@/lib/event-type-meta"
 import { cn } from "@/lib/utils"
-import type { Document, Folder } from "@/lib/types"
+import type { Document, DocumentVersion, Folder } from "@/lib/types"
 
 function downloadUrl(id: number): string {
   return `/api/documents/${id}/download`
+}
+
+function versionDownloadUrl(docId: number, versionId: number): string {
+  return `/api/documents/${docId}/versions/${versionId}/download`
 }
 
 /** Trigger a browser download without navigating away. */
@@ -154,6 +158,7 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
   } | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [editingDoc, setEditingDoc] = useState<Document | null>(null)
+  const [versionsDoc, setVersionsDoc] = useState<Document | null>(null)
 
   const [moveTarget, setMoveTarget] = useState("")
   const [bulkPending, setBulkPending] = useState(false)
@@ -571,6 +576,11 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
                               Edit
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              onClick={() => setVersionsDoc(d)}
+                            >
+                              Version history
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               onClick={() => deleteDocs([d.id])}
                               className="text-destructive"
                             >
@@ -631,6 +641,11 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
                       <span className="inline-flex items-center gap-2">
                         <Icon className="size-4 shrink-0 text-muted-foreground" />
                         <span className="font-medium">{d.title}</span>
+                        {d.version_count > 1 && d.current_version_no != null && (
+                          <span className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
+                            v{d.current_version_no}
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="px-3 py-2">
@@ -674,6 +689,9 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
                           <DropdownMenuItem onClick={() => setEditingDoc(d)}>
                             Edit
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setVersionsDoc(d)}>
+                            Version history
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => deleteDocs([d.id])}
                             className="text-destructive"
@@ -714,6 +732,13 @@ export function DocumentsBrowser({ folders, documents, siteId }: Props) {
           flatFolders={flatFolders}
           categories={categories}
           onClose={() => setEditingDoc(null)}
+        />
+      )}
+      {versionsDoc && (
+        <VersionHistoryDialog
+          key={versionsDoc.id}
+          doc={versionsDoc}
+          onClose={() => setVersionsDoc(null)}
         />
       )}
     </div>
@@ -1100,6 +1125,248 @@ function DocumentEditDialog({
             {pending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function VersionHistoryDialog({
+  doc,
+  onClose,
+}: {
+  doc: Document
+  onClose: () => void
+}) {
+  const router = useRouter()
+  const [versions, setVersions] = useState<DocumentVersion[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const [file, setFile] = useState<File | null>(null)
+  const [note, setNote] = useState("")
+  const [dragActive, setDragActive] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [restorePending, setRestorePending] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoadError(null)
+    fetch(`/api/be/documents/${doc.id}/versions`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(
+            typeof body.detail === "string"
+              ? body.detail
+              : `Failed to load versions (${res.status})`,
+          )
+        }
+        return res.json() as Promise<DocumentVersion[]>
+      })
+      .then((data) => {
+        if (!cancelled) setVersions(data)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Unknown error")
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [doc.id, refreshKey])
+
+  async function submit() {
+    if (!file) {
+      setError("Choose a file to upload.")
+      return
+    }
+    setPending(true)
+    setError(null)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      if (note.trim()) fd.append("note", note.trim())
+      const res = await fetch(`/api/documents/${doc.id}/versions`, {
+        method: "POST",
+        body: fd,
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}))
+        throw new Error(detail.detail ?? "Upload failed")
+      }
+      setFile(null)
+      setNote("")
+      setRefreshKey((k) => k + 1)
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error")
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function restore(v: DocumentVersion) {
+    if (!confirm(`Restore v${v.version_no} as the current version?`)) return
+    setRestorePending(true)
+    setError(null)
+    try {
+      const res = await fetch(
+        `/api/be/documents/${doc.id}/versions/${v.id}/restore`,
+        { method: "POST" },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(
+          typeof body.detail === "string"
+            ? body.detail
+            : `Restore failed (${res.status})`,
+        )
+      }
+      setRefreshKey((k) => k + 1)
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error")
+    } finally {
+      setRestorePending(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Version history — {doc.title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="doc-version-file"
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragActive(true)
+              }}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragActive(false)
+                const f = e.dataTransfer.files?.[0]
+                if (f) setFile(f)
+              }}
+              className={cn(
+                "flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed p-4 text-center transition-colors",
+                dragActive
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:bg-muted/50",
+              )}
+            >
+              <Upload className="size-5 text-muted-foreground" />
+              {file ? (
+                <>
+                  <span className="text-sm font-medium">{file.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatBytes(file.size)} — click or drop to replace
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-sm font-medium">
+                    Upload new version
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Drop a file here, or click to browse.
+                  </span>
+                </>
+              )}
+              <input
+                id="doc-version-file"
+                type="file"
+                className="sr-only"
+                disabled={pending}
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Note (optional)"
+                aria-label="Version note"
+                disabled={pending}
+              />
+              <Button onClick={submit} disabled={pending || !file}>
+                {pending ? "Uploading…" : "Upload"}
+              </Button>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+
+          {loadError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {loadError}
+            </p>
+          ) : versions === null ? (
+            <p className="text-sm text-muted-foreground">Loading versions…</p>
+          ) : versions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No versions yet.</p>
+          ) : (
+            <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+              {versions.map((v) => (
+                <li
+                  key={v.id}
+                  className="flex items-start justify-between gap-3 rounded-md border p-2"
+                >
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-mono font-medium">
+                        v{v.version_no}
+                      </span>
+                      {v.is_current && (
+                        <Badge variant="outline">Current</Badge>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        {formatBytes(v.size_bytes)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {v.created_by_username ?? "—"} ·{" "}
+                      <LocalTime iso={v.created_at} />
+                    </div>
+                    {v.note && (
+                      <p className="text-xs text-muted-foreground">{v.note}</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <a
+                      href={versionDownloadUrl(doc.id, v.id)}
+                      download=""
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-accent"
+                    >
+                      <Download className="size-3.5" />
+                      Download
+                    </a>
+                    {!v.is_current && (
+                      <button
+                        type="button"
+                        onClick={() => restore(v)}
+                        disabled={restorePending}
+                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )
