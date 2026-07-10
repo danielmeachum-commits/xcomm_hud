@@ -17,14 +17,18 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { Mermaid } from "@/components/docs/mermaid"
+import { rehypeMermaid } from "@/lib/rehype-mermaid"
 import { cn } from "@/lib/utils"
 import type { DocPage } from "@/lib/types"
 
 // Synchronous client-side renderer for the live preview — GitHub-flavored
-// markdown + heading ids. No Shiki (async); the saved page gets highlighting
-// from the server renderer.
+// markdown + heading ids + mermaid diagrams. No Shiki (async); the saved page
+// gets highlighting from the server renderer.
+const previewComponents = { ...defaultMdxComponents, mermaid: Mermaid }
 const { Markdown: PreviewMarkdown } = createMarkdownRenderer({
   remarkPlugins: [remarkGfm, remarkHeading],
+  rehypePlugins: [rehypeMermaid],
 })
 
 function slugify(s: string): string {
@@ -284,7 +288,7 @@ export function DocPageEditor({
         <ResizablePanel defaultSize="50%" minSize="25%">
           <div className="h-full overflow-auto bg-background p-4">
             <DocsBody>
-              <PreviewMarkdown async={false} components={defaultMdxComponents}>
+              <PreviewMarkdown async={false} components={previewComponents}>
                 {preview || "*Nothing to preview yet.*"}
               </PreviewMarkdown>
             </DocsBody>

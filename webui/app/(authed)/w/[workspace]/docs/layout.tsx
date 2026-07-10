@@ -7,5 +7,11 @@ import "./docs.css"
 // shell's sidebar + header). RootProvider supplies fumadocs' TOC/anchor context
 // but its next-themes is disabled so we inherit the app's root ThemeProvider.
 export default function DocsLayout({ children }: { children: ReactNode }) {
-  return <RootProvider theme={{ enabled: false }}>{children}</RootProvider>
+  // search disabled: fumadocs' built-in ⌘K indexes build-time files, but our
+  // content is in the DB — we provide our own search (see docs-nav.tsx).
+  return (
+    <RootProvider theme={{ enabled: false }} search={{ enabled: false }}>
+      {children}
+    </RootProvider>
+  )
 }
