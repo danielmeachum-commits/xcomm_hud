@@ -1192,10 +1192,62 @@ class DocPage(Base):
         ForeignKey("doc_page.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Optional top-level grouping (the section switcher). NULL = the implicit
+    # "General" section.
+    section_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("doc_section.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     slug: Mapped[str] = mapped_column(String(160), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class DocSection(Base):
+    """A top-level grouping for doc pages (the Knowledge Hub section switcher).
+
+    Sections are global (`workspace_id` NULL, shared everywhere) or
+    workspace-scoped, and a workspace section SHADOWS a global one with the
+    same slug — same rule as DocPage. Pages reference a section via
+    `doc_page.section_id`; a NULL section_id means the implicit "General"
+    section that always exists in the UI.
+    """
+
+    __tablename__ = "doc_section"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug", name="uq_doc_section_ws_slug"),
+        Index(
+            "uq_doc_section_global_slug",
+            "slug",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    slug: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Lucide icon name for the section switcher (optional).
+    icon: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True

@@ -1329,6 +1329,7 @@ class DocPageIn(BaseModel):
     description: Optional[str] = None
     content: str = ""
     parent_id: Optional[int] = None
+    section_id: Optional[int] = None
     display_order: int = 0
     # "workspace" (default) creates the page in the current workspace;
     # "global" creates a shared page (workspace_id NULL) visible everywhere.
@@ -1343,6 +1344,7 @@ class DocPagePatch(BaseModel):
     # Explicit null detaches the page to the top level (exclude_unset
     # distinguishes "omitted" from "set to null").
     parent_id: Optional[int] = None
+    section_id: Optional[int] = None
     display_order: Optional[int] = None
 
 
@@ -1350,6 +1352,7 @@ class DocPageOut(_ORM):
     id: int
     workspace_id: Optional[int] = None
     parent_id: Optional[int] = None
+    section_id: Optional[int] = None
     slug: str
     title: str
     description: Optional[str] = None
@@ -1360,6 +1363,36 @@ class DocPageOut(_ORM):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     # Computed in the router: True when workspace_id is NULL (shared page).
+    is_global: bool = False
+
+
+class DocSectionIn(BaseModel):
+    slug: str
+    title: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: int = 0
+    scope: Literal["workspace", "global"] = "workspace"
+
+
+class DocSectionPatch(BaseModel):
+    slug: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: Optional[int] = None
+
+
+class DocSectionOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    slug: str
+    title: str
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    display_order: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     is_global: bool = False
 
 

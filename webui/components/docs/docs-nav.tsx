@@ -1,16 +1,25 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
+  Check,
   ChevronDown,
+  Folder,
   Globe,
   PanelLeft,
   Plus,
   Search,
 } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import type { DocPage } from "@/lib/types"
+import type { DocPage, DocSection } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 import { DocsSearch } from "./docs-search"
 
@@ -19,7 +28,6 @@ interface TreeNode {
   children: TreeNode[]
 }
 
-/** Build a tree from a flat page list. Orphans (parent not in the set) fall to root. */
 function buildTree(pages: DocPage[]): TreeNode[] {
   const byId = new Map<number, DocPage>(pages.map((p) => [p.id, p]))
   const nodes = new Map<number, TreeNode>(
@@ -73,6 +81,12 @@ function NavItems({
               )}
             >
               <span className="truncate">{page.title}</span>
+              {page.is_global && (
+                <Globe
+                  className="ml-auto size-3 shrink-0 opacity-50"
+                  aria-label="Global"
+                />
+              )}
             </Link>
             {children.length > 0 && (
               <NavItems
@@ -89,64 +103,28 @@ function NavItems({
   )
 }
 
-function NavSection({
-  title,
-  icon: Icon,
-  pages,
-  currentSlug,
-  base,
-}: {
-  title: string
-  icon?: typeof Globe
-  pages: DocPage[]
-  currentSlug: string | null
-  base: string
-}) {
-  const [open, setOpen] = useState(true)
-  if (pages.length === 0) return null
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-      >
-        {Icon && <Icon className="size-3" />}
-        <span>{title}</span>
-        <ChevronDown
-          className={cn(
-            "ml-auto size-3.5 transition-transform",
-            !open && "-rotate-90",
-          )}
-        />
-      </button>
-      {open && (
-        <NavItems
-          nodes={buildTree(pages)}
-          currentSlug={currentSlug}
-          base={base}
-          depth={0}
-        />
-      )}
-    </div>
-  )
-}
+// The "General" pseudo-section (pages with no section_id).
+const GENERAL = { id: null as number | null, title: "General", description: null as string | null, is_global: false }
 
 export function DocsNav({
   pages,
+  sections,
   currentSlug,
+  currentSectionId,
   canEdit,
 }: {
   pages: DocPage[]
+  sections: DocSection[]
   currentSlug: string | null
+  currentSectionId: number | null
   canEdit: boolean
 }) {
   const { w } = useWorkspace()
+  const router = useRouter()
   const base = w("/docs")
   const [collapsed, setCollapsed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
 
-  // ⌘K / Ctrl+K opens search (fumadocs' built-in ⌘K is disabled in the layout).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -158,10 +136,42 @@ export function DocsNav({
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const globalPages = pages.filter((p) => p.is_global)
-  const workspacePages = pages.filter((p) => !p.is_global)
+  // First page (by order) in each section — used to navigate on section switch.
+  const firstPageBySection = useMemo(() => {
+    const m = new Map<number | null, DocPage>()
+    for (const p of [...pages].sort(
+      (a, b) => a.display_order - b.display_order || a.title.localeCompare(b.title),
+    )) {
+      const key = p.section_id ?? null
+      if (!m.has(key)) m.set(key, p)
+    }
+    return m
+  }, [pages])
 
-  // Search dialog is always mounted so ⌘K works even when the rail is collapsed.
+  // Sections that actually contain pages, plus General if there are loose pages.
+  const switcherSections = useMemo(() => {
+    const list: typeof GENERAL[] = []
+    if (firstPageBySection.has(null)) list.push(GENERAL)
+    for (const s of [...sections].sort(
+      (a, b) => a.display_order - b.display_order || a.title.localeCompare(b.title),
+    )) {
+      if (firstPageBySection.has(s.id)) list.push(s)
+    }
+    return list
+  }, [sections, firstPageBySection])
+
+  const current =
+    switcherSections.find((s) => s.id === currentSectionId) ??
+    switcherSections[0] ??
+    GENERAL
+
+  const sectionPages = pages.filter((p) => (p.section_id ?? null) === current.id)
+
+  const goToSection = (id: number | null) => {
+    const first = firstPageBySection.get(id)
+    if (first) router.push(`${base}/${first.slug}`)
+  }
+
   const search = (
     <DocsSearch
       open={searchOpen}
@@ -196,7 +206,7 @@ export function DocsNav({
   }
 
   return (
-    <nav className="flex w-56 shrink-0 flex-col gap-2">
+    <nav className="flex w-60 shrink-0 flex-col gap-2">
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-semibold">Knowledge Hub</span>
         <div className="flex items-center gap-0.5">
@@ -220,6 +230,56 @@ export function DocsNav({
         </div>
       </div>
 
+      {/* Section switcher */}
+      {switcherSections.length > 1 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md border border-border bg-input/30 px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted"
+              />
+            }
+          >
+            {current.is_global ? (
+              <Globe className="size-4 shrink-0 opacity-70" />
+            ) : (
+              <Folder className="size-4 shrink-0 opacity-70" />
+            )}
+            <span className="truncate font-medium">{current.title}</span>
+            <ChevronDown className="ml-auto size-4 shrink-0 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            {switcherSections.map((s) => (
+              <DropdownMenuItem
+                key={s.id ?? "general"}
+                onClick={() => goToSection(s.id)}
+                className="flex items-start gap-2"
+              >
+                {s.is_global ? (
+                  <Globe className="mt-0.5 size-4 shrink-0 opacity-70" />
+                ) : (
+                  <Folder className="mt-0.5 size-4 shrink-0 opacity-70" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium">{s.title}</span>
+                    {s.id === current.id && (
+                      <Check className="size-3.5 text-primary" />
+                    )}
+                  </div>
+                  {s.description && (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {s.description}
+                    </p>
+                  )}
+                </div>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
       <button
         type="button"
         onClick={() => setSearchOpen(true)}
@@ -233,24 +293,15 @@ export function DocsNav({
       </button>
       {search}
 
-      {pages.length === 0 ? (
+      {sectionPages.length === 0 ? (
         <p className="px-2 text-xs text-muted-foreground">No pages yet.</p>
       ) : (
-        <div className="flex flex-col gap-2">
-          <NavSection
-            title="This workspace"
-            pages={workspacePages}
-            currentSlug={currentSlug}
-            base={base}
-          />
-          <NavSection
-            title="Global"
-            icon={Globe}
-            pages={globalPages}
-            currentSlug={currentSlug}
-            base={base}
-          />
-        </div>
+        <NavItems
+          nodes={buildTree(sectionPages)}
+          currentSlug={currentSlug}
+          base={base}
+          depth={0}
+        />
       )}
     </nav>
   )

@@ -6,18 +6,20 @@ import { Badge } from "@/components/ui/badge"
 import { DocsNav } from "@/components/docs/docs-nav"
 import { DocsToc } from "@/components/docs/docs-toc"
 import { DocMarkdown, getDocToc } from "@/lib/docs-render"
-import type { DocPage } from "@/lib/types"
+import type { DocPage, DocSection } from "@/lib/types"
 
 /** Shared in-shell Knowledge Hub read view: docs nav on the left, the rendered
  * page in the middle, an "On this page" rail on the right — all inside a single
  * self-contained floating card. `page` is null when there are no docs yet. */
 export function DocsPageView({
   pages,
+  sections,
   page,
   canEdit,
   basePath,
 }: {
   pages: DocPage[]
+  sections: DocSection[]
   page: DocPage | null
   canEdit: boolean
   basePath: string
@@ -35,7 +37,9 @@ export function DocsPageView({
       <div className="flex gap-6 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <DocsNav
           pages={pages}
+          sections={sections}
           currentSlug={page?.slug ?? null}
+          currentSectionId={page?.section_id ?? null}
           canEdit={canEdit}
         />
         {page ? (

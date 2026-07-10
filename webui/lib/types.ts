@@ -664,6 +664,7 @@ export interface DocPage {
   id: number
   workspace_id: number | null
   parent_id: number | null
+  section_id: number | null
   slug: string
   title: string
   description: string | null
@@ -671,6 +672,19 @@ export interface DocPage {
   display_order: number
   created_by: number | null
   created_by_username: string | null
+  created_at: string
+  updated_at: string
+  is_global: boolean
+}
+
+export interface DocSection {
+  id: number
+  workspace_id: number | null
+  slug: string
+  title: string
+  description: string | null
+  icon: string | null
+  display_order: number
   created_at: string
   updated_at: string
   is_global: boolean
