@@ -1323,6 +1323,46 @@ class DocumentVersionOut(_ORM):
     is_current: bool = False
 
 
+class DocPageIn(BaseModel):
+    slug: str
+    title: str
+    description: Optional[str] = None
+    content: str = ""
+    parent_id: Optional[int] = None
+    display_order: int = 0
+    # "workspace" (default) creates the page in the current workspace;
+    # "global" creates a shared page (workspace_id NULL) visible everywhere.
+    scope: Literal["workspace", "global"] = "workspace"
+
+
+class DocPagePatch(BaseModel):
+    slug: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    # Explicit null detaches the page to the top level (exclude_unset
+    # distinguishes "omitted" from "set to null").
+    parent_id: Optional[int] = None
+    display_order: Optional[int] = None
+
+
+class DocPageOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    slug: str
+    title: str
+    description: Optional[str] = None
+    content: str
+    display_order: int
+    created_by: Optional[int] = None
+    created_by_username: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    # Computed in the router: True when workspace_id is NULL (shared page).
+    is_global: bool = False
+
+
 # Portable export shapes — reference parents by name, no ids.
 
 

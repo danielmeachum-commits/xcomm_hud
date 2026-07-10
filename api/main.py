@@ -17,6 +17,7 @@ from models import User, Workspace
 from routers import (
     auth,
     canvas,
+    doc_pages,
     documents,
     enclave_sources,
     event_types,
@@ -109,6 +110,7 @@ app.include_router(events.router)
 app.include_router(event_types.router)
 app.include_router(folders.router)
 app.include_router(documents.router)
+app.include_router(doc_pages.router)
 app.include_router(rules.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
