@@ -4,21 +4,22 @@ import { DocsBody, DocsDescription, DocsTitle } from "fumadocs-ui/page"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { Badge } from "@/components/ui/badge"
 import { DocsNav } from "@/components/docs/docs-nav"
+import { DocsToc } from "@/components/docs/docs-toc"
 import { DocMarkdown, getDocToc } from "@/lib/docs-render"
-import type { DocPage } from "@/lib/types"
+import type { DocPage, DocSection } from "@/lib/types"
 
-/** Shared in-shell docs read view: docs nav on the left, the rendered page in
- * the middle, an "On this page" rail on the right. `page` is null when the
- * workspace has no docs yet. We assemble the layout ourselves (rather than
- * fumadocs' <DocsPage>, which requires a <DocsLayout> context) so docs sit
- * inside the app shell. DocsBody/DocsTitle/DocsDescription are context-free. */
+/** Shared in-shell Knowledge Hub read view: docs nav on the left, the rendered
+ * page in the middle, an "On this page" rail on the right — all inside a single
+ * self-contained floating card. `page` is null when there are no docs yet. */
 export function DocsPageView({
   pages,
+  sections,
   page,
   canEdit,
   basePath,
 }: {
   pages: DocPage[]
+  sections: DocSection[]
   page: DocPage | null
   canEdit: boolean
   basePath: string
@@ -29,14 +30,16 @@ export function DocsPageView({
     <div className="flex flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
         items={[
-          { label: "Documentation" },
+          { label: "Knowledge Hub" },
           ...(page ? [{ label: page.title }] : []),
         ]}
       />
-      <div className="flex gap-6">
+      <div className="flex gap-6 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <DocsNav
           pages={pages}
+          sections={sections}
           currentSlug={page?.slug ?? null}
+          currentSectionId={page?.section_id ?? null}
           canEdit={canEdit}
         />
         {page ? (
@@ -64,28 +67,7 @@ export function DocsPageView({
                 <DocMarkdown content={page.content} />
               </DocsBody>
             </article>
-            {toc.length > 0 && (
-              <aside className="hidden w-56 shrink-0 xl:block">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">
-                  On this page
-                </p>
-                <ul className="space-y-1 text-sm">
-                  {toc.map((item) => (
-                    <li
-                      key={item.url}
-                      style={{ paddingLeft: Math.max(0, item.depth - 1) * 12 }}
-                    >
-                      <a
-                        href={item.url}
-                        className="block truncate text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        {item.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </aside>
-            )}
+            <DocsToc items={toc} />
           </>
         ) : (
           <div className="flex min-h-[300px] flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border text-center">

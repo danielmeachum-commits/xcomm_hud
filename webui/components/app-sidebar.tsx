@@ -103,6 +103,7 @@ export function AppSidebar({ user, sites }: Props) {
   const onSitesRoute =
     pathname === sitesHref || pathname.startsWith(sitesHref + "/")
   const [sitesOpen, setSitesOpen] = useState(onSitesRoute)
+  const [adminOpen, setAdminOpen] = useState(false)
 
   useEffect(() => {
     if (onSitesRoute) setSitesOpen(true)
@@ -270,29 +271,47 @@ export function AppSidebar({ user, sites }: Props) {
 
         {isAdmin && (
           <SidebarGroup>
-            <SidebarGroupLabel>Admin</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {[
-                  ...WORKSPACE_ADMIN_ITEMS.map((item) => ({
-                    ...item,
-                    href: w(item.path),
-                  })),
-                  ...GLOBAL_ADMIN_ITEMS,
-                ].map((item) => (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      isActive={isActive(item.href)}
-                      tooltip={item.label}
-                      render={<Link href={item.href} />}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
+            <SidebarGroupLabel
+              render={
+                <button
+                  type="button"
+                  onClick={() => setAdminOpen((o) => !o)}
+                  className="flex w-full items-center justify-between"
+                />
+              }
+            >
+              <span>Admin</span>
+              <ChevronRight
+                className={cn(
+                  "size-3.5 transition-transform",
+                  adminOpen && "rotate-90",
+                )}
+              />
+            </SidebarGroupLabel>
+            {adminOpen && (
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {[
+                    ...WORKSPACE_ADMIN_ITEMS.map((item) => ({
+                      ...item,
+                      href: w(item.path),
+                    })),
+                    ...GLOBAL_ADMIN_ITEMS,
+                  ].map((item) => (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        isActive={isActive(item.href)}
+                        tooltip={item.label}
+                        render={<Link href={item.href} />}
+                      >
+                        <item.icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            )}
           </SidebarGroup>
         )}
       </SidebarContent>
@@ -302,12 +321,12 @@ export function AppSidebar({ user, sites }: Props) {
           {/* Docs render inside the app shell under the current workspace. */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              tooltip="Documentation"
+              tooltip="Knowledge Hub"
               isActive={isActive(w("/docs"))}
               render={<Link href={w("/docs")} />}
             >
               <BookOpen data-icon="inline-start" />
-              <span>Documentation</span>
+              <span>Knowledge Hub</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

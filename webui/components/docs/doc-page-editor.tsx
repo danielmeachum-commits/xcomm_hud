@@ -17,14 +17,18 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { Mermaid } from "@/components/docs/mermaid"
+import { rehypeMermaid } from "@/lib/rehype-mermaid"
 import { cn } from "@/lib/utils"
-import type { DocPage } from "@/lib/types"
+import type { DocPage, DocSection } from "@/lib/types"
 
 // Synchronous client-side renderer for the live preview — GitHub-flavored
-// markdown + heading ids. No Shiki (async); the saved page gets highlighting
-// from the server renderer.
+// markdown + heading ids + mermaid diagrams. No Shiki (async); the saved page
+// gets highlighting from the server renderer.
+const previewComponents = { ...defaultMdxComponents, mermaid: Mermaid }
 const { Markdown: PreviewMarkdown } = createMarkdownRenderer({
   remarkPlugins: [remarkGfm, remarkHeading],
+  rehypePlugins: [rehypeMermaid],
 })
 
 function slugify(s: string): string {
@@ -40,12 +44,14 @@ export function DocPageEditor({
   mode,
   page,
   allPages,
+  sections,
   basePath,
   canDelete,
 }: {
   mode: "create" | "edit"
   page?: DocPage
   allPages: DocPage[]
+  sections: DocSection[]
   basePath: string
   canDelete: boolean
 }) {
@@ -58,6 +64,12 @@ export function DocPageEditor({
   const [parentId, setParentId] = useState<string>(
     page?.parent_id != null ? String(page.parent_id) : "",
   )
+  const [sectionId, setSectionId] = useState<string>(
+    page?.section_id != null ? String(page.section_id) : "",
+  )
+  const [localSections, setLocalSections] = useState<DocSection[]>(sections)
+  const [newSection, setNewSection] = useState("")
+  const [creatingSection, setCreatingSection] = useState(false)
   const [displayOrder, setDisplayOrder] = useState<string>(
     String(page?.display_order ?? 0),
   )
@@ -66,6 +78,33 @@ export function DocPageEditor({
   )
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Inline-create a section (matches the page's current scope) and select it.
+  async function createSection() {
+    const name = newSection.trim()
+    if (!name) return
+    setCreatingSection(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/be/doc-sections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: name, slug: slugify(name), scope }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.detail ?? "Failed to create section")
+      }
+      const created: DocSection = await res.json()
+      setLocalSections((s) => [...s, created])
+      setSectionId(String(created.id))
+      setNewSection("")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create section")
+    } finally {
+      setCreatingSection(false)
+    }
+  }
 
   // Auto-derive the slug from the title until the author edits it by hand.
   useEffect(() => {
@@ -94,6 +133,7 @@ export function DocPageEditor({
         description: description.trim() || null,
         content,
         parent_id: parentId === "" ? null : Number(parentId),
+        section_id: sectionId === "" ? null : Number(sectionId),
         display_order: Number(displayOrder) || 0,
       }
       if (mode === "create") body.scope = scope
@@ -209,6 +249,46 @@ export function DocPageEditor({
           </select>
         </div>
         <div className="flex flex-col gap-1.5">
+          <Label htmlFor="doc-section">Section</Label>
+          <select
+            id="doc-section"
+            value={sectionId}
+            onChange={(e) => setSectionId(e.target.value)}
+            className="h-9 rounded-md border border-input bg-input/30 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <option value="">General</option>
+            {localSections.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.title}
+                {s.is_global ? " (global)" : ""}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-1">
+            <Input
+              value={newSection}
+              onChange={(e) => setNewSection(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  createSection()
+                }
+              }}
+              placeholder="New section…"
+              className="h-8 text-xs"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={createSection}
+              disabled={creatingSection || !newSection.trim()}
+              className="h-8 px-2 text-xs"
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="doc-order">Order</Label>
           <Input
             id="doc-order"
@@ -284,7 +364,7 @@ export function DocPageEditor({
         <ResizablePanel defaultSize="50%" minSize="25%">
           <div className="h-full overflow-auto bg-background p-4">
             <DocsBody>
-              <PreviewMarkdown async={false} components={defaultMdxComponents}>
+              <PreviewMarkdown async={false} components={previewComponents}>
                 {preview || "*Nothing to preview yet.*"}
               </PreviewMarkdown>
             </DocsBody>

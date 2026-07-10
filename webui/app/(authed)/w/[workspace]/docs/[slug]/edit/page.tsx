@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import { DocPageEditor } from "@/components/docs/doc-page-editor"
-import type { DocPage, Me } from "@/lib/types"
+import type { DocPage, DocSection, Me } from "@/lib/types"
 
 interface PageProps {
   params: Promise<{ workspace: string; slug: string }>
@@ -14,7 +14,10 @@ export default async function EditDocPage({ params }: PageProps) {
   if (me.role !== "operator" && me.role !== "admin") {
     redirect(`/w/${workspace}/docs/${slug}`)
   }
-  const pages = await apiGet<DocPage[]>("/doc-pages").catch(() => [] as DocPage[])
+  const [pages, sections] = await Promise.all([
+    apiGet<DocPage[]>("/doc-pages").catch(() => [] as DocPage[]),
+    apiGet<DocSection[]>("/doc-sections").catch(() => [] as DocSection[]),
+  ])
   const page = pages.find((p) => p.slug === slug)
   if (!page) notFound()
 
@@ -23,6 +26,7 @@ export default async function EditDocPage({ params }: PageProps) {
       mode="edit"
       page={page}
       allPages={pages}
+      sections={sections}
       basePath={`/w/${workspace}/docs`}
       canDelete={me.role === "admin"}
     />

@@ -161,6 +161,7 @@ def create_doc_page(
     page = DocPage(
         workspace_id=workspace_id,
         parent_id=body.parent_id,
+        section_id=body.section_id,
         slug=body.slug,
         title=body.title,
         description=body.description,
