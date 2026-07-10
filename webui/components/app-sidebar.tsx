@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import {
   Bell,
+  BookOpen,
   ChevronRight,
   ChevronUp,
   FileText,
@@ -298,6 +299,17 @@ export function AppSidebar({ user, sites }: Props) {
 
       <SidebarFooter>
         <SidebarMenu>
+          {/* Docs live at the top-level /docs route (not workspace-scoped). */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Documentation"
+              isActive={isActive("/docs")}
+              render={<Link href="/docs" />}
+            >
+              <BookOpen data-icon="inline-start" />
+              <span>Documentation</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
