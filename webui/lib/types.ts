@@ -660,6 +660,22 @@ export interface EnclaveSource {
   notes: string | null
 }
 
+export interface DocPage {
+  id: number
+  workspace_id: number | null
+  parent_id: number | null
+  slug: string
+  title: string
+  description: string | null
+  content: string
+  display_order: number
+  created_by: number | null
+  created_by_username: string | null
+  created_at: string
+  updated_at: string
+  is_global: boolean
+}
+
 export interface ApiError {
   detail: string
 }

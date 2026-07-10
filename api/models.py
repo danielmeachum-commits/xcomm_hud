@@ -11,11 +11,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -65,6 +67,7 @@ SUBJECT_KINDS = (
     "work_center",
     "workspace",
     "document",
+    "doc_page",
 )
 EVENT_TYPES = ("validation", "general", "personnel")
 # Every Event row is either a high-volume audit "log" or a briefing-worthy
@@ -1149,4 +1152,57 @@ class TeamWorkCenterLead(Base):
         BigInteger,
         ForeignKey("personnel.id", ondelete="CASCADE"),
         nullable=False,
+    )
+
+
+class DocPage(Base):
+    """A documentation page authored in-app; markdown lives in `content`.
+
+    Pages are either global (`workspace_id` NULL — the shared HUD manual,
+    visible in every workspace) or workspace-scoped. A workspace page SHADOWS
+    a global page with the same slug, mirroring the EventTypeDef / catalog
+    pattern (see action_registry.lookup_catalog_type). The nav hierarchy lives
+    in `parent_id` + `display_order`; the API returns a flat, merged list and
+    the UI assembles the tree. URLs are flat (`/docs/<slug>`), so slugs are
+    unique per scope.
+    """
+
+    __tablename__ = "doc_page"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "slug", name="uq_doc_page_ws_slug"),
+        # Postgres treats NULLs as distinct, so the constraint above does not
+        # stop duplicate GLOBAL slugs — enforce those with a partial index.
+        Index(
+            "uq_doc_page_global_slug",
+            "slug",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("doc_page.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    slug: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )

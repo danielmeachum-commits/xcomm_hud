@@ -1,0 +1,13 @@
+/*
+ * Fumadocs styling, scoped to the /w/<workspace>/docs subtree.
+ *
+ * Imported only by the docs layout, so Next bundles fumadocs' Tailwind preset
+ * exclusively on docs routes — the rest of the app is untouched. shadcn.css maps
+ * fumadocs' --color-fd-* tokens onto the app's own shadcn tokens (globals.css),
+ * so docs inherit the app's light/dark theme.
+ */
+@import "tailwindcss";
+@import "fumadocs-ui/css/shadcn.css";
+@import "fumadocs-ui/css/preset.css";
+
+@source "../../../../../node_modules/fumadocs-ui/dist/**/*.js";

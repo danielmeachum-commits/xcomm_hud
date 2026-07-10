@@ -299,12 +299,12 @@ export function AppSidebar({ user, sites }: Props) {
 
       <SidebarFooter>
         <SidebarMenu>
-          {/* Docs live at the top-level /docs route (not workspace-scoped). */}
+          {/* Docs render inside the app shell under the current workspace. */}
           <SidebarMenuItem>
             <SidebarMenuButton
               tooltip="Documentation"
-              isActive={isActive("/docs")}
-              render={<Link href="/docs" />}
+              isActive={isActive(w("/docs"))}
+              render={<Link href={w("/docs")} />}
             >
               <BookOpen data-icon="inline-start" />
               <span>Documentation</span>
