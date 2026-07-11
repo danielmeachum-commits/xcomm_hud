@@ -277,7 +277,7 @@ export function DocPageEditor({
   )
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
       <div className="flex items-center justify-between gap-4">
         <Input
           value={title}
