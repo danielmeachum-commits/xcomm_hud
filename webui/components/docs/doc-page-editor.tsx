@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Globe, Save, Trash2 } from "lucide-react"
+import { Save, Trash2 } from "lucide-react"
 import { createMarkdownRenderer } from "fumadocs-core/content/md"
 import { remarkHeading } from "fumadocs-core/mdx-plugins/remark-heading"
 import defaultMdxComponents from "fumadocs-ui/mdx"
@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/resizable"
 import { Mermaid } from "@/components/docs/mermaid"
 import { rehypeMermaid } from "@/lib/rehype-mermaid"
-import { cn } from "@/lib/utils"
 import type { DocPage, DocSection } from "@/lib/types"
 
 // Synchronous client-side renderer for the live preview — GitHub-flavored
@@ -73,13 +72,10 @@ export function DocPageEditor({
   const [displayOrder, setDisplayOrder] = useState<string>(
     String(page?.display_order ?? 0),
   )
-  const [scope, setScope] = useState<"workspace" | "global">(
-    page?.is_global ? "global" : "workspace",
-  )
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Inline-create a section (matches the page's current scope) and select it.
+  // Inline-create a section and select it.
   async function createSection() {
     const name = newSection.trim()
     if (!name) return
@@ -89,7 +85,7 @@ export function DocPageEditor({
       const res = await fetch("/api/be/doc-sections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: name, slug: slugify(name), scope }),
+        body: JSON.stringify({ title: name, slug: slugify(name) }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
@@ -136,7 +132,6 @@ export function DocPageEditor({
         section_id: sectionId === "" ? null : Number(sectionId),
         display_order: Number(displayOrder) || 0,
       }
-      if (mode === "create") body.scope = scope
       const url = mode === "edit" ? `/api/be/doc-pages/${page!.id}` : "/api/be/doc-pages"
       const res = await fetch(url, {
         method: mode === "edit" ? "PATCH" : "POST",
@@ -260,7 +255,6 @@ export function DocPageEditor({
             {localSections.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.title}
-                {s.is_global ? " (global)" : ""}
               </option>
             ))}
           </select>
@@ -305,44 +299,6 @@ export function DocPageEditor({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Short summary (optional)"
           />
-        </div>
-        <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <Label>Scope</Label>
-          {mode === "edit" ? (
-            <p className="flex h-9 items-center text-sm text-muted-foreground">
-              {page?.is_global ? (
-                <>
-                  <Globe className="mr-1.5 size-3.5" /> Global — shared across all
-                  workspaces
-                </>
-              ) : (
-                "This workspace"
-              )}
-            </p>
-          ) : (
-            <div className="inline-flex rounded-md border border-input p-0.5">
-              {(["workspace", "global"] as const).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setScope(s)}
-                  className={cn(
-                    "rounded px-3 py-1 text-sm transition-colors",
-                    scope === s
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {s === "workspace" ? "This workspace" : "Global"}
-                </button>
-              ))}
-            </div>
-          )}
-          {mode === "create" && scope === "global" && (
-            <p className="text-xs text-muted-foreground">
-              Global pages appear in every workspace.
-            </p>
-          )}
         </div>
       </div>
 

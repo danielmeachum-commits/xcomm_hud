@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { FileText, Globe } from "lucide-react"
+import { FileText } from "lucide-react"
 import {
   Command,
   CommandDialog,
@@ -68,11 +68,7 @@ export function DocsSearch({
                   onSelect={() => go(p.slug)}
                   className="items-start"
                 >
-                  {p.is_global ? (
-                    <Globe className="mt-0.5 size-4 shrink-0 opacity-70" />
-                  ) : (
-                    <FileText className="mt-0.5 size-4 shrink-0 opacity-70" />
-                  )}
+                  <FileText className="mt-0.5 size-4 shrink-0 opacity-70" />
                   <div className="flex min-w-0 flex-col">
                     <span className="font-medium">{p.title}</span>
                     {snippet ? (

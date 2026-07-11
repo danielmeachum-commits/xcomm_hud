@@ -11,13 +11,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
-    Index,
     Integer,
     SmallInteger,
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -1158,35 +1156,18 @@ class TeamWorkCenterLead(Base):
 class DocPage(Base):
     """A documentation page authored in-app; markdown lives in `content`.
 
-    Pages are either global (`workspace_id` NULL — the shared HUD manual,
-    visible in every workspace) or workspace-scoped. A workspace page SHADOWS
-    a global page with the same slug, mirroring the EventTypeDef / catalog
-    pattern (see action_registry.lookup_catalog_type). The nav hierarchy lives
-    in `parent_id` + `display_order`; the API returns a flat, merged list and
-    the UI assembles the tree. URLs are flat (`/docs/<slug>`), so slugs are
-    unique per scope.
+    The Knowledge Hub is global — every page is shared across all workspaces.
+    The nav hierarchy lives in `parent_id` + `display_order`; the API returns a
+    flat list and the UI assembles the tree. URLs are flat (`/docs/<slug>`), so
+    slugs are globally unique.
     """
 
     __tablename__ = "doc_page"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "slug", name="uq_doc_page_ws_slug"),
-        # Postgres treats NULLs as distinct, so the constraint above does not
-        # stop duplicate GLOBAL slugs — enforce those with a partial index.
-        Index(
-            "uq_doc_page_global_slug",
-            "slug",
-            unique=True,
-            postgresql_where=text("workspace_id IS NULL"),
-        ),
+        UniqueConstraint("slug", name="uq_doc_page_slug"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
     parent_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("doc_page.id", ondelete="SET NULL"),
@@ -1218,31 +1199,18 @@ class DocPage(Base):
 class DocSection(Base):
     """A top-level grouping for doc pages (the Knowledge Hub section switcher).
 
-    Sections are global (`workspace_id` NULL, shared everywhere) or
-    workspace-scoped, and a workspace section SHADOWS a global one with the
-    same slug — same rule as DocPage. Pages reference a section via
-    `doc_page.section_id`; a NULL section_id means the implicit "General"
-    section that always exists in the UI.
+    Sections are global — shared across all workspaces, like the pages they
+    hold. Pages reference a section via `doc_page.section_id`; a NULL
+    section_id means the implicit "General" section that always exists in the
+    UI.
     """
 
     __tablename__ = "doc_section"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "slug", name="uq_doc_section_ws_slug"),
-        Index(
-            "uq_doc_section_global_slug",
-            "slug",
-            unique=True,
-            postgresql_where=text("workspace_id IS NULL"),
-        ),
+        UniqueConstraint("slug", name="uq_doc_section_slug"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
     slug: Mapped[str] = mapped_column(String(160), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

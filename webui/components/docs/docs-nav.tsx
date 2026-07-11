@@ -3,15 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import {
-  Check,
-  ChevronDown,
-  Folder,
-  Globe,
-  PanelLeft,
-  Plus,
-  Search,
-} from "lucide-react"
+import { Check, ChevronDown, PanelLeft, Plus, Search } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +14,7 @@ import { cn } from "@/lib/utils"
 import type { DocPage, DocSection } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 import { DocsSearch } from "./docs-search"
+import { SectionIcon } from "./section-icon"
 
 interface TreeNode {
   page: DocPage
@@ -81,12 +74,6 @@ function NavItems({
               )}
             >
               <span className="truncate">{page.title}</span>
-              {page.is_global && (
-                <Globe
-                  className="ml-auto size-3 shrink-0 opacity-50"
-                  aria-label="Global"
-                />
-              )}
             </Link>
             {children.length > 0 && (
               <NavItems
@@ -104,7 +91,12 @@ function NavItems({
 }
 
 // The "General" pseudo-section (pages with no section_id).
-const GENERAL = { id: null as number | null, title: "General", description: null as string | null, is_global: false }
+const GENERAL = {
+  id: null as number | null,
+  title: "General",
+  description: null as string | null,
+  icon: null as string | null,
+}
 
 export function DocsNav({
   pages,
@@ -241,11 +233,10 @@ export function DocsNav({
               />
             }
           >
-            {current.is_global ? (
-              <Globe className="size-4 shrink-0 opacity-70" />
-            ) : (
-              <Folder className="size-4 shrink-0 opacity-70" />
-            )}
+            <SectionIcon
+              name={current.icon}
+              className="size-4 shrink-0 opacity-70"
+            />
             <span className="truncate font-medium">{current.title}</span>
             <ChevronDown className="ml-auto size-4 shrink-0 opacity-60" />
           </DropdownMenuTrigger>
@@ -256,11 +247,10 @@ export function DocsNav({
                 onClick={() => goToSection(s.id)}
                 className="flex items-start gap-2"
               >
-                {s.is_global ? (
-                  <Globe className="mt-0.5 size-4 shrink-0 opacity-70" />
-                ) : (
-                  <Folder className="mt-0.5 size-4 shrink-0 opacity-70" />
-                )}
+                <SectionIcon
+                  name={s.icon}
+                  className="mt-0.5 size-4 shrink-0 opacity-70"
+                />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium">{s.title}</span>

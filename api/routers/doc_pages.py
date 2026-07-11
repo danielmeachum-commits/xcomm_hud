@@ -1,10 +1,8 @@
 """Documentation pages — markdown authored in-app, stored in Postgres.
 
-Pages are global (`workspace_id` NULL, shared everywhere) or workspace-scoped;
-a workspace page SHADOWS a global with the same slug, mirroring the event-type
-catalog (see action_registry.lookup_catalog_type). The tree shape lives in
-`parent_id` + `display_order` — the list endpoint returns a flat, merged,
-shadow-resolved set and the UI assembles the hierarchy.
+The Knowledge Hub is global: every page is shared across all workspaces. The
+tree shape lives in `parent_id` + `display_order` — the list endpoint returns a
+flat set and the UI assembles the hierarchy.
 """
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,7 +30,6 @@ router = APIRouter(prefix="/doc-pages", tags=["doc_pages"])
 def _out(page: DocPage, username: Optional[str]) -> DocPageOut:
     out = DocPageOut.model_validate(page)
     out.created_by_username = username
-    out.is_global = page.workspace_id is None
     return out
 
 
@@ -62,70 +58,47 @@ def _record_doc_page_event(
         log.warning("Failed to record %s for doc_page %s", action_slug, page.id)
 
 
-def _load_doc_page(db: Session, page_id: int, workspace: Workspace) -> DocPage:
-    """404 unless the page is global or belongs to the current workspace."""
+def _load_doc_page(db: Session, page_id: int) -> DocPage:
     page = db.get(DocPage, page_id)
-    if page is None or (
-        page.workspace_id is not None and page.workspace_id != workspace.id
-    ):
+    if page is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Doc page not found")
     return page
 
 
-def _validate_parent(
-    db: Session, parent_id: int, workspace: Workspace, self_id: Optional[int]
-) -> None:
+def _validate_parent(db: Session, parent_id: int, self_id: Optional[int]) -> None:
     if self_id is not None and parent_id == self_id:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "A page cannot be its own parent"
         )
-    _load_doc_page(db, parent_id, workspace)
+    _load_doc_page(db, parent_id)
 
 
 @router.get("", response_model=list[DocPageOut])
 def list_doc_pages(
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
     rows = (
         db.query(DocPage, User.username)
         .outerjoin(User, DocPage.created_by == User.id)
-        .filter(
-            or_(
-                DocPage.workspace_id == workspace.id,
-                DocPage.workspace_id.is_(None),
-            )
-        )
         .order_by(DocPage.display_order, DocPage.title)
         .all()
     )
-    # Shadow-resolve: a workspace page wins over a global with the same slug.
-    by_slug: dict[str, tuple[DocPage, Optional[str]]] = {}
-    for page, username in rows:
-        existing = by_slug.get(page.slug)
-        if existing is None or (
-            existing[0].workspace_id is None and page.workspace_id is not None
-        ):
-            by_slug[page.slug] = (page, username)
-    return [_out(page, username) for page, username in by_slug.values()]
+    return [_out(page, username) for page, username in rows]
 
 
 @router.get("/by-slug/{slug}", response_model=DocPageOut)
 def get_doc_page_by_slug(
     slug: str,
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    q = (
+    row = (
         db.query(DocPage, User.username)
         .outerjoin(User, DocPage.created_by == User.id)
         .filter(DocPage.slug == slug)
+        .first()
     )
-    row = q.filter(DocPage.workspace_id == workspace.id).first()
-    if row is None:
-        row = q.filter(DocPage.workspace_id.is_(None)).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Doc page not found")
     return _out(row[0], row[1])
@@ -135,10 +108,9 @@ def get_doc_page_by_slug(
 def get_doc_page(
     page_id: int,
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    page = _load_doc_page(db, page_id, workspace)
+    page = _load_doc_page(db, page_id)
     username = (
         db.query(User.username).filter(User.id == page.created_by).scalar()
         if page.created_by is not None
@@ -155,11 +127,9 @@ def create_doc_page(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    workspace_id = None if body.scope == "global" else workspace.id
     if body.parent_id is not None:
-        _validate_parent(db, body.parent_id, workspace, None)
+        _validate_parent(db, body.parent_id, None)
     page = DocPage(
-        workspace_id=workspace_id,
         parent_id=body.parent_id,
         section_id=body.section_id,
         slug=body.slug,
@@ -197,10 +167,10 @@ def patch_doc_page(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    page = _load_doc_page(db, page_id, workspace)
+    page = _load_doc_page(db, page_id)
     updates = body.model_dump(exclude_unset=True)
     if updates.get("parent_id") is not None:
-        _validate_parent(db, updates["parent_id"], workspace, page.id)
+        _validate_parent(db, updates["parent_id"], page.id)
     for k, v in updates.items():
         setattr(page, k, v)
     try:
@@ -234,7 +204,7 @@ def delete_doc_page(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("admin")),
 ):
-    page = _load_doc_page(db, page_id, workspace)
+    page = _load_doc_page(db, page_id)
     _record_doc_page_event(
         db,
         action_slug="doc_page.deleted",

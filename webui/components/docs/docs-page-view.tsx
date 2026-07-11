@@ -2,7 +2,6 @@ import Link from "next/link"
 import { Pencil, Plus } from "lucide-react"
 import { DocsBody, DocsDescription, DocsTitle } from "fumadocs-ui/page"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
-import { Badge } from "@/components/ui/badge"
 import { DocsNav } from "@/components/docs/docs-nav"
 import { DocsToc } from "@/components/docs/docs-toc"
 import { DocMarkdown, getDocToc } from "@/lib/docs-render"
@@ -48,7 +47,6 @@ export function DocsPageView({
               <div className="mb-2 flex items-start justify-between gap-4">
                 <DocsTitle>{page.title}</DocsTitle>
                 <div className="mt-1 flex shrink-0 items-center gap-2">
-                  {page.is_global && <Badge variant="outline">Global</Badge>}
                   {canEdit && (
                     <Link
                       href={`${basePath}/${page.slug}/edit`}

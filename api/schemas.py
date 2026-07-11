@@ -1331,9 +1331,6 @@ class DocPageIn(BaseModel):
     parent_id: Optional[int] = None
     section_id: Optional[int] = None
     display_order: int = 0
-    # "workspace" (default) creates the page in the current workspace;
-    # "global" creates a shared page (workspace_id NULL) visible everywhere.
-    scope: Literal["workspace", "global"] = "workspace"
 
 
 class DocPagePatch(BaseModel):
@@ -1350,7 +1347,6 @@ class DocPagePatch(BaseModel):
 
 class DocPageOut(_ORM):
     id: int
-    workspace_id: Optional[int] = None
     parent_id: Optional[int] = None
     section_id: Optional[int] = None
     slug: str
@@ -1362,8 +1358,6 @@ class DocPageOut(_ORM):
     created_by_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    # Computed in the router: True when workspace_id is NULL (shared page).
-    is_global: bool = False
 
 
 class DocSectionIn(BaseModel):
@@ -1372,7 +1366,6 @@ class DocSectionIn(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     display_order: int = 0
-    scope: Literal["workspace", "global"] = "workspace"
 
 
 class DocSectionPatch(BaseModel):
@@ -1385,7 +1378,6 @@ class DocSectionPatch(BaseModel):
 
 class DocSectionOut(_ORM):
     id: int
-    workspace_id: Optional[int] = None
     slug: str
     title: str
     description: Optional[str] = None
@@ -1393,7 +1385,6 @@ class DocSectionOut(_ORM):
     display_order: int
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    is_global: bool = False
 
 
 # Portable export shapes — reference parents by name, no ids.
