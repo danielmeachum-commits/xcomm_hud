@@ -48,6 +48,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  SidebarSeparator,
 } from "@/components/ui/sidebar"
 import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import { statusToIndicatorState } from "@/lib/status"
@@ -315,27 +316,34 @@ export function AppSidebar({ user, sites }: Props) {
             )}
           </SidebarGroup>
         )}
+
+        {/* Global scope — shared across every workspace, set apart from the
+            workspace-scoped nav above. Room for more global areas later. */}
+        <SidebarSeparator />
+        <SidebarGroup>
+          <SidebarGroupLabel className="gap-1.5">
+            <Globe className="size-3" />
+            Global
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Knowledge Hub — shared across all workspaces"
+                  isActive={isActive(w("/docs"))}
+                  render={<Link href={w("/docs")} />}
+                >
+                  <BookOpen data-icon="inline-start" />
+                  <span>Knowledge Hub</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>
         <SidebarMenu>
-          {/* The Knowledge Hub is global — shared across every workspace — so
-              it's set apart from the workspace-scoped nav above. */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="Knowledge Hub — shared across all workspaces"
-              isActive={isActive(w("/docs"))}
-              render={<Link href={w("/docs")} />}
-              className="border border-sidebar-border/60 bg-sidebar-accent/40"
-            >
-              <BookOpen data-icon="inline-start" />
-              <span>Knowledge Hub</span>
-              <span className="ml-auto flex items-center gap-1 rounded bg-sidebar px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground group-data-[collapsible=icon]:hidden">
-                <Globe className="size-2.5" />
-                Global
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
