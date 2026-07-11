@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Save, Trash2 } from "lucide-react"
+import { Save, SlidersHorizontal, Trash2 } from "lucide-react"
 import { createMarkdownRenderer } from "fumadocs-core/content/md"
 import { remarkHeading } from "fumadocs-core/mdx-plugins/remark-heading"
 import defaultMdxComponents from "fumadocs-ui/mdx"
 import remarkGfm from "remark-gfm"
 import { DocsBody } from "fumadocs-ui/page"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -169,13 +174,131 @@ export function DocPageEditor({
     }
   }
 
+  const details = (
+    <Popover>
+      <PopoverTrigger className={buttonVariants({ variant: "outline" })}>
+        <SlidersHorizontal className="size-4" />
+        Details
+      </PopoverTrigger>
+      <PopoverContent align="end" className="max-h-[70vh] w-96 overflow-y-auto">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="doc-section">Section</Label>
+            <select
+              id="doc-section"
+              value={sectionId}
+              onChange={(e) => setSectionId(e.target.value)}
+              className="h-9 rounded-md border border-input bg-input/30 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <option value="">General</option>
+              {localSections.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1">
+              <Input
+                value={newSection}
+                onChange={(e) => setNewSection(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    createSection()
+                  }
+                }}
+                placeholder="New section…"
+                className="h-8 text-xs"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={createSection}
+                disabled={creatingSection || !newSection.trim()}
+                className="h-8 px-2 text-xs"
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="doc-parent">Parent page</Label>
+            <select
+              id="doc-parent"
+              value={parentId}
+              onChange={(e) => setParentId(e.target.value)}
+              className="h-9 rounded-md border border-input bg-input/30 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <option value="">— None (top level) —</option>
+              {parentOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="doc-desc">Description</Label>
+            <Input
+              id="doc-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Short summary (optional)"
+            />
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-border pt-3">
+            <p className="text-xs font-medium text-muted-foreground">Advanced</p>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="doc-slug">URL slug</Label>
+              <Input
+                id="doc-slug"
+                value={slug}
+                onChange={(e) => {
+                  setSlugEdited(true)
+                  setSlug(slugify(e.target.value))
+                }}
+                placeholder="page-url"
+              />
+              <p className="text-xs text-muted-foreground">
+                {mode === "edit"
+                  ? "Changing this breaks existing links to the page."
+                  : "Auto-generated from the title."}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="doc-order">Order</Label>
+              <Input
+                id="doc-order"
+                type="number"
+                value={displayOrder}
+                onChange={(e) => setDisplayOrder(e.target.value)}
+                className="w-24"
+              />
+              <p className="text-xs text-muted-foreground">
+                Position among sibling pages.
+              </p>
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold tracking-tight">
-          {mode === "edit" ? "Edit page" : "New page"}
-        </h1>
-        <div className="flex items-center gap-2">
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Untitled page"
+          aria-label="Page title"
+          className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 text-xl font-semibold tracking-tight shadow-none focus-visible:ring-0 md:text-2xl"
+        />
+        <div className="flex shrink-0 items-center gap-2">
+          {details}
           <Button
             variant="outline"
             onClick={() =>
@@ -203,104 +326,6 @@ export function DocPageEditor({
           {error}
         </p>
       )}
-
-      {/* Metadata */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="doc-title">Title</Label>
-          <Input
-            id="doc-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Page title"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="doc-slug">Slug</Label>
-          <Input
-            id="doc-slug"
-            value={slug}
-            onChange={(e) => {
-              setSlugEdited(true)
-              setSlug(slugify(e.target.value))
-            }}
-            placeholder="page-url"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="doc-parent">Parent</Label>
-          <select
-            id="doc-parent"
-            value={parentId}
-            onChange={(e) => setParentId(e.target.value)}
-            className="h-9 rounded-md border border-input bg-input/30 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            <option value="">— None (top level) —</option>
-            {parentOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.title}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="doc-section">Section</Label>
-          <select
-            id="doc-section"
-            value={sectionId}
-            onChange={(e) => setSectionId(e.target.value)}
-            className="h-9 rounded-md border border-input bg-input/30 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            <option value="">General</option>
-            {localSections.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.title}
-              </option>
-            ))}
-          </select>
-          <div className="flex items-center gap-1">
-            <Input
-              value={newSection}
-              onChange={(e) => setNewSection(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  createSection()
-                }
-              }}
-              placeholder="New section…"
-              className="h-8 text-xs"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={createSection}
-              disabled={creatingSection || !newSection.trim()}
-              className="h-8 px-2 text-xs"
-            >
-              Add
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="doc-order">Order</Label>
-          <Input
-            id="doc-order"
-            type="number"
-            value={displayOrder}
-            onChange={(e) => setDisplayOrder(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5 sm:col-span-2">
-          <Label htmlFor="doc-desc">Description</Label>
-          <Input
-            id="doc-desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Short summary (optional)"
-          />
-        </div>
-      </div>
 
       {/* Split pane: markdown source | live preview */}
       <ResizablePanelGroup
