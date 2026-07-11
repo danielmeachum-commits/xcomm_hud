@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Save, SlidersHorizontal, Trash2 } from "lucide-react"
 import { createMarkdownRenderer } from "fumadocs-core/content/md"
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/resizable"
 import { Mermaid } from "@/components/docs/mermaid"
 import { rehypeMermaid } from "@/lib/rehype-mermaid"
+import { EditorToolbar } from "@/components/docs/editor-toolbar"
 import type { DocPage, DocSection } from "@/lib/types"
 
 // Synchronous client-side renderer for the live preview — GitHub-flavored
@@ -79,6 +80,7 @@ export function DocPageEditor({
   )
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const contentRef = useRef<HTMLTextAreaElement>(null)
 
   // Inline-create a section and select it.
   async function createSection() {
@@ -333,13 +335,17 @@ export function DocPageEditor({
         className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border"
       >
         <ResizablePanel defaultSize="50%" minSize="25%">
-          <Textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Write markdown here…"
-            spellCheck={false}
-            className="h-full w-full resize-none rounded-none border-0 bg-transparent font-mono text-sm focus-visible:ring-0"
-          />
+          <div className="flex h-full flex-col">
+            <EditorToolbar textareaRef={contentRef} onChange={setContent} />
+            <Textarea
+              ref={contentRef}
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Write markdown here…"
+              spellCheck={false}
+              className="min-h-0 w-full flex-1 resize-none rounded-none border-0 bg-transparent font-mono text-sm focus-visible:ring-0"
+            />
+          </div>
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel defaultSize="50%" minSize="25%">
