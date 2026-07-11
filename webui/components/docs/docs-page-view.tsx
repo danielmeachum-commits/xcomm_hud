@@ -29,7 +29,7 @@ export function DocsPageView({
   const toc = page ? getDocToc(page.content) : []
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
       <div className="flex items-center justify-between gap-2">
         <PageBreadcrumbs
           items={[
@@ -48,7 +48,7 @@ export function DocsPageView({
           <ExternalLink className="size-4" />
         </a>
       </div>
-      <div className="flex gap-6 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
+      <div className="flex min-h-0 flex-1 gap-6 overflow-hidden rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <DocsNav
           pages={pages}
           sections={sections}
@@ -59,8 +59,8 @@ export function DocsPageView({
         />
         {page ? (
           <>
-            <article className="min-w-0 flex-1">
-              <div className="mb-2 flex items-start justify-between gap-4">
+            <article className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              <div className="mb-2 flex shrink-0 items-start justify-between gap-4">
                 <DocsTitle>{page.title}</DocsTitle>
                 <div className="mt-1 flex shrink-0 items-center gap-2">
                   <ReaderControls />
@@ -75,13 +75,15 @@ export function DocsPageView({
                   )}
                 </div>
               </div>
-              {page.description && (
-                <DocsDescription>{page.description}</DocsDescription>
-              )}
-              <div className="kh-reader">
-                <DocsBody>
-                  <DocMarkdown content={page.content} />
-                </DocsBody>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {page.description && (
+                  <DocsDescription>{page.description}</DocsDescription>
+                )}
+                <div className="kh-reader">
+                  <DocsBody>
+                    <DocMarkdown content={page.content} />
+                  </DocsBody>
+                </div>
               </div>
             </article>
             <DocsToc items={toc} />

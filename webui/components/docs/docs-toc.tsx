@@ -18,7 +18,7 @@ export function DocsToc({ items }: { items: TocItem[] }) {
 
   if (collapsed) {
     return (
-      <div className="sticky top-6 hidden shrink-0 self-start xl:block">
+      <div className="hidden shrink-0 xl:block">
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -33,7 +33,7 @@ export function DocsToc({ items }: { items: TocItem[] }) {
   }
 
   return (
-    <aside className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-56 shrink-0 self-start overflow-y-auto xl:block">
+    <aside className="hidden w-56 shrink-0 overflow-y-auto xl:block">
       <div className="mb-2 flex items-center justify-between gap-1">
         <span className="text-xs font-medium text-muted-foreground">
           On this page
