@@ -16,7 +16,7 @@ export function DocsToc({ items }: { items: TocItem[] }) {
   const [open, setOpen] = useState(true)
   if (items.length === 0) return null
   return (
-    <aside className="hidden w-56 shrink-0 xl:block">
+    <aside className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-56 shrink-0 self-start overflow-y-auto xl:block">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

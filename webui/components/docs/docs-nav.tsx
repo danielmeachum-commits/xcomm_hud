@@ -186,7 +186,7 @@ export function DocsNav({
 
   if (collapsed) {
     return (
-      <div className="flex shrink-0 flex-col gap-1">
+      <div className="sticky top-6 flex shrink-0 flex-col gap-1 self-start">
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -209,7 +209,7 @@ export function DocsNav({
   }
 
   return (
-    <nav className="flex w-60 shrink-0 flex-col gap-2">
+    <nav className="sticky top-6 flex max-h-[calc(100dvh-3rem)] w-60 shrink-0 flex-col gap-2 self-start overflow-y-auto">
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-semibold">Knowledge Hub</span>
         <div className="flex items-center gap-0.5">
