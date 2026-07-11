@@ -25,6 +25,7 @@ export default async function DocsLandingPage({ params }: PageProps) {
       sections={sections}
       page={page}
       canEdit={canEdit}
+      canDelete={me.role === "admin"}
       basePath={`/w/${workspace}/docs`}
     />
   )

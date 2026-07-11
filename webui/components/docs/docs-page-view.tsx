@@ -15,12 +15,14 @@ export function DocsPageView({
   sections,
   page,
   canEdit,
+  canDelete,
   basePath,
 }: {
   pages: DocPage[]
   sections: DocSection[]
   page: DocPage | null
   canEdit: boolean
+  canDelete: boolean
   basePath: string
 }) {
   const toc = page ? getDocToc(page.content) : []
@@ -40,6 +42,7 @@ export function DocsPageView({
           currentSlug={page?.slug ?? null}
           currentSectionId={page?.section_id ?? null}
           canEdit={canEdit}
+          canDelete={canDelete}
         />
         {page ? (
           <>

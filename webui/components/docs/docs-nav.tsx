@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, ChevronDown, PanelLeft, Plus, Search } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  FolderCog,
+  PanelLeft,
+  Plus,
+  Search,
+} from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +22,7 @@ import type { DocPage, DocSection } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 import { DocsSearch } from "./docs-search"
 import { SectionIcon } from "./section-icon"
+import { SectionManager } from "./section-manager"
 
 interface TreeNode {
   page: DocPage
@@ -104,18 +112,21 @@ export function DocsNav({
   currentSlug,
   currentSectionId,
   canEdit,
+  canDelete,
 }: {
   pages: DocPage[]
   sections: DocSection[]
   currentSlug: string | null
   currentSectionId: number | null
   canEdit: boolean
+  canDelete: boolean
 }) {
   const { w } = useWorkspace()
   const router = useRouter()
   const base = w("/docs")
   const [collapsed, setCollapsed] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [manageOpen, setManageOpen] = useState(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -203,13 +214,23 @@ export function DocsNav({
         <span className="text-sm font-semibold">Knowledge Hub</span>
         <div className="flex items-center gap-0.5">
           {canEdit && (
-            <Link
-              href={`${base}/new`}
-              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              title="New page"
-            >
-              <Plus className="size-4" />
-            </Link>
+            <>
+              <button
+                type="button"
+                onClick={() => setManageOpen(true)}
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Manage sections"
+              >
+                <FolderCog className="size-4" />
+              </button>
+              <Link
+                href={`${base}/new`}
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="New page"
+              >
+                <Plus className="size-4" />
+              </Link>
+            </>
           )}
           <button
             type="button"
@@ -282,6 +303,14 @@ export function DocsNav({
         </kbd>
       </button>
       {search}
+      {canEdit && (
+        <SectionManager
+          open={manageOpen}
+          onOpenChange={setManageOpen}
+          sections={sections}
+          canDelete={canDelete}
+        />
+      )}
 
       {sectionPages.length === 0 ? (
         <p className="px-2 text-xs text-muted-foreground">No pages yet.</p>
