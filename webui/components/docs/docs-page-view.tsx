@@ -1,9 +1,10 @@
 import Link from "next/link"
-import { Pencil, Plus } from "lucide-react"
+import { ExternalLink, Pencil, Plus } from "lucide-react"
 import { DocsBody, DocsDescription, DocsTitle } from "fumadocs-ui/page"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { DocsNav } from "@/components/docs/docs-nav"
 import { DocsToc } from "@/components/docs/docs-toc"
+import { ReaderControls } from "@/components/docs/reader-controls"
 import { DocMarkdown, getDocToc } from "@/lib/docs-render"
 import type { DocPage, DocSection } from "@/lib/types"
 
@@ -29,12 +30,24 @@ export function DocsPageView({
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs
-        items={[
-          { label: "Knowledge Hub" },
-          ...(page ? [{ label: page.title }] : []),
-        ]}
-      />
+      <div className="flex items-center justify-between gap-2">
+        <PageBreadcrumbs
+          items={[
+            { label: "Knowledge Hub" },
+            ...(page ? [{ label: page.title }] : []),
+          ]}
+        />
+        <a
+          href={page ? `${basePath}/${page.slug}` : basePath}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open in new tab"
+          aria-label="Open in new tab"
+          className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <ExternalLink className="size-4" />
+        </a>
+      </div>
       <div className="flex gap-6 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <DocsNav
           pages={pages}
@@ -50,6 +63,7 @@ export function DocsPageView({
               <div className="mb-2 flex items-start justify-between gap-4">
                 <DocsTitle>{page.title}</DocsTitle>
                 <div className="mt-1 flex shrink-0 items-center gap-2">
+                  <ReaderControls />
                   {canEdit && (
                     <Link
                       href={`${basePath}/${page.slug}/edit`}
@@ -64,9 +78,11 @@ export function DocsPageView({
               {page.description && (
                 <DocsDescription>{page.description}</DocsDescription>
               )}
-              <DocsBody>
-                <DocMarkdown content={page.content} />
-              </DocsBody>
+              <div className="kh-reader">
+                <DocsBody>
+                  <DocMarkdown content={page.content} />
+                </DocsBody>
+              </div>
             </article>
             <DocsToc items={toc} />
           </>

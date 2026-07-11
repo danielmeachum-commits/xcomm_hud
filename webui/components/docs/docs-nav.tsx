@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import {
   Check,
   ChevronDown,
-  ExternalLink,
   FolderCog,
   PanelLeft,
   Plus,
@@ -131,15 +130,6 @@ export function DocsNav({
         >
           <Search className="size-4" />
         </button>
-        <a
-          href={currentSlug ? `${base}/${currentSlug}` : base}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          title="Open in new tab"
-        >
-          <ExternalLink className="size-4" />
-        </a>
         {search}
       </div>
     )
@@ -150,15 +140,6 @@ export function DocsNav({
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-semibold">Knowledge Hub</span>
         <div className="flex items-center gap-0.5">
-          <a
-            href={currentSlug ? `${base}/${currentSlug}` : base}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            title="Open in new tab"
-          >
-            <ExternalLink className="size-4" />
-          </a>
           {canEdit && (
             <>
               <button

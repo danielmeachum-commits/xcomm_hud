@@ -11,3 +11,15 @@
 @import "fumadocs-ui/css/preset.css";
 
 @source "../../../../../node_modules/fumadocs-ui/dist/**/*.js";
+
+/*
+ * Reader text-size control (see ReaderControls). The scale lives in a CSS var
+ * on :root; the article prose inherits from .kh-reader so every em-based size
+ * (headings, spacing) scales together.
+ */
+.kh-reader {
+  font-size: calc(1rem * var(--kh-font-scale, 1));
+}
+.kh-reader .prose {
+  font-size: inherit;
+}
