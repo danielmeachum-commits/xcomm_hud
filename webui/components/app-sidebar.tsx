@@ -8,6 +8,7 @@ import {
   BookOpen,
   ChevronRight,
   ChevronUp,
+  ExternalLink,
   FileText,
   Flag,
   Globe,
@@ -336,6 +337,20 @@ export function AppSidebar({ user, sites }: Props) {
                   <BookOpen data-icon="inline-start" />
                   <span>Knowledge Hub</span>
                 </SidebarMenuButton>
+                <SidebarMenuAction
+                  showOnHover
+                  title="Open in new tab"
+                  aria-label="Open Knowledge Hub in a new tab"
+                  render={
+                    <a
+                      href={w("/docs")}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    />
+                  }
+                >
+                  <ExternalLink />
+                </SidebarMenuAction>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>

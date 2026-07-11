@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ExternalLink, Pencil, Plus } from "lucide-react"
+import { Pencil, Plus } from "lucide-react"
 import { DocsBody, DocsDescription, DocsTitle } from "fumadocs-ui/page"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { DocsNav } from "@/components/docs/docs-nav"
@@ -30,24 +30,12 @@ export function DocsPageView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 sm:p-6">
-      <div className="flex shrink-0 items-center gap-1">
-        <PageBreadcrumbs
-          items={[
-            { label: "Knowledge Hub" },
-            ...(page ? [{ label: page.title }] : []),
-          ]}
-        />
-        <a
-          href={page ? `${basePath}/${page.slug}` : basePath}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open in new tab"
-          aria-label="Open in new tab"
-          className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <ExternalLink className="size-3.5" />
-        </a>
-      </div>
+      <PageBreadcrumbs
+        items={[
+          { label: "Knowledge Hub" },
+          ...(page ? [{ label: page.title }] : []),
+        ]}
+      />
       <div className="flex min-h-0 flex-1 gap-6 overflow-hidden rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6">
         <DocsNav
           pages={pages}
