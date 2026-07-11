@@ -19,7 +19,7 @@ from db import get_db
 from deps import get_current_workspace, requires
 from models import DocPage, User, Workspace
 from pubsub import notify
-from schemas import DocPageIn, DocPageOut, DocPagePatch
+from schemas import DocPageIn, DocPageOut, DocPagePatch, DocPageReorderIn
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +85,36 @@ def list_doc_pages(
         .all()
     )
     return [_out(page, username) for page, username in rows]
+
+
+@router.post("/reorder", status_code=status.HTTP_204_NO_CONTENT)
+def reorder_doc_pages(
+    body: DocPageReorderIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _=Depends(requires("operator")),
+):
+    """Bulk-apply new parent_id + display_order for a set of pages (drag reorder
+    in the nav). The client sends the affected pages; we trust its computed tree
+    but guard against a page parenting itself."""
+    pages = {
+        p.id: p
+        for p in db.query(DocPage)
+        .filter(DocPage.id.in_([it.id for it in body.items]))
+        .all()
+    }
+    for it in body.items:
+        page = pages.get(it.id)
+        if page is None:
+            continue
+        if it.parent_id == it.id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "A page cannot be its own parent"
+            )
+        page.parent_id = it.parent_id
+        page.display_order = it.display_order
+    db.flush()
+    notify(background_tasks)
 
 
 @router.get("/by-slug/{slug}", response_model=DocPageOut)

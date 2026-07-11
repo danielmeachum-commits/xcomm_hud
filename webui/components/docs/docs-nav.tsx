@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   Check,
   ChevronDown,
+  ExternalLink,
   FolderCog,
   PanelLeft,
   Plus,
@@ -21,82 +22,9 @@ import { cn } from "@/lib/utils"
 import type { DocPage, DocSection } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 import { DocsSearch } from "./docs-search"
+import { DocsNavTree } from "./docs-nav-tree"
 import { SectionIcon } from "./section-icon"
 import { SectionManager } from "./section-manager"
-
-interface TreeNode {
-  page: DocPage
-  children: TreeNode[]
-}
-
-function buildTree(pages: DocPage[]): TreeNode[] {
-  const byId = new Map<number, DocPage>(pages.map((p) => [p.id, p]))
-  const nodes = new Map<number, TreeNode>(
-    pages.map((p) => [p.id, { page: p, children: [] }]),
-  )
-  const roots: TreeNode[] = []
-  for (const p of pages) {
-    const node = nodes.get(p.id)!
-    if (p.parent_id != null && byId.has(p.parent_id)) {
-      nodes.get(p.parent_id)!.children.push(node)
-    } else {
-      roots.push(node)
-    }
-  }
-  const sort = (list: TreeNode[]) => {
-    list.sort(
-      (a, b) =>
-        a.page.display_order - b.page.display_order ||
-        a.page.title.localeCompare(b.page.title),
-    )
-    list.forEach((n) => sort(n.children))
-  }
-  sort(roots)
-  return roots
-}
-
-function NavItems({
-  nodes,
-  currentSlug,
-  base,
-  depth,
-}: {
-  nodes: TreeNode[]
-  currentSlug: string | null
-  base: string
-  depth: number
-}) {
-  return (
-    <ul className={cn(depth > 0 && "ml-3 border-l border-border/60 pl-2")}>
-      {nodes.map(({ page, children }) => {
-        const active = page.slug === currentSlug
-        return (
-          <li key={page.id}>
-            <Link
-              href={`${base}/${page.slug}`}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                active
-                  ? "bg-accent font-medium text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              )}
-            >
-              <span className="truncate">{page.title}</span>
-            </Link>
-            {children.length > 0 && (
-              <NavItems
-                nodes={children}
-                currentSlug={currentSlug}
-                base={base}
-                depth={depth + 1}
-              />
-            )}
-          </li>
-        )
-      })}
-    </ul>
-  )
-}
 
 // The "General" pseudo-section (pages with no section_id).
 const GENERAL = {
@@ -203,6 +131,15 @@ export function DocsNav({
         >
           <Search className="size-4" />
         </button>
+        <a
+          href={currentSlug ? `${base}/${currentSlug}` : base}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Open in new tab"
+        >
+          <ExternalLink className="size-4" />
+        </a>
         {search}
       </div>
     )
@@ -213,6 +150,15 @@ export function DocsNav({
       <div className="flex items-center justify-between px-1">
         <span className="text-sm font-semibold">Knowledge Hub</span>
         <div className="flex items-center gap-0.5">
+          <a
+            href={currentSlug ? `${base}/${currentSlug}` : base}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Open in new tab"
+          >
+            <ExternalLink className="size-4" />
+          </a>
           {canEdit && (
             <>
               <button
@@ -315,11 +261,11 @@ export function DocsNav({
       {sectionPages.length === 0 ? (
         <p className="px-2 text-xs text-muted-foreground">No pages yet.</p>
       ) : (
-        <NavItems
-          nodes={buildTree(sectionPages)}
+        <DocsNavTree
+          pages={sectionPages}
           currentSlug={currentSlug}
           base={base}
-          depth={0}
+          canEdit={canEdit}
         />
       )}
     </nav>

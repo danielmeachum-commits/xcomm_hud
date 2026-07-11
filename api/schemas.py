@@ -1360,6 +1360,16 @@ class DocPageOut(_ORM):
     updated_at: datetime.datetime
 
 
+class DocPageOrderItem(BaseModel):
+    id: int
+    parent_id: Optional[int] = None
+    display_order: int
+
+
+class DocPageReorderIn(BaseModel):
+    items: list[DocPageOrderItem]
+
+
 class DocSectionIn(BaseModel):
     slug: str
     title: str
