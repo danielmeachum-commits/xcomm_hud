@@ -75,9 +75,6 @@ export function DocPageEditor({
   const [localSections, setLocalSections] = useState<DocSection[]>(sections)
   const [newSection, setNewSection] = useState("")
   const [creatingSection, setCreatingSection] = useState(false)
-  const [displayOrder, setDisplayOrder] = useState<string>(
-    String(page?.display_order ?? 0),
-  )
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const contentRef = useRef<HTMLTextAreaElement>(null)
@@ -137,7 +134,7 @@ export function DocPageEditor({
         content,
         parent_id: parentId === "" ? null : Number(parentId),
         section_id: sectionId === "" ? null : Number(sectionId),
-        display_order: Number(displayOrder) || 0,
+        display_order: page?.display_order ?? 0,
       }
       const url = mode === "edit" ? `/api/be/doc-pages/${page!.id}` : "/api/be/doc-pages"
       const res = await fetch(url, {
@@ -270,19 +267,9 @@ export function DocPageEditor({
                   : "Auto-generated from the title."}
               </p>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="doc-order">Order</Label>
-              <Input
-                id="doc-order"
-                type="number"
-                value={displayOrder}
-                onChange={(e) => setDisplayOrder(e.target.value)}
-                className="w-24"
-              />
-              <p className="text-xs text-muted-foreground">
-                Position among sibling pages.
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Reorder pages by dragging them in the sidebar.
+            </p>
           </div>
         </div>
       </PopoverContent>
