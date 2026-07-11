@@ -10,6 +10,7 @@ import {
   ChevronUp,
   FileText,
   Flag,
+  Globe,
   ListChecks,
   LogOut,
   MapPin,
@@ -318,15 +319,21 @@ export function AppSidebar({ user, sites }: Props) {
 
       <SidebarFooter>
         <SidebarMenu>
-          {/* Docs render inside the app shell under the current workspace. */}
+          {/* The Knowledge Hub is global — shared across every workspace — so
+              it's set apart from the workspace-scoped nav above. */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              tooltip="Knowledge Hub"
+              tooltip="Knowledge Hub — shared across all workspaces"
               isActive={isActive(w("/docs"))}
               render={<Link href={w("/docs")} />}
+              className="border border-sidebar-border/60 bg-sidebar-accent/40"
             >
               <BookOpen data-icon="inline-start" />
               <span>Knowledge Hub</span>
+              <span className="ml-auto flex items-center gap-1 rounded bg-sidebar px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground group-data-[collapsible=icon]:hidden">
+                <Globe className="size-2.5" />
+                Global
+              </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
