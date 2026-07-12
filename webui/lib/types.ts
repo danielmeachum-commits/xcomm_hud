@@ -341,6 +341,9 @@ export interface RuleComputedField {
 export interface Rule {
   id: number
   workspace_id: number | null
+  /** Stable identity for global built-ins; null for workspace rules. */
+  key: string | null
+  version: number
   name: string
   description: string | null
   trigger: string
@@ -350,6 +353,9 @@ export interface Rule {
   actions: RuleActionStep[]
   enabled: boolean
   is_builtin: boolean
+  /** Whether this workspace has turned a global built-in off for itself.
+   *  Always false for workspace-owned rules. */
+  disabled_here: boolean
   on_error: "abort" | "skip"
   priority: number
   created_by_user_id: number | null

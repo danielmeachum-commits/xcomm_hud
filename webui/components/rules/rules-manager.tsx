@@ -62,8 +62,11 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
   const builtinRules = rules.filter((r) => r.is_builtin)
   const customRules = rules.filter((r) => !r.is_builtin)
 
-  function canManage(r: Rule): boolean {
-    return r.is_builtin ? isAdmin : isOperator
+  // Built-in rules are code-owned and can't be edited/deleted here; a
+  // workspace only turns one off for itself (disabled_here). A workspace rule
+  // is on iff its own `enabled` is set.
+  function effectiveEnabled(r: Rule): boolean {
+    return r.is_builtin ? r.enabled && !r.disabled_here : r.enabled
   }
 
   function summarize(r: Rule): string {
@@ -90,12 +93,22 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
 
   async function toggleEnabled(r: Rule) {
     setRowError(null)
+    const on = effectiveEnabled(r)
     try {
-      const res = await fetch(`/api/be/rules/${r.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !r.enabled }),
-      })
+      // Built-ins are code-owned: toggling one only sets a per-workspace
+      // override, never mutates the shared rule. Workspace rules flip their
+      // own `enabled`.
+      const res = r.is_builtin
+        ? await fetch(`/api/be/rules/${r.id}/workspace-state`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ disabled: on }),
+          })
+        : await fetch(`/api/be/rules/${r.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: !r.enabled }),
+          })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(
@@ -158,10 +171,11 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
   function renderRow(r: Rule) {
     const isExpanded = expanded === r.id
     const runs = executions[r.id]
+    const on = effectiveEnabled(r)
     return (
       <li
         key={r.id}
-        className={cn("border-t first:border-t-0", !r.enabled && "opacity-55")}
+        className={cn("border-t first:border-t-0", !on && "opacity-55")}
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
           <button
@@ -179,9 +193,9 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">{r.name}</span>
-              {!r.enabled && (
+              {!on && (
                 <span className="rounded border border-border bg-muted/60 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Disabled
+                  {r.is_builtin && r.disabled_here ? "Disabled here" : "Disabled"}
                 </span>
               )}
             </div>
@@ -211,15 +225,22 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
                 <Copy className="size-3.5" />
               </Button>
             )}
-            {canManage(r) && (
+            {isOperator && (
               <>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => toggleEnabled(r)}
                   className="gap-1.5"
+                  title={
+                    r.is_builtin
+                      ? on
+                        ? "Turn this built-in off for this workspace"
+                        : "Turn this built-in back on for this workspace"
+                      : undefined
+                  }
                 >
-                  {r.enabled ? (
+                  {on ? (
                     <>
                       <ZapOff className="size-3.5" />
                       Disable
@@ -231,26 +252,28 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
                     </>
                   )}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setEditing(r)
-                    setDuplicating(false)
-                    setWizardOpen(true)
-                  }}
-                >
-                  Edit
-                </Button>
                 {!r.is_builtin && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDelete(r)}
-                    className="text-destructive"
-                  >
-                    Delete
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setEditing(r)
+                        setDuplicating(false)
+                        setWizardOpen(true)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDelete(r)}
+                      className="text-destructive"
+                    >
+                      Delete
+                    </Button>
+                  </>
                 )}
               </>
             )}
@@ -332,8 +355,9 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
         <h2 className="text-sm font-medium">Built-in</h2>
         <p className="text-xs text-muted-foreground">
           The system record-keeping — these rules write the feed rows for
-          validations, sign-ins, and posture changes. Admins can retune or
-          disable them.
+          validations, sign-ins, and posture changes. They're managed centrally
+          and shared across every workspace; you can turn one off for this
+          workspace, or duplicate it into an editable workspace rule.
         </p>
         <ul className="overflow-hidden rounded-md border">
           {builtinRules.map(renderRow)}

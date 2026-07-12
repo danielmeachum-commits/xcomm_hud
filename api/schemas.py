@@ -684,6 +684,9 @@ class RuleComputedField(BaseModel):
 class RuleOut(_ORM):
     id: int
     workspace_id: Optional[int] = None
+    # Stable identity for global built-ins (NULL for workspace rules).
+    key: Optional[str] = None
+    version: int = 1
     name: str
     description: Optional[str] = None
     trigger: str
@@ -693,6 +696,10 @@ class RuleOut(_ORM):
     actions: list[RuleActionStep] = Field(default_factory=list)
     enabled: bool = True
     is_builtin: bool = False
+    # Whether the requesting workspace has turned this global rule off for
+    # itself (WorkspaceRuleState). Always False for workspace-owned rules,
+    # whose own `enabled` already reflects their state.
+    disabled_here: bool = False
     on_error: Literal["abort", "skip"] = "skip"
     priority: int = 100
     created_by_user_id: Optional[int] = None
@@ -726,6 +733,13 @@ class RulePatch(BaseModel):
     enabled: Optional[bool] = None
     on_error: Optional[Literal["abort", "skip"]] = None
     priority: Optional[int] = None
+
+
+class RuleWorkspaceStateIn(BaseModel):
+    """A workspace's overlay on a global built-in: turn it off for this
+    workspace without touching the shared, code-owned row."""
+
+    disabled: bool
 
 
 class RuleTestIn(BaseModel):

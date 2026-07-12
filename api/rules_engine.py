@@ -56,6 +56,7 @@ from models import (
     Team,
     Unit,
     WorkCenter,
+    WorkspaceRuleState,
 )
 
 log = logging.getLogger("xcomm_hud.rules")
@@ -658,6 +659,19 @@ def emit_trigger(
         .order_by(Rule.priority, Rule.id)
         .all()
     )
+
+    # A workspace can turn a global built-in off for itself without touching
+    # the shared row — honor that here so a disabled default doesn't fire.
+    if workspace_id is not None:
+        disabled_ids = {
+            rid
+            for (rid,) in db.query(WorkspaceRuleState.rule_id).filter(
+                WorkspaceRuleState.workspace_id == workspace_id,
+                WorkspaceRuleState.disabled.is_(True),
+            )
+        }
+        if disabled_ids:
+            rules = [r for r in rules if r.id not in disabled_ids]
 
     for rule in rules:
         rule_ctx = dict(ctx)
