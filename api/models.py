@@ -11,11 +11,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -639,6 +641,17 @@ class Rule(Base):
     """
 
     __tablename__ = "rule"
+    __table_args__ = (
+        # A global (workspace_id NULL) built-in is identified by its stable
+        # `key` — the handle the startup reconcile matches on. At most one
+        # global row per key; workspace rules leave `key` NULL.
+        Index(
+            "uq_rule_global_key",
+            "key",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL AND key IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     workspace_id: Mapped[Optional[int]] = mapped_column(
@@ -646,6 +659,15 @@ class Rule(Base):
         ForeignKey("workspace.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
+    )
+    # Stable identity for global built-in rules, owned by api/default_rules.py.
+    # NULL for workspace rules. The reconcile upserts globals by this key.
+    key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Definition version for global built-ins: the reconcile only overwrites a
+    # stored row when the code's version is higher, so unchanged rows and
+    # per-workspace state are never churned. Irrelevant for workspace rules.
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -708,6 +730,45 @@ class RuleExecution(Base):
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="ok")
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context = mapped_column(JSONB, nullable=True)
+
+
+class WorkspaceRuleState(Base):
+    """Per-workspace overlay on a global built-in rule.
+
+    Global rules (workspace_id NULL, is_builtin) are code-owned and fire
+    across every workspace. A workspace can't edit them, but it can turn one
+    off for itself — that override lives here, one row per (workspace, rule),
+    instead of mutating the shared row. To customize behavior, operators
+    duplicate the global into an editable workspace rule.
+    """
+
+    __tablename__ = "workspace_rule_state"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "rule_id", name="uq_workspace_rule_state"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rule_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("rule.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    disabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
 
 
 class Unit(Base):
