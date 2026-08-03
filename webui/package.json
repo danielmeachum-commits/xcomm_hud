@@ -34,6 +34,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@domscribe/next": "^0.5.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

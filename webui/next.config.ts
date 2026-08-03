@@ -1,5 +1,6 @@
-import type { NextConfig } from "next"
+import type { NextConfig } from 'next';
+import { withDomscribe } from '@domscribe/next';
 
-const nextConfig: NextConfig = {}
+const nextConfig: NextConfig = {};
 
-export default nextConfig
+export default withDomscribe()(nextConfig);

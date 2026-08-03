@@ -21,3 +21,6 @@ webui/.source/
 .idea/
 .vscode/
 *.swp
+
+# Domscribe artifacts
+.domscribe
