@@ -25,72 +25,84 @@ export class ApiError extends Error {
   }
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
+// Page components routinely swallow failures to keep rendering — the
+// `apiGet<T>(...).catch(() => [])` pattern is everywhere — which means a broken
+// endpoint shows up as an empty table with no clue that anything went wrong.
+// Logging here, at the one place every request passes through, guarantees a
+// trace in the server logs no matter what the caller does with the rejection.
+// 401 is excluded: that is the ordinary unauthenticated path, where the caller
+// redirects to /login rather than hiding a real fault.
+function logFailure(
+  method: string,
+  path: string,
+  status: number | null,
+  detail: string,
+) {
+  if (status === 401) return
+  console.error(
+    `[api] ${method} ${path} failed (${status ?? "no response"}): ${detail.slice(0, 500)}`,
+  )
+}
+
+async function handleResponse<T>(
+  method: string,
+  path: string,
+  res: Response,
+): Promise<T> {
   if (!res.ok) {
+    const raw = await res.text()
     let detail = res.statusText
     try {
-      const body = await res.json()
+      const body = JSON.parse(raw)
       if (typeof body?.detail === "string") detail = body.detail
     } catch {
       // ignore parse errors
     }
+    logFailure(method, path, res.status, raw || detail)
     throw new ApiError(res.status, detail)
   }
   return res.json() as Promise<T>
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const authHeader = await getForwardHeaders()
-  const res = await fetch(`${API}${path}`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-    },
-    cache: "no-store",
-  })
-  return handleResponse<T>(res)
+  let res: Response
+  try {
+    res = await fetch(`${API}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeader,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      cache: "no-store",
+    })
+  } catch (err) {
+    // The API being unreachable is swallowed by callers just like an HTTP error.
+    logFailure(method, path, null, String(err))
+    throw err
+  }
+  return handleResponse<T>(method, path, res)
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  return request<T>("GET", path)
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const authHeader = await getForwardHeaders()
-  const res = await fetch(`${API}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  })
-  return handleResponse<T>(res)
+  return request<T>("POST", path, body)
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const authHeader = await getForwardHeaders()
-  const res = await fetch(`${API}${path}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  })
-  return handleResponse<T>(res)
+  return request<T>("PATCH", path, body)
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const authHeader = await getForwardHeaders()
-  const res = await fetch(`${API}${path}`, {
-    method: "DELETE",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeader,
-    },
-    cache: "no-store",
-  })
-  return handleResponse<T>(res)
+  return request<T>("DELETE", path)
 }
 
 /**
