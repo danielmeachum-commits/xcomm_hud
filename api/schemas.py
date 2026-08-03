@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,7 +54,57 @@ SubjectKind = Literal[
     "work_center",
     "workspace",
     "document",
+    "doc_page",
 ]
+# Runtime view of the Literal above. `SubjectKind` stays the single declaration
+# of what a kind may be; anything needing membership at runtime derives it here
+# instead of repeating the list.
+SUBJECT_KINDS: frozenset[str] = frozenset(get_args(SubjectKind))
+
+
+class SubjectKinds:
+    """Named constant per subject kind, for feed-row write sites to reference.
+
+    Event rows are only type-checked on the way *out* (EventOut), so a kind
+    invented at a `record_action` call site inserts fine and then breaks the
+    whole feed at serialization time — which is how `doc_page` escaped twice.
+    Going through these constants turns an invented kind into an AttributeError
+    at the write itself (immediately, for module-level tables like
+    action_registry.ACTIONS), and `record_action` rejects anything outside
+    SUBJECT_KINDS that reaches it from data instead — so no unknown kind can
+    reach the Event table.
+    """
+
+    SERVICE: SubjectKind = "service"
+    SITE: SubjectKind = "site"
+    GATEWAY: SubjectKind = "gateway"
+    SERVICE_GATEWAY: SubjectKind = "service_gateway"
+    SITE_FPCON: SubjectKind = "site_fpcon"
+    SITE_EMCON: SubjectKind = "site_emcon"
+    SITE_STATUS: SubjectKind = "site_status"
+    PERSONNEL_LOCATION: SubjectKind = "personnel_location"
+    SYSTEM: SubjectKind = "system"
+    MISSION: SubjectKind = "mission"
+    EXERCISE: SubjectKind = "exercise"
+    TEAM: SubjectKind = "team"
+    UNIT: SubjectKind = "unit"
+    WORK_CENTER: SubjectKind = "work_center"
+    WORKSPACE: SubjectKind = "workspace"
+    DOCUMENT: SubjectKind = "document"
+    DOC_PAGE: SubjectKind = "doc_page"
+
+
+# Adding a kind means adding it to the Literal and to the class above; this
+# refuses to import if only one of the two happened.
+_declared_kinds = {v for k, v in vars(SubjectKinds).items() if not k.startswith("_")}
+if _declared_kinds != SUBJECT_KINDS:
+    raise RuntimeError(
+        "SubjectKinds is out of sync with the SubjectKind literal — "
+        f"missing constants for {sorted(SUBJECT_KINDS - _declared_kinds)}, "
+        f"unknown kinds {sorted(_declared_kinds - SUBJECT_KINDS)}"
+    )
+del _declared_kinds
+
 EventType = Literal["validation", "general", "personnel"]
 RecordClass = Literal["log", "event"]
 Severity = Literal["info", "notice", "warning", "critical"]
@@ -62,24 +112,31 @@ Severity = Literal["info", "notice", "warning", "critical"]
 # Which subject_kinds belong to which event_type. Used for validation on both
 # create and list endpoints.
 VALIDATION_SUBJECT_KINDS = {
-    "service",
-    "site",
-    "gateway",
-    "service_gateway",
-    "site_fpcon",
-    "site_emcon",
-    "site_status",
+    SubjectKinds.SERVICE,
+    SubjectKinds.SITE,
+    SubjectKinds.GATEWAY,
+    SubjectKinds.SERVICE_GATEWAY,
+    SubjectKinds.SITE_FPCON,
+    SubjectKinds.SITE_EMCON,
+    SubjectKinds.SITE_STATUS,
 }
-PERSONNEL_SUBJECT_KINDS = {"personnel_location"}
+PERSONNEL_SUBJECT_KINDS = {SubjectKinds.PERSONNEL_LOCATION}
 GENERAL_SUBJECT_KINDS = {
-    "system",
-    "mission",
-    "exercise",
-    "site",
-    "team",
-    "unit",
-    "work_center",
-    "workspace",
+    SubjectKinds.SYSTEM,
+    SubjectKinds.MISSION,
+    SubjectKinds.EXERCISE,
+    SubjectKinds.SITE,
+    SubjectKinds.TEAM,
+    SubjectKinds.UNIT,
+    SubjectKinds.WORK_CENTER,
+    SubjectKinds.WORKSPACE,
+}
+# Free-text scopes — general events on these ride on subject_label alone and
+# have no row to resolve.
+LABEL_ONLY_SUBJECT_KINDS = {
+    SubjectKinds.SYSTEM,
+    SubjectKinds.MISSION,
+    SubjectKinds.EXERCISE,
 }
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]

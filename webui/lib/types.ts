@@ -79,6 +79,8 @@ export type SubjectKind =
   | "unit"
   | "work_center"
   | "workspace"
+  | "document"
+  | "doc_page"
 
 export type EventType = "validation" | "general" | "personnel"
 

@@ -58,6 +58,7 @@ from models import (
     WorkCenter,
     WorkspaceRuleState,
 )
+from schemas import SubjectKinds
 
 log = logging.getLogger("xcomm_hud.rules")
 
@@ -418,7 +419,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("service_context",),
             lambda ctx: {
-                "subject_kind": "service",
+                "subject_kind": SubjectKinds.SERVICE,
                 "subject_id": ctx.get("service_id"),
             },
         ),
@@ -433,7 +434,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("gateway_context",),
             lambda ctx: {
-                "subject_kind": "gateway",
+                "subject_kind": SubjectKinds.GATEWAY,
                 "subject_id": ctx.get("gateway_id"),
             },
         ),
@@ -450,7 +451,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("service_context", "gateway_context"),
             lambda ctx: {
-                "subject_kind": "service_gateway",
+                "subject_kind": SubjectKinds.SERVICE_GATEWAY,
                 "subject_id": ctx.get("service_id"),
                 "second_subject_id": ctx.get("gateway_id"),
                 "subject_label": f"{ctx.get('service_name')} via {ctx.get('gateway_name')}",
@@ -467,7 +468,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("site_context",),
             lambda ctx: {
-                "subject_kind": "site_status",
+                "subject_kind": SubjectKinds.SITE_STATUS,
                 "subject_id": ctx.get("site_id"),
             },
         ),
@@ -482,7 +483,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("site_context",),
             lambda ctx: {
-                "subject_kind": "site_fpcon",
+                "subject_kind": SubjectKinds.SITE_FPCON,
                 "subject_id": ctx.get("site_id"),
             },
         ),
@@ -497,7 +498,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("site_context",),
             lambda ctx: {
-                "subject_kind": "site_emcon",
+                "subject_kind": SubjectKinds.SITE_EMCON,
                 "subject_id": ctx.get("site_id"),
             },
         ),
@@ -513,7 +514,7 @@ TRIGGERS: dict[str, TriggerDef] = {
             ],
             ("personnel_context", "site_context"),
             lambda ctx: {
-                "subject_kind": "personnel_location",
+                "subject_kind": SubjectKinds.PERSONNEL_LOCATION,
                 "subject_id": ctx.get("personnel_id"),
                 "second_subject_id": ctx.get("site_id"),
                 "subject_label": ctx.get("personnel_name"),

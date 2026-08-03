@@ -150,6 +150,8 @@ const KIND_OPTIONS: MultiSelectOption[] = [
   { value: "team", label: "Team", group: "general" },
   { value: "unit", label: "Unit", group: "general" },
   { value: "work_center", label: "Work center", group: "general" },
+  { value: "document", label: "Document", group: "general" },
+  { value: "doc_page", label: "Doc page", group: "general" },
 ]
 
 const SEVERITY_OPTIONS: MultiSelectOption[] = SEVERITY_ORDER.map((s) => ({

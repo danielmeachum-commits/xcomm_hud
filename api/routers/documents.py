@@ -41,7 +41,7 @@ from models import (
     Workspace,
 )
 from pubsub import notify
-from schemas import DocumentOut, DocumentPatch, DocumentVersionOut
+from schemas import DocumentOut, DocumentPatch, DocumentVersionOut, SubjectKinds
 
 log = logging.getLogger("xcomm_hud.documents")
 
@@ -104,13 +104,19 @@ def _record_document_event(
     doc: Document,
     user_id: int,
 ) -> None:
-    """Best-effort feed row — a registry/catalog miss must not fail the mutation."""
+    """Best-effort feed row — a registry/catalog miss must not fail the mutation.
+
+    The kind is resolved outside the try on purpose: a bad one is not a
+    catalog miss but a coding error, and swallowing it is exactly how the
+    `doc_page` outage stayed invisible.
+    """
+    subject_kind = SubjectKinds.DOCUMENT
     try:
         record_action(
             db,
             action_slug=action_slug,
             workspace_id=workspace_id,
-            subject_kind="document",
+            subject_kind=subject_kind,
             subject_id=doc.id,
             subject_label=doc.title,
             user_id=user_id,

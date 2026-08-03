@@ -19,7 +19,13 @@ from db import get_db
 from deps import get_current_workspace, requires
 from models import DocPage, User, Workspace
 from pubsub import notify
-from schemas import DocPageIn, DocPageOut, DocPagePatch, DocPageReorderIn
+from schemas import (
+    DocPageIn,
+    DocPageOut,
+    DocPagePatch,
+    DocPageReorderIn,
+    SubjectKinds,
+)
 
 log = logging.getLogger(__name__)
 
@@ -41,13 +47,19 @@ def _record_doc_page_event(
     page: DocPage,
     user_id: int,
 ) -> None:
-    """Best-effort audit row — a registry/catalog miss must not fail the mutation."""
+    """Best-effort audit row — a registry/catalog miss must not fail the mutation.
+
+    The kind is resolved outside the try on purpose: a bad one is not a
+    catalog miss but a coding error, and swallowing it is exactly how the
+    `doc_page` outage stayed invisible.
+    """
+    subject_kind = SubjectKinds.DOC_PAGE
     try:
         record_action(
             db,
             action_slug=action_slug,
             workspace_id=workspace_id,
-            subject_kind="doc_page",
+            subject_kind=subject_kind,
             subject_id=page.id,
             subject_label=page.title,
             user_id=user_id,

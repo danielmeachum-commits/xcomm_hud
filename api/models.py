@@ -50,25 +50,8 @@ GATEWAY_KINDS = ("milsat", "commercial", "other")
 GATEWAY_PACE = ("primary", "alternate", "contingency", "emergency")
 USER_ROLES = ("viewer", "operator", "admin")
 VALIDATION_SOURCES = ("manual", "ingest")
-SUBJECT_KINDS = (
-    "service",
-    "site",
-    "gateway",
-    "service_gateway",
-    "site_fpcon",
-    "site_emcon",
-    "site_status",
-    "personnel_location",
-    "system",
-    "mission",
-    "exercise",
-    "team",
-    "unit",
-    "work_center",
-    "workspace",
-    "document",
-    "doc_page",
-)
+# Subject kinds are declared once, in schemas.SubjectKind — this module used to
+# carry a second copy that nothing read and nobody kept in sync.
 EVENT_TYPES = ("validation", "general", "personnel")
 # Every Event row is either a high-volume audit "log" or a briefing-worthy
 # "event" — the timeline shows events, the audit view shows everything.

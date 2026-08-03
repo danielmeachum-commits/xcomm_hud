@@ -22,6 +22,8 @@ export const SUBJECT_KIND_LABELS: Record<SubjectKind, string> = {
   gateway: "Gateway",
   service_gateway: "Cell",
   personnel_location: "Personnel",
+  document: "Document",
+  doc_page: "Doc page",
 }
 
 export const REGISTRY_TYPE_LABELS: Record<string, string> = {
@@ -33,4 +35,9 @@ export const REGISTRY_TYPE_LABELS: Record<string, string> = {
   "site.fpcon": "FPCON change",
   "site.emcon": "EMCON change",
   "personnel.checkin": "Sign-in",
+  "document.uploaded": "Document uploaded",
+  "document.deleted": "Document deleted",
+  "doc_page.created": "Doc page created",
+  "doc_page.updated": "Doc page updated",
+  "doc_page.deleted": "Doc page deleted",
 }

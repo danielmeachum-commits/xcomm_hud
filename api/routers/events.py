@@ -49,16 +49,26 @@ from schemas import (
     EventSummaryOut,
     EventType,
     GENERAL_SUBJECT_KINDS,
+    LABEL_ONLY_SUBJECT_KINDS,
     PERSONNEL_SUBJECT_KINDS,
     RecordClass,
     Severity,
     SubjectKind,
+    SubjectKinds,
     VALIDATION_SUBJECT_KINDS,
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 KEEPALIVE_INTERVAL = 20.0
+
+# Kinds whose subject_id points at a Site row, whatever aspect of it changed.
+_SITE_SUBJECT_KINDS = (
+    SubjectKinds.SITE,
+    SubjectKinds.SITE_FPCON,
+    SubjectKinds.SITE_EMCON,
+    SubjectKinds.SITE_STATUS,
+)
 
 
 def _now() -> datetime.datetime:
@@ -72,7 +82,7 @@ def _enrich(db: Session, v: Event) -> EventOut:
         if u:
             out.validated_by_username = u.username
     if v.subject_id is not None:
-        if v.subject_kind == "service":
+        if v.subject_kind == SubjectKinds.SERVICE:
             svc = db.get(Service, v.subject_id)
             if svc:
                 out.subject_name = svc.name
@@ -80,7 +90,7 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 site = db.get(Site, svc.site_id)
                 if site:
                     out.site_name = site.name
-        elif v.subject_kind == "gateway":
+        elif v.subject_kind == SubjectKinds.GATEWAY:
             gw = db.get(Gateway, v.subject_id)
             if gw:
                 out.subject_name = gw.name
@@ -88,7 +98,7 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 site = db.get(Site, gw.site_id)
                 if site:
                     out.site_name = site.name
-        elif v.subject_kind == "service_gateway":
+        elif v.subject_kind == SubjectKinds.SERVICE_GATEWAY:
             # subject_id is the service; the gateway lives in second_subject_id
             # so subject_name stays the service, and subject_label carries the
             # "svc via gw" hint that the UI shows as a subtitle.
@@ -99,13 +109,13 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 site = db.get(Site, svc.site_id)
                 if site:
                     out.site_name = site.name
-        elif v.subject_kind in ("site", "site_fpcon", "site_emcon", "site_status"):
+        elif v.subject_kind in _SITE_SUBJECT_KINDS:
             site = db.get(Site, v.subject_id)
             if site:
                 out.subject_name = site.name
                 out.site_id = site.id
                 out.site_name = site.name
-        elif v.subject_kind == "personnel_location":
+        elif v.subject_kind == SubjectKinds.PERSONNEL_LOCATION:
             # subject_id is the personnel row; second_subject_id (when set)
             # is the site they signed into. Fill site_name off that so the
             # events table's site column stays useful.
@@ -117,19 +127,19 @@ def _enrich(db: Session, v: Event) -> EventOut:
                 if site:
                     out.site_id = site.id
                     out.site_name = site.name
-        elif v.subject_kind == "team":
+        elif v.subject_kind == SubjectKinds.TEAM:
             team = db.get(Team, v.subject_id)
             if team:
                 out.subject_name = team.name
-        elif v.subject_kind == "unit":
+        elif v.subject_kind == SubjectKinds.UNIT:
             unit = db.get(Unit, v.subject_id)
             if unit:
                 out.subject_name = unit.name
-        elif v.subject_kind == "work_center":
+        elif v.subject_kind == SubjectKinds.WORK_CENTER:
             wc = db.get(WorkCenter, v.subject_id)
             if wc:
                 out.subject_name = wc.name
-        elif v.subject_kind == "workspace":
+        elif v.subject_kind == SubjectKinds.WORKSPACE:
             ws = db.get(Workspace, v.subject_id)
             if ws:
                 out.subject_name = ws.name
@@ -141,21 +151,21 @@ def _enrich(db: Session, v: Event) -> EventOut:
 
 def _resolve_subject(db: Session, subject_kind: str, subject_id: int):
     """Return the current row for a known-entity subject kind, or raise 404."""
-    if subject_kind == "service":
+    if subject_kind == SubjectKinds.SERVICE:
         obj = db.get(Service, subject_id)
-    elif subject_kind == "gateway":
+    elif subject_kind == SubjectKinds.GATEWAY:
         obj = db.get(Gateway, subject_id)
-    elif subject_kind in ("site", "site_fpcon", "site_emcon", "site_status"):
+    elif subject_kind in _SITE_SUBJECT_KINDS:
         obj = db.get(Site, subject_id)
-    elif subject_kind == "personnel_location":
+    elif subject_kind == SubjectKinds.PERSONNEL_LOCATION:
         obj = db.get(Personnel, subject_id)
-    elif subject_kind == "team":
+    elif subject_kind == SubjectKinds.TEAM:
         obj = db.get(Team, subject_id)
-    elif subject_kind == "unit":
+    elif subject_kind == SubjectKinds.UNIT:
         obj = db.get(Unit, subject_id)
-    elif subject_kind == "work_center":
+    elif subject_kind == SubjectKinds.WORK_CENTER:
         obj = db.get(WorkCenter, subject_id)
-    elif subject_kind == "workspace":
+    elif subject_kind == SubjectKinds.WORKSPACE:
         obj = db.get(Workspace, subject_id)
     else:
         obj = None
@@ -314,14 +324,14 @@ def events_summary(
 # Manual validation/personnel events reuse the registry classification of
 # the action that normally produces that subject_kind.
 _MANUAL_ACTION_SLUGS = {
-    "service": "service.validate",
-    "gateway": "gateway.validate",
-    "service_gateway": "cell.validate",
-    "site": "site.validate",
-    "site_status": "site.status",
-    "site_fpcon": "site.fpcon",
-    "site_emcon": "site.emcon",
-    "personnel_location": "personnel.checkin",
+    SubjectKinds.SERVICE: "service.validate",
+    SubjectKinds.GATEWAY: "gateway.validate",
+    SubjectKinds.SERVICE_GATEWAY: "cell.validate",
+    SubjectKinds.SITE: "site.validate",
+    SubjectKinds.SITE_STATUS: "site.status",
+    SubjectKinds.SITE_FPCON: "site.fpcon",
+    SubjectKinds.SITE_EMCON: "site.emcon",
+    SubjectKinds.PERSONNEL_LOCATION: "personnel.checkin",
 }
 
 
@@ -414,11 +424,7 @@ def create_event(
             )
         # Entity-backed scopes must reference a live row; free-text scopes
         # (system/mission/exercise) ride on subject_label alone.
-        if body.subject_id is not None and body.subject_kind not in (
-            "system",
-            "mission",
-            "exercise",
-        ):
+        if body.subject_id is not None and body.subject_kind not in LABEL_ONLY_SUBJECT_KINDS:
             _resolve_subject(db, body.subject_kind, body.subject_id)
 
     row = record_action(
@@ -595,7 +601,7 @@ def _apply_subject_status(
     background_tasks: BackgroundTasks,
 ) -> None:
     """Write `new_status`/`new_ts` back to the live subject row."""
-    if row.subject_kind == "service":
+    if row.subject_kind == SubjectKinds.SERVICE:
         svc = db.get(Service, row.subject_id)
         if svc:
             svc.status = new_status
@@ -603,7 +609,7 @@ def _apply_subject_status(
             svc.validated_by_user_id = user_id
             db.flush()
             notify(background_tasks)
-    elif row.subject_kind == "gateway":
+    elif row.subject_kind == SubjectKinds.GATEWAY:
         gw = db.get(Gateway, row.subject_id)
         if gw:
             gw.status = new_status
@@ -611,7 +617,7 @@ def _apply_subject_status(
             gw.validated_by_user_id = user_id
             db.flush()
             notify(background_tasks)
-    elif row.subject_kind == "service_gateway" and row.second_subject_id is not None:
+    elif row.subject_kind == SubjectKinds.SERVICE_GATEWAY and row.second_subject_id is not None:
         cell = (
             db.query(ServiceGatewayStatus)
             .filter(

@@ -21,6 +21,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from models import Event, EventTypeDef
+from schemas import SUBJECT_KINDS, SubjectKind, SubjectKinds
 
 
 def _now() -> datetime.datetime:
@@ -32,35 +33,35 @@ class Action:
     record_class: str  # "log" | "event"
     severity: str  # "info" | "notice" | "warning" | "critical"
     event_type: str = "validation"
-    kinds: tuple[str, ...] = ()
+    kinds: tuple[SubjectKind, ...] = ()
 
 
 # Default classification for system action slugs. Rules may override any
 # of these per-row via record_action's keyword overrides.
 ACTIONS: dict[str, Action] = {
     "service.validate": Action(
-        record_class="log", severity="info", kinds=("service",)
+        record_class="log", severity="info", kinds=(SubjectKinds.SERVICE,)
     ),
     "gateway.validate": Action(
-        record_class="log", severity="info", kinds=("gateway",)
+        record_class="log", severity="info", kinds=(SubjectKinds.GATEWAY,)
     ),
     "cell.validate": Action(
-        record_class="log", severity="info", kinds=("service_gateway",)
+        record_class="log", severity="info", kinds=(SubjectKinds.SERVICE_GATEWAY,)
     ),
     "site.status": Action(
-        record_class="event", severity="notice", kinds=("site_status",)
+        record_class="event", severity="notice", kinds=(SubjectKinds.SITE_STATUS,)
     ),
     "site.fpcon": Action(
-        record_class="event", severity="warning", kinds=("site_fpcon",)
+        record_class="event", severity="warning", kinds=(SubjectKinds.SITE_FPCON,)
     ),
     "site.emcon": Action(
-        record_class="event", severity="warning", kinds=("site_emcon",)
+        record_class="event", severity="warning", kinds=(SubjectKinds.SITE_EMCON,)
     ),
     "personnel.checkin": Action(
         record_class="log",
         severity="info",
         event_type="personnel",
-        kinds=("personnel_location",),
+        kinds=(SubjectKinds.PERSONNEL_LOCATION,),
     ),
 }
 
@@ -85,7 +86,7 @@ def record_action(
     *,
     action_slug: str,
     workspace_id: Optional[int],
-    subject_kind: str,
+    subject_kind: SubjectKind,
     subject_id: Optional[int] = None,
     second_subject_id: Optional[int] = None,
     subject_label: Optional[str] = None,
@@ -105,7 +106,17 @@ def record_action(
     slug's registry defaults, falling back to the EventTypeDef catalog for
     declarable types; explicit keyword arguments override either — that's
     how rule action params retune e.g. a validation's severity per rule.
+
+    `subject_kind` is checked here as well as typed: kinds reaching this from
+    data (rule trigger subjects) can't be caught by the `SubjectKinds`
+    constants, and an unknown one must fail at its own mutation rather than
+    land a row that later breaks every read of the feed.
     """
+    if subject_kind not in SUBJECT_KINDS:
+        raise ValueError(
+            f"Unknown subject_kind '{subject_kind}' — add it to SubjectKind in schemas.py"
+        )
+
     resolved_class = "log"
     resolved_severity = "info"
     resolved_event_type = "validation"
