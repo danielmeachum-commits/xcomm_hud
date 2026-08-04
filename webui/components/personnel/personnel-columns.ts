@@ -1,5 +1,6 @@
 export type PersonnelColumnKey =
   | "name"
+  | "rank"
   | "status"
   | "work_center"
   | "unit"
@@ -19,6 +20,7 @@ export interface PersonnelColumnDef {
 
 export const ALL_PERSONNEL_COLUMNS: PersonnelColumnDef[] = [
   { key: "name", label: "Name", sortable: true, alwaysOn: true },
+  { key: "rank", label: "Rank", sortable: true, alwaysOn: false },
   { key: "status", label: "Status", sortable: true, alwaysOn: false },
   { key: "work_center", label: "Work center", sortable: true, alwaysOn: false },
   { key: "unit", label: "Unit", sortable: true, alwaysOn: false },
@@ -31,6 +33,7 @@ export const ALL_PERSONNEL_COLUMNS: PersonnelColumnDef[] = [
 
 export const DEFAULT_VISIBLE: PersonnelColumnKey[] = [
   "name",
+  "rank",
   "status",
   "work_center",
   "unit",
@@ -39,14 +42,26 @@ export const DEFAULT_VISIBLE: PersonnelColumnKey[] = [
   "email",
 ]
 
-const STORAGE_KEY = "personnel.columns.v1"
+const STORAGE_KEY = "personnel.columns.v2"
+// v1 predates the Rank column. Prefs saved under it can't distinguish "user
+// hid Rank" from "Rank didn't exist yet", so migration opts them into it once.
+const STORAGE_KEY_V1 = "personnel.columns.v1"
 
 /** Load persisted visible-column prefs, falling back to defaults. SSR-safe. */
 export function loadVisibleColumns(): PersonnelColumnKey[] {
   if (typeof window === "undefined") return DEFAULT_VISIBLE
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_VISIBLE
+    let raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      const legacy = window.localStorage.getItem(STORAGE_KEY_V1)
+      if (!legacy) return DEFAULT_VISIBLE
+      const migrated = JSON.parse(legacy) as PersonnelColumnKey[]
+      if (!migrated.includes("rank")) {
+        migrated.splice(migrated.indexOf("name") + 1, 0, "rank")
+      }
+      raw = JSON.stringify(migrated)
+      window.localStorage.setItem(STORAGE_KEY, raw)
+    }
     const parsed = JSON.parse(raw) as PersonnelColumnKey[]
     const known = new Set(ALL_PERSONNEL_COLUMNS.map((c) => c.key))
     const visible = parsed.filter((k) => known.has(k))

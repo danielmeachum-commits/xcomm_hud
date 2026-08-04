@@ -14,7 +14,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { PERSONNEL_STATUS_LABELS } from "@/lib/personnel-data"
+import { PERSONNEL_STATUS_LABELS, rankSeniority } from "@/lib/personnel-data"
+import { formatPhone } from "@/lib/phone"
 import type { Personnel, Site, Unit, WorkCenter } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/lib/workspace"
@@ -116,6 +117,13 @@ export function PersonnelTable({
     switch (key) {
       case "name":
         return `${p.last_name} ${p.first_name}`.toLowerCase()
+      case "rank": {
+        // Sort by seniority, not alphabetically — ascending puts the most
+        // senior first. Zero-padded so the shared string compare stays valid;
+        // unknown ranks return "" so they fall to the bottom either way.
+        const seniority = rankSeniority(p.personnel_type, p.branch, p.rank)
+        return seniority === 0 ? "" : String(999 - seniority).padStart(4, "0")
+      }
       case "status":
         return PERSONNEL_STATUS_LABELS[p.current_status].toLowerCase()
       case "work_center":
@@ -173,7 +181,8 @@ export function PersonnelTable({
               className="shrink-0"
             />
             <span className="text-[13px]">
-              {p.rank ? (
+              {/* The Rank column already carries this — don't print it twice. */}
+              {p.rank && !visibleSet.has("rank") ? (
                 <span className="text-muted-foreground">{p.rank} </span>
               ) : null}
               <span className="font-medium text-foreground">
@@ -193,6 +202,12 @@ export function PersonnelTable({
             </span>
           </Link>
         )
+      case "rank":
+        return p.rank ? (
+          <span className="whitespace-nowrap">{p.rank}</span>
+        ) : (
+          "—"
+        )
       case "status":
         return <PersonnelStatusPill person={p} sites={sites} canEdit={canEdit} />
       case "work_center":
@@ -204,7 +219,13 @@ export function PersonnelTable({
           ? siteById.get(p.assigned_site_id)?.name
           : "—"
       case "cellphone":
-        return p.cellphone || "—"
+        return p.cellphone ? (
+          <span className="whitespace-nowrap tabular-nums">
+            {formatPhone(p.cellphone)}
+          </span>
+        ) : (
+          "—"
+        )
       case "dsn":
         return p.dsn || "—"
       case "email":

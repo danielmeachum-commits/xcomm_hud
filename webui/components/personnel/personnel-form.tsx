@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { Check, CheckCircle2, Plus } from "lucide-react"
 
 import { CommanderStar } from "@/components/personnel/commander-star"
+import { PersonnelPicker } from "@/components/personnel/personnel-picker"
 
 interface Draft {
   personnel_type: PersonnelType
@@ -63,10 +64,15 @@ interface Draft {
   team_ids: Set<number>
 }
 
-function makeDraft(person?: Personnel | null, defaultUnit?: Unit | null): Draft {
+function makeDraft(
+  person?: Personnel | null,
+  defaultUnit?: Unit | null,
+  defaultSite?: Site | null,
+): Draft {
   // The workspace's default unit only seeds brand-new people — editing never
-  // rewrites an existing (possibly deliberately blank) unit or branch.
+  // rewrites an existing (possibly deliberately blank) unit, branch, or site.
   const seedUnit = person ? null : defaultUnit
+  const seedSite = person ? null : defaultSite
   return {
     personnel_type: person?.personnel_type ?? "military",
     branch: (person?.branch ?? seedUnit?.branch ?? DEFAULT_BRANCH) as
@@ -85,7 +91,8 @@ function makeDraft(person?: Personnel | null, defaultUnit?: Unit | null): Draft 
     unit_id: person?.unit_id?.toString() ?? seedUnit?.id.toString() ?? "",
     supervisor_id: person?.supervisor_id?.toString() ?? "",
     is_commander: person?.is_commander ?? false,
-    assigned_site_id: person?.assigned_site_id?.toString() ?? "",
+    assigned_site_id:
+      person?.assigned_site_id?.toString() ?? seedSite?.id.toString() ?? "",
     room_number: person?.room_number?.toString() ?? "",
     team_ids: new Set(person?.team_ids ?? []),
   }
@@ -247,16 +254,21 @@ export function PersonnelForm({
   const router = useRouter()
   const editing = !!person
   const defaultUnit = units.find((u) => u.is_default) ?? null
+  // No "default site" flag exists yet, so new people start at the first site
+  // in the workspace list — one less field to touch for single-site setups.
+  const defaultSite = sites[0] ?? null
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState<Draft>(makeDraft(person, defaultUnit))
+  const [draft, setDraft] = useState<Draft>(makeDraft(person, defaultUnit, defaultSite))
   const [step, setStep] = useState(0)
   const [maxVisited, setMaxVisited] = useState(0)
   // After a successful create: show the confirmation panel with "Add another".
   const [createdName, setCreatedName] = useState<string | null>(null)
   // Skill level follows the rank's typical default until the user picks one.
   const skillTouched = useRef(false)
+  // Id of the roster duplicate the user has explicitly waved through.
+  const [dupAckId, setDupAckId] = useState<number | null>(null)
 
   // Records created inline during this dialog session, merged with the
   // server-provided lists (props only refresh after router.refresh()).
@@ -328,6 +340,12 @@ export function PersonnelForm({
   function setIdentity(patch: Partial<Draft>) {
     setDraft((d) => {
       const next = { ...d, ...patch }
+      // Military rows have no "— None —" option, so an empty branch would show
+      // the first option (Air Force) while the state stayed blank. Snap it to
+      // the default instead — submit() coerces it the same way anyway.
+      if (next.personnel_type !== "civilian" && !next.branch) {
+        next.branch = DEFAULT_BRANCH
+      }
       const suggested = defaultSkillLevel(
         next.personnel_type,
         next.branch || null,
@@ -342,12 +360,13 @@ export function PersonnelForm({
   }
 
   function reset() {
-    setDraft(makeDraft(person, defaultUnit))
+    setDraft(makeDraft(person, defaultUnit, defaultSite))
     setError(null)
     setStep(0)
     setMaxVisited(0)
     setCreatedName(null)
     skillTouched.current = false
+    setDupAckId(null)
   }
 
   function close() {
@@ -367,8 +386,30 @@ export function PersonnelForm({
     setError(null)
   }
 
+  // Duplicate guard — someone already on the roster with the same name. An
+  // exact match (name *and* rank) blocks Next until acknowledged; a name-only
+  // match is just a heads-up, since two people can share a name.
+  const nameMatches = useMemo(() => {
+    const last = draft.last_name.trim().toLowerCase()
+    const first = draft.first_name.trim().toLowerCase()
+    if (!last || !first) return []
+    return supervisors.filter(
+      (p) =>
+        (!editing || p.id !== person!.id) &&
+        p.last_name.trim().toLowerCase() === last &&
+        p.first_name.trim().toLowerCase() === first,
+    )
+  }, [supervisors, draft.last_name, draft.first_name, editing, person])
+
+  const exactDuplicate =
+    nameMatches.find((p) => (p.rank ?? "") === draft.rank) ?? null
+  const needsDupConfirm = !!exactDuplicate && dupAckId !== exactDuplicate.id
+
   const stepValid =
-    step !== 0 || (draft.last_name.trim() !== "" && draft.first_name.trim() !== "")
+    step !== 0 ||
+    (draft.last_name.trim() !== "" &&
+      draft.first_name.trim() !== "" &&
+      !needsDupConfirm)
 
   function toggleTeam(id: number, checked: boolean) {
     const next = new Set(draft.team_ids)
@@ -441,12 +482,16 @@ export function PersonnelForm({
   }
 
   function addAnother() {
-    setDraft(makeDraft(null))
+    // Reset back to a seeded blank draft — same as opening the dialog fresh —
+    // so the workspace default unit and its branch come back instead of
+    // clearing out on every subsequent person.
+    setDraft(makeDraft(null, defaultUnit, defaultSite))
     setCreatedName(null)
     setError(null)
     setStep(0)
     setMaxVisited(0)
     skillTouched.current = false
+    setDupAckId(null)
   }
 
   // --- Review helpers -------------------------------------------------------
@@ -656,6 +701,50 @@ export function PersonnelForm({
                     </div>
                   </div>
 
+                  {nameMatches.length > 0 && (
+                    <div
+                      className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+                      role="alert"
+                    >
+                      <p className="font-medium">
+                        {exactDuplicate
+                          ? "This person may already be on the roster."
+                          : "Someone with this name is already on the roster."}
+                      </p>
+                      <ul className="text-muted-foreground">
+                        {nameMatches.map((p) => (
+                          <li key={p.id}>
+                            {p.rank ? `${p.rank} ` : ""}
+                            {p.last_name}, {p.first_name}
+                            {p.unit_id
+                              ? ` — ${allUnits.find((u) => u.id === p.unit_id)?.name ?? "unknown unit"}`
+                              : ""}
+                          </li>
+                        ))}
+                      </ul>
+                      {exactDuplicate && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={!needsDupConfirm || pending}
+                            onClick={() => setDupAckId(exactDuplicate.id)}
+                          >
+                            {needsDupConfirm
+                              ? "Add anyway"
+                              : "Confirmed — different person"}
+                          </Button>
+                          {needsDupConfirm && (
+                            <span className="text-xs text-muted-foreground">
+                              Same name and rank — confirm to continue.
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Unit ahead of branch — picking a unit with a branch
                       prefills the branch (still editable below). */}
                   <div className="space-y-1.5">
@@ -836,25 +925,16 @@ export function PersonnelForm({
 
                   <div className="space-y-1.5">
                     <Label htmlFor="supervisor_id">Supervisor</Label>
-                    <select
+                    <PersonnelPicker
                       id="supervisor_id"
                       value={draft.supervisor_id}
-                      onChange={(e) =>
-                        setDraft({ ...draft, supervisor_id: e.target.value })
-                      }
+                      onChange={(v) => setDraft({ ...draft, supervisor_id: v })}
+                      personnel={supervisors.filter(
+                        (s) => !editing || s.id !== person!.id,
+                      )}
                       disabled={pending}
-                      className={selectClass}
-                    >
-                      <option value="">— None —</option>
-                      {supervisors
-                        .filter((s) => !editing || s.id !== person!.id)
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.rank ? `${s.rank} ` : ""}
-                            {s.last_name}, {s.first_name}
-                          </option>
-                        ))}
-                    </select>
+                      placeholder="Search supervisors…"
+                    />
                   </div>
 
                   {/* Commander/OIC — officers only, one slot per unit. Non-

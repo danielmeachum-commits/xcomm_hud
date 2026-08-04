@@ -1,0 +1,150 @@
+{
+  "name": "cisco",
+  "scopeName": "source.cisco",
+  "patterns": [
+    {
+      "match": "^[ \\t]*!.*$",
+      "name": "comment.line.exclamation.cisco"
+    },
+    {
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'",
+      "name": "string.quoted.cisco"
+    },
+    {
+      "match": "(^[ \\t]*(?:enable[ \\t]+)?(?:password|secret)[ \\t]+(?:\\d{1,2}[ \\t]+)?)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*username[ \\t]+\\S+[ \\t]+(?:[^\\n]*?[ \\t]+)?(?:password|secret)[ \\t]+(?:\\d{1,2}[ \\t]+)?)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*snmp-server[ \\t]+community[ \\t]+)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*crypto[ \\t]+isakmp[ \\t]+key[ \\t]+)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*pre-shared-key[ \\t]+(?:local[ \\t]+|remote[ \\t]+)?)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*key-string[ \\t]+(?:\\d{1,2}[ \\t]+)?)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*key[ \\t]+(?:0|7)[ \\t]+)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "(^[ \\t]*ntp[ \\t]+authentication-key[ \\t]+\\d+[ \\t]+\\w+[ \\t]+)(\\S+)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.cisco"
+        },
+        "2": {
+          "name": "constant.character.escape.secret.cisco"
+        }
+      }
+    },
+    {
+      "match": "\\b(?:[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}\\.[0-9A-Fa-f]{4}|(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\\b",
+      "name": "constant.numeric.mac.cisco"
+    },
+    {
+      "match": "(?:(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,4}:(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)|::(?:[Ff]{4}(?::0{1,4})?:)?(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)|[Ff][Ee]80:(?::[A-Fa-f0-9]{0,4}){0,4}%[0-9A-Za-z]+|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,5}(?::[A-Fa-f0-9]{1,4}){1,2}|(?:[A-Fa-f0-9]{1,4}:){1,4}(?::[A-Fa-f0-9]{1,4}){1,3}|(?:[A-Fa-f0-9]{1,4}:){1,3}(?::[A-Fa-f0-9]{1,4}){1,4}|(?:[A-Fa-f0-9]{1,4}:){1,2}(?::[A-Fa-f0-9]{1,4}){1,5}|[A-Fa-f0-9]{1,4}:(?::[A-Fa-f0-9]{1,4}){1,6}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|:(?:(?::[A-Fa-f0-9]{1,4}){1,7}|:))(?:\\/(?:12[0-8]|1[01]\\d|\\d?\\d))?",
+      "name": "constant.numeric.ipv6.cisco"
+    },
+    {
+      "match": "\\b(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?:\\/(?:3[0-2]|[12]?\\d))?\\b",
+      "name": "constant.numeric.ip.cisco"
+    },
+    {
+      "match": "\\b(?:TwentyFiveGigE|TwoGigabitEthernet|FiveGigabitEthernet|FortyGigabitEthernet|HundredGigE|TenGigabitEthernet|GigabitEthernet|FastEthernet|Bundle-Ether|Virtual-Template|Virtual-Access|Port-channel|Group-Async|Multilink|Management|Cellular|Loopback|Ethernet|Serial|Dialer|Tunnel|Async|TenGigE|FortyGigE|GigE|Vlan|mgmt|nve|BVI|ATM|POS|Gig|Twe|Hu|Fo|Fi|Gi|Fa|Te|Ser|Se|Lo|Tun|Tu|Vl|Ma|Eth|Et)[ \\t]*\\d+(?:\\/\\d+)*(?:[.:]\\d+)?\\b",
+      "name": "entity.name.type.interface.cisco"
+    },
+    {
+      "match": "(^[ \\t]*)(no|default)(?=[ \\t]|$)",
+      "captures": {
+        "2": {
+          "name": "keyword.control.negation.cisco"
+        }
+      }
+    },
+    {
+      "match": "\\b(?:configure|terminal|disable|enable|logout|login|conf|exit|end|do)\\b",
+      "name": "keyword.control.mode.cisco"
+    },
+    {
+      "match": "\\b(?:frame-relay|fabricpath|rapid-pvst|connected|kerberos|tacacs\\+|netflow|ospfv3|isakmp|dhcpv6|syslog|telnet|icmpv6|tacacs|radsec|radius|macsec|static|eigrp|ripng|is-is|l2vpn|vxlan|dot1q|ipsec|ikev1|ikev2|https|sflow|ipfix|dot1x|ospf|isis|mpls|rsvp|vpls|evpn|igmp|msdp|hsrp|vrrp|glbp|pvst|mstp|rstp|lldp|lacp|pagp|udld|l2tp|pptp|hdlc|dhcp|sntp|snmp|tftp|sftp|http|icmp|ldap|bgp|rip|ldp|otv|pim|bfd|mst|stp|cdp|vtp|dtp|isl|gre|esp|ppp|atm|pos|dns|ntp|ftp|scp|ssh|tcp|udp|arp|ndp|eap|ah)\\b",
+      "name": "support.type.protocol.cisco"
+    },
+    {
+      "match": "\\b(?:route-reflector-client|advertisement-interval|log-adjacency-changes|soft-reconfiguration|default-information|password-encryption|ingress-replication|anycast-gateway-mac|authentication-key|mac-address-table|passive-interface|aggregate-address|multicast-routing|channel-protocol|graceful-restart|revocation-check|source-interface|absolute-timeout|default-gateway|summary-address|distribute-list|session-timeout|max-connections|address-family|service-policy|priority-queue|authentication|helper-address|traffic-filter|send-community|maximum-prefix|network-object|server-private|pre-shared-key|algorithm-type|peer-keepalive|priority-level|parameter-map|domain-lookup|spanning-tree|carrier-delay|encapsulation|port-security|channel-group|storm-control|bridge-domain|load-interval|maximum-paths|update-source|next-hop-self|ebgp-multihop|discard-route|tag-switching|authorization|tacacs-server|radius-server|transform-set|reverse-route|discriminator|secure-server|auto-recovery|random-detect|object-group|port-channel|netconf-yang|access-group|redistribute|auto-summary|ttl-security|virtual-link|route-target|group-object|access-class|authenticate|exec-timeout|peer-gateway|port-profile|domain-name|name-server|prefix-list|access-list|description|negotiation|flowcontrol|nonegotiate|filter-list|offset-list|label-range|established|port-object|snmp-server|trusted-key|summer-time|synchronous|queue-limit|definition|time-range|errdisable|controller|redundancy|policy-map|media-type|hold-queue|unnumbered|switchport|bpdufilter|forwarding|peer-group|rp-address|capability|precedence|accounting|encryption|crypto-map|trustpoint|enrollment|rsakeypair|inspection|chassis-id|rate-limit|nopassword|timestamps|interface|stackwise|scheduler|class-map|route-map|telemetry|bandwidth|keepalive|secondary|protected|violation|bpduguard|proxy-arp|originate|router-id|remote-as|fall-over|sham-link|log-input|fragments|new-model|transport|zone-pair|community|preferred|privilege|peer-link|match-all|match-any|hostname|calendar|platform|restconf|overload|shutdown|portfast|instance|xconnect|distance|neighbor|activate|variance|throttle|on-match|continue|sequence|evaluate|lifetime|proposal|firewall|snooping|location|engineid|buffered|facility|timezone|username|generate|datetime|password|jumbomtu|hardware|service|version|license|feature|install|archive|manager|monitor|context|address|allowed|maximum|standby|preempt|outside|network|totally|reflect|dynamic|keyring|profile|inspect|contact|logging|console|history|zeroize|overlay|reload|system|applet|domain|duplex|native|access|sticky|inline|timers|inside|member|router|metric|permit|remark|option|method|crypto|policy|tunnel|verify|server|master|output|secret|length|uptime|banner|police|write|clock|event|track|alias|chain|speed|delay|dot1q|trunk|voice|aging|guard|power|route|match|range|dot1x|local|ikev1|ikev2|group|traps|input|width|class|shape|boot|copy|ipv6|host|lldp|udld|vlan|flow|name|pool|mode|lacp|pagp|vrrp|glbp|area|stub|nssa|deny|dscp|exec|none|hash|peer|zone|pass|drop|user|view|sntp|line|path|motd|copp|role|nxos|vdc|arp|mtu|vrf|key|cdp|vtp|isl|nat|nve|vni|set|any|neq|log|tos|ttl|aaa|mab|pki|run|vty|aux|rsa|vpc|fex|qos|ip|eq|gt|lt|nv)\\b",
+      "name": "keyword.other.cisco"
+    },
+    {
+      "match": "\\b(?:0x[0-9A-Fa-f]+|\\d+(?:\\.\\d+)?)\\b",
+      "name": "constant.numeric.cisco"
+    },
+    {
+      "match": "[=<>]",
+      "name": "keyword.operator.cisco"
+    },
+    {
+      "match": "[,]",
+      "name": "punctuation.separator.cisco"
+    }
+  ]
+}

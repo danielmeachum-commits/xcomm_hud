@@ -14,7 +14,7 @@ interface RankProps {
   branch: Branch | null
   personnelType: PersonnelType
   rank: string | null
-  /** Pixel size — controls both width and height. */
+  /** Pixel size — caps both width and height; aspect ratio is preserved. */
   size?: number
   className?: string
 }
@@ -51,6 +51,7 @@ export function RankInsignia({
       alt={rank ?? ""}
       width={size}
       height={size}
+      style={{ maxWidth: size, maxHeight: size, width: "auto", height: "auto" }}
       className={cn("inline-block object-contain", className)}
       onError={() => setErrored(true)}
     />
