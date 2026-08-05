@@ -1,6 +1,6 @@
 "use client"
 
-import { Boxes, List, Network, Search } from "lucide-react"
+import { Boxes, List, Network, Search, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
@@ -75,6 +75,10 @@ export function EquipmentPageClient({
   const [enclaveFilter, setEnclaveFilter] = useState<number | "all" | "none">(
     "all",
   )
+  // Which UTC a piece of gear came in on is the question asked right after a
+  // deploy — "did that land, and where is it?" — and the flat list had no way
+  // to answer it. "none" is again a real answer: gear detached from its UTC.
+  const [utcFilter, setUtcFilter] = useState<number | "all" | "none">("all")
 
   function setView(next: View) {
     const params = new URLSearchParams(searchParams.toString())
@@ -95,6 +99,13 @@ export function EquipmentPageClient({
     const term = search.trim().toLowerCase()
     return equipment.filter((e) => {
       if (siteFilter !== "all" && e.site_id !== siteFilter) return false
+      if (utcFilter === "none" && e.utc_instance_id !== null) return false
+      if (
+        utcFilter !== "all" &&
+        utcFilter !== "none" &&
+        e.utc_instance_id !== utcFilter
+      )
+        return false
       if (enclaveFilter === "none" && e.enclave_id !== null) return false
       if (
         enclaveFilter !== "all" &&
@@ -115,7 +126,7 @@ export function EquipmentPageClient({
         )
       )
     })
-  }, [equipment, search, siteFilter, enclaveFilter, aliasesByTypeId])
+  }, [equipment, search, siteFilter, utcFilter, enclaveFilter, aliasesByTypeId])
 
   const bySite = useMemo(() => {
     const map = new Map<number, Equipment[]>()
@@ -132,6 +143,43 @@ export function EquipmentPageClient({
     [sites],
   )
   const utcById = useMemo(() => new Map(utcs.map((u) => [u.id, u])), [utcs])
+
+  /** UTCs under the package they deployed with, packages in name order and the
+   *  standalone ones last. A package is the unit an operator thinks in — it's
+   *  what they deployed and what they tear down — but nothing in this view used
+   *  to show it. */
+  const utcGroups = useMemo(() => {
+    const byPackage = new Map<number | null, UtcInstance[]>()
+    // Seeded with every package, including ones whose last UTC was deleted:
+    // an empty package is still a real row, and if it isn't shown there is no
+    // way left to reach it — the teardown that emptied it strands it.
+    for (const p of packages) byPackage.set(p.id, [])
+    for (const u of utcs) {
+      const k = u.package_instance_id ?? null
+      const bucket = byPackage.get(k)
+      if (bucket) bucket.push(u)
+      else byPackage.set(k, [u])
+    }
+    // Within a package, the primary leads and its extensions follow — the order
+    // the deployment is described in, not the order the rows were inserted.
+    const rank: Record<UtcInstance["role"], number> = {
+      primary: 0,
+      extension: 1,
+      independent: 2,
+    }
+    return [...byPackage.entries()]
+      .map(([k, grouped]) => ({
+        key: String(k ?? "none"),
+        package: k === null ? null : (packages.find((p) => p.id === k) ?? null),
+        utcs: [...grouped].sort(
+          (a, b) => rank[a.role] - rank[b.role] || a.name.localeCompare(b.name),
+        ),
+      }))
+      .sort((a, b) => {
+        if (!a.package !== !b.package) return a.package ? -1 : 1
+        return (a.package?.name ?? "").localeCompare(b.package?.name ?? "")
+      })
+  }, [utcs, packages])
   const enclaveById = useMemo(
     () => new Map(enclaves.map((e) => [e.id, e])),
     [enclaves],
@@ -195,6 +243,37 @@ export function EquipmentPageClient({
                 </option>
               ))}
             </select>
+            {utcs.length > 0 && (
+              <select
+                aria-label="Filter by UTC"
+                value={utcFilter}
+                onChange={(e) =>
+                  setUtcFilter(
+                    e.target.value === "all" || e.target.value === "none"
+                      ? (e.target.value as "all" | "none")
+                      : Number(e.target.value),
+                  )
+                }
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="all">All UTCs</option>
+                {/* Grouped by package, so "everything that went out with FCP-1"
+                    is one glance rather than a name-matching exercise. */}
+                {utcGroups.map((g) => (
+                  <optgroup
+                    key={g.key}
+                    label={g.package?.name ?? "No package"}
+                  >
+                    {g.utcs.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value="none">No UTC</option>
+              </select>
+            )}
             {enclaves.length > 0 && (
               <select
                 aria-label="Filter by enclave"
@@ -224,7 +303,7 @@ export function EquipmentPageClient({
       {view === "topology" ? (
         <NetworkCanvas topology={topology} enclaves={enclaves} />
       ) : view === "utcs" ? (
-        utcs.length === 0 ? (
+        utcs.length === 0 && packages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-12 text-center">
             <Boxes className="size-6 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
@@ -232,30 +311,59 @@ export function EquipmentPageClient({
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {utcs.map((u) => (
-              <section
-                key={u.id}
-                className="rounded-xl border border-border p-4"
-              >
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <Link
-                    href={w(`/equipment/utc/${u.id}`)}
-                    className="font-medium hover:underline"
-                  >
-                    {u.name}
-                  </Link>
-                  {u.utc_def_code && (
-                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                      {u.utc_def_code}
-                    </span>
-                  )}
+          <div className="flex flex-col gap-6">
+            {utcGroups.map((g) => (
+              <div key={g.key} className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-semibold tracking-tight">
+                    {g.package?.name ?? "Standalone"}
+                  </h2>
                   <span className="text-xs text-muted-foreground">
-                    {siteById.get(u.site_id)?.name ?? u.site_name}
+                    {g.utcs.length === 0
+                      ? "empty"
+                      : `${g.utcs.length} UTC${g.utcs.length === 1 ? "" : "s"}`}
                   </span>
+                  {g.package && (
+                    <PackageTeardown
+                      packageInstance={g.package}
+                      utcs={g.utcs}
+                      equipment={equipment}
+                    />
+                  )}
                 </div>
-                <UtcCompletenessPanel utc={u} enclaves={enclaves} />
-              </section>
+                {g.utcs.map((u) => (
+                  <section
+                    key={u.id}
+                    className="rounded-xl border border-border p-4"
+                  >
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <Link
+                        href={w(`/equipment/utc/${u.id}`)}
+                        className="font-medium hover:underline"
+                      >
+                        {u.name}
+                      </Link>
+                      {u.utc_def_code && (
+                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                          {u.utc_def_code}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        {siteById.get(u.site_id)?.name ?? u.site_name}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        ·{" "}
+                        {
+                          equipment.filter((e) => e.utc_instance_id === u.id)
+                            .length
+                        }{" "}
+                        serialized
+                      </span>
+                    </div>
+                    <UtcCompletenessPanel utc={u} enclaves={enclaves} />
+                  </section>
+                ))}
+              </div>
             ))}
           </div>
         )
@@ -328,13 +436,42 @@ export function EquipmentPageClient({
                                     />
                                   )}
                               </div>
-                              <div className="truncate text-xs text-muted-foreground">
-                                {e.type_category
-                                  ? EQUIPMENT_CATEGORY_LABELS[e.type_category]
-                                  : "—"}
-                                {e.serial_number ? ` · SN ${e.serial_number}` : ""}
-                                {e.nsn ? ` · NSN ${e.nsn}` : ""}
-                                {utc ? ` · ${utc.name}` : ""}
+                              <div className="flex flex-wrap items-center gap-1.5 truncate text-xs text-muted-foreground">
+                                <span className="truncate">
+                                  {e.type_category
+                                    ? EQUIPMENT_CATEGORY_LABELS[e.type_category]
+                                    : "—"}
+                                  {e.serial_number
+                                    ? ` · SN ${e.serial_number}`
+                                    : ""}
+                                  {e.nsn ? ` · NSN ${e.nsn}` : ""}
+                                </span>
+                                {/* The UTC used to be the tail of a run-on
+                                    metadata line, which is where you look last.
+                                    After a deploy it's the first thing asked
+                                    about, so it gets its own chip — with the
+                                    package, since that's the thing that went
+                                    out. Not a link: this whole row already is
+                                    one, and anchors can't nest. */}
+                                <span
+                                  className={cn(
+                                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                                    utc
+                                      ? "border-border"
+                                      : "border-dashed text-muted-foreground/70",
+                                  )}
+                                >
+                                  <Boxes className="size-3" />
+                                  {/* Names are usually suggested from the
+                                      package ("FCP-1 Primary"), so naming both
+                                      would stutter. */}
+                                  {utc
+                                    ? utc.package_name &&
+                                      !utc.name.startsWith(utc.package_name)
+                                      ? `${utc.package_name} · ${utc.name}`
+                                      : utc.name
+                                    : "No UTC"}
+                                </span>
                               </div>
                             </div>
                           </Link>
@@ -373,6 +510,93 @@ export function EquipmentPageClient({
             })}
         </div>
       )}
+    </>
+  )
+}
+
+/** Tear a deployed package down to nothing.
+ *
+ *  A package deploy that half-succeeded leaves gear registered under UTCs that
+ *  were never finished, and unpicking it one PATCH at a time through the flat
+ *  equipment list is what "I can't start over" actually means. This does the
+ *  whole thing in the order the foreign keys demand — equipment, then UTCs,
+ *  then the package — because `DELETE /packages/{id}` alone only nulls the
+ *  UTCs' package_instance_id and leaves the deployment standing.
+ *
+ *  It stops at the first failure and says how far it got, rather than
+ *  reporting success over a partial teardown. */
+function PackageTeardown({
+  packageInstance,
+  utcs,
+  equipment,
+}: {
+  packageInstance: PackageInstance
+  utcs: UtcInstance[]
+  equipment: Equipment[]
+}) {
+  const router = useRouter()
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const utcIds = new Set(utcs.map((u) => u.id))
+  const gear = equipment.filter(
+    (e) => e.utc_instance_id !== null && utcIds.has(e.utc_instance_id),
+  )
+
+  async function del(url: string, what: string) {
+    const res = await fetch(url, { method: "DELETE" })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      const detail = body?.detail
+      throw new Error(
+        `${what}: ${typeof detail === "string" ? detail : `failed (${res.status})`}`,
+      )
+    }
+  }
+
+  async function run() {
+    const contents =
+      utcs.length === 0
+        ? "It has nothing deployed under it."
+        : `This permanently deletes ${utcs.length} UTC${utcs.length === 1 ? "" : "s"} ` +
+          `and ${gear.length} serialized item${gear.length === 1 ? "" : "s"}, ` +
+          `along with their bulk holdings and capability bindings.\n\n` +
+          `This cannot be undone.`
+    if (!confirm(`Delete package “${packageInstance.name}”?\n\n${contents}`))
+      return
+    setPending(true)
+    setError(null)
+    try {
+      for (const e of gear) {
+        await del(`/api/be/equipment/${e.id}`, e.equipment_code)
+      }
+      for (const u of utcs) {
+        await del(`/api/be/utcs/${u.id}`, u.name)
+      }
+      await del(`/api/be/packages/${packageInstance.id}`, packageInstance.name)
+      router.refresh()
+    } catch (e) {
+      setError(
+        `${e instanceof Error ? e.message : "Teardown failed"} — some of it may already be deleted.`,
+      )
+      router.refresh()
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={run}
+        className="inline-flex items-center gap-1 rounded-full border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+      >
+        <Trash2 className="size-3" />
+        {pending ? "Deleting…" : "Delete package"}
+      </button>
+      {error && <span className="text-[11px] text-destructive">{error}</span>}
     </>
   )
 }

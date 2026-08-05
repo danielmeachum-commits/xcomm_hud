@@ -24,6 +24,11 @@ export const SUBJECT_KIND_LABELS: Record<SubjectKind, string> = {
   personnel_location: "Personnel",
   document: "Document",
   doc_page: "Doc page",
+  equipment: "Equipment",
+  equipment_capability: "Capability",
+  equipment_link: "Equipment link",
+  utc_instance: "UTC",
+  package_instance: "Package",
 }
 
 export const REGISTRY_TYPE_LABELS: Record<string, string> = {
@@ -40,4 +45,9 @@ export const REGISTRY_TYPE_LABELS: Record<string, string> = {
   "doc_page.created": "Doc page created",
   "doc_page.updated": "Doc page updated",
   "doc_page.deleted": "Doc page deleted",
+  "equipment.registered": "Equipment registered",
+  "equipment.deleted": "Equipment deleted",
+  "utc.deployed": "UTC deployed",
+  "utc.deleted": "UTC deleted",
+  "package.deleted": "Package deleted",
 }

@@ -78,6 +78,7 @@ SubjectKind = Literal[
     "equipment_capability",
     "equipment_link",
     "utc_instance",
+    "package_instance",
 ]
 # Runtime view of the Literal above. `SubjectKind` stays the single declaration
 # of what a kind may be; anything needing membership at runtime derives it here
@@ -119,6 +120,7 @@ class SubjectKinds:
     EQUIPMENT_CAPABILITY: SubjectKind = "equipment_capability"
     EQUIPMENT_LINK: SubjectKind = "equipment_link"
     UTC_INSTANCE: SubjectKind = "utc_instance"
+    PACKAGE_INSTANCE: SubjectKind = "package_instance"
 
 
 # Adding a kind means adding it to the Literal and to the class above; this
@@ -167,6 +169,7 @@ GENERAL_SUBJECT_KINDS = {
     # being rewired is news, but it isn't a validation.
     SubjectKinds.EQUIPMENT_LINK,
     SubjectKinds.UTC_INSTANCE,
+    SubjectKinds.PACKAGE_INSTANCE,
 }
 # Free-text scopes — general events on these ride on subject_label alone and
 # have no row to resolve.

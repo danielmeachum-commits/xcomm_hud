@@ -96,6 +96,28 @@ ACTIONS: dict[str, Action] = {
         event_type="general",
         kinds=(SubjectKinds.UTC_INSTANCE,),
     ),
+    # ---------- Deletions ----------
+    # Removing accountable property, a deployment, or a whole package left no
+    # trace at all: the row vanished and nothing recorded who did it or what
+    # was in it. These are the mirror image of the registration/deployment
+    # records above and classified the same way they are — `log`/`info`, an
+    # audit trail rather than something to alert on. The label and counts are
+    # the whole point, since the subject_id they carry no longer resolves.
+    "equipment.deleted": Action(
+        record_class="log", severity="info", kinds=(SubjectKinds.EQUIPMENT,)
+    ),
+    "utc.deleted": Action(
+        record_class="log",
+        severity="info",
+        event_type="general",
+        kinds=(SubjectKinds.UTC_INSTANCE,),
+    ),
+    "package.deleted": Action(
+        record_class="log",
+        severity="info",
+        event_type="general",
+        kinds=(SubjectKinds.PACKAGE_INSTANCE,),
+    ),
 }
 
 

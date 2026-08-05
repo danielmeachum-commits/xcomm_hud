@@ -15,6 +15,7 @@ import datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from action_registry import record_action
 from db import get_db
 from deps import get_current_workspace, requires
 from equipment_codes import resolve_code
@@ -53,6 +54,7 @@ from schemas import (
     PackageInstanceIn,
     PackageInstanceOut,
     PackageInstancePatch,
+    SubjectKinds,
     UtcCompletenessLine,
     UtcCompletenessOut,
     UtcDeployIn,
@@ -384,9 +386,31 @@ def delete_package(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    _=Depends(requires("operator")),
+    current_user: User = Depends(requires("operator")),
 ):
     row = _load_package(db, package_id, workspace)
+    # Deleting a package does not delete its UTCs — the FK is SET NULL, so
+    # they carry on as standalone deployments. Recording how many were cut
+    # loose is the only way to explain later why they have no package.
+    orphaned = (
+        db.query(UtcInstance)
+        .filter(UtcInstance.package_instance_id == row.id)
+        .count()
+    )
+    record_action(
+        db,
+        action_slug="package.deleted",
+        workspace_id=workspace.id,
+        subject_kind=SubjectKinds.PACKAGE_INSTANCE,
+        subject_id=row.id,
+        subject_label=row.name,
+        user_id=current_user.id,
+        note=(
+            f"{orphaned} UTC{'' if orphaned == 1 else 's'} kept, now standalone"
+            if orphaned
+            else "No UTCs were attached"
+        ),
+    )
     db.delete(row)
     notify(background_tasks)
 
@@ -478,7 +502,7 @@ def delete_utc(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    _=Depends(requires("operator")),
+    current_user: User = Depends(requires("operator")),
 ):
     """Delete a deployed UTC.
 
@@ -488,6 +512,28 @@ def delete_utc(
     would be indefensible.
     """
     row = _load_utc(db, utc_id, workspace)
+    # How much gear is about to be orphaned is the part worth keeping: after
+    # the delete nothing connects those rows to the UTC they arrived on.
+    detached = (
+        db.query(Equipment).filter(Equipment.utc_instance_id == row.id).count()
+    )
+    site = db.get(Site, row.site_id)
+    record_action(
+        db,
+        action_slug="utc.deleted",
+        workspace_id=workspace.id,
+        subject_kind=SubjectKinds.UTC_INSTANCE,
+        subject_id=row.id,
+        second_subject_id=row.site_id,
+        subject_label=row.name,
+        user_id=current_user.id,
+        note=(
+            f"{detached} serialized item{'' if detached == 1 else 's'} left registered"
+            f" with no UTC at {site.name if site else 'the site'}"
+            if detached
+            else "No serialized gear was attached"
+        ),
+    )
     db.delete(row)
     notify(background_tasks)
 

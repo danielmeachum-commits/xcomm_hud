@@ -120,6 +120,7 @@ export function UtcDetailClient({
             </p>
           )}
         </div>
+        <DeleteUtc utc={utc} equipmentCount={equipment.length} />
       </header>
 
       <UtcCompletenessPanel utc={utc} enclaves={enclaves} />
@@ -196,6 +197,120 @@ export function UtcDetailClient({
   )
 }
 
+/** Delete this deployment.
+ *
+ *  The server deliberately does NOT take the gear with it — `utc_instance_id`
+ *  is SET NULL, because a radio outlives the UTC it arrived in. That is right
+ *  for a redeployment and wrong for "this deploy was a mistake, start over",
+ *  which leaves phantom equipment nobody can account for. So the choice is put
+ *  in front of the operator instead of being decided for them, and the gear is
+ *  deleted first — after the UTC is gone there's nothing left to find it by. */
+function DeleteUtc({
+  utc,
+  equipmentCount,
+}: {
+  utc: UtcInstance
+  equipmentCount: number
+}) {
+  const router = useRouter()
+  const { w } = useWorkspace()
+  const [open, setOpen] = useState(false)
+  const [withGear, setWithGear] = useState(true)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run() {
+    setPending(true)
+    setError(null)
+    try {
+      if (withGear && equipmentCount > 0) {
+        const list: Equipment[] = await fetch(
+          `/api/be/equipment?utc_instance_id=${utc.id}`,
+        ).then((r) => (r.ok ? r.json() : []))
+        for (const e of list) {
+          const res = await fetch(`/api/be/equipment/${e.id}`, {
+            method: "DELETE",
+          })
+          if (!res.ok) throw new Error(`${e.equipment_code} (${res.status})`)
+        }
+      }
+      const res = await fetch(`/api/be/utcs/${utc.id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error(`the UTC itself (${res.status})`)
+      router.push(w("/equipment?view=utcs"))
+      router.refresh()
+    } catch (e) {
+      setError(
+        `Could not delete ${e instanceof Error ? e.message : "it"} — anything already deleted stays deleted.`,
+      )
+      setPending(false)
+      router.refresh()
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 className="size-3.5" />
+        Delete UTC
+      </Button>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 p-3">
+      <p className="text-xs">
+        Delete <span className="font-medium">{utc.name}</span>? Its bulk
+        holdings and expected contents go with it.
+      </p>
+      {equipmentCount > 0 && (
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={withGear}
+            disabled={pending}
+            onChange={(e) => setWithGear(e.target.checked)}
+          />
+          Also delete its {equipmentCount} serialized{" "}
+          {equipmentCount === 1 ? "item" : "items"}
+          <span className="text-muted-foreground">
+            — unchecked, they stay registered with no UTC
+          </span>
+        </label>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive"
+          disabled={pending}
+          onClick={run}
+        >
+          {pending ? "Deleting…" : "Delete"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={pending}
+          onClick={() => {
+            setOpen(false)
+            setError(null)
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function EquipmentRow({
   equipment,
   enclaves,
@@ -238,6 +353,19 @@ function EquipmentRow({
       })
       if (res.ok) router.refresh()
       return res.ok
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function destroy() {
+    setPending(true)
+    try {
+      const res = await fetch(`/api/be/equipment/${equipment.id}`, {
+        method: "DELETE",
+      })
+      if (res.ok) router.refresh()
+      else alert(`Could not delete ${equipment.equipment_code} (${res.status}).`)
     } finally {
       setPending(false)
     }
@@ -355,6 +483,31 @@ function EquipmentRow({
             >
               <Trash2 className="size-3.5" />
               Remove from UTC
+            </Button>
+
+            {/* Detaching and deleting are different acts and were not
+                distinguishable before: a serial typed wrong during a deploy has
+                to be *unregistered*, not handed back to the pool as a phantom
+                radio nobody owns. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={pending}
+              title="Unregisters this gear entirely"
+              onClick={() => {
+                if (
+                  confirm(
+                    `Delete ${equipment.equipment_code} permanently? ` +
+                      `It stops existing in the workspace, along with its capabilities and bindings. This cannot be undone.`,
+                  )
+                )
+                  destroy()
+              }}
+            >
+              <Trash2 className="size-3.5" />
+              Delete
             </Button>
           </div>
 

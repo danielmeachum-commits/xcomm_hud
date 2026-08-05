@@ -82,6 +82,15 @@ export type SubjectKind =
   | "workspace"
   | "document"
   | "doc_page"
+  // The equipment tier's kinds were never mirrored here, so the feed rendered
+  // them as their raw slug ("utc_instance") while every other kind had a
+  // label. Adding them means SUBJECT_KIND_LABELS stops compiling until each
+  // one is named, which is the point.
+  | "equipment"
+  | "equipment_capability"
+  | "equipment_link"
+  | "utc_instance"
+  | "package_instance"
 
 export type EventType = "validation" | "general" | "personnel"
 

@@ -1150,6 +1150,141 @@ function CodeFields({
 
 // ===================== Package definition =====================
 
+/** One UTC a package calls for, while it's being authored. No `id` — the save
+ *  path replaces the whole list, and `display_order` is the array order. */
+interface PackageUtcDraft {
+  utc_def_id: number | ""
+  quantity: number
+  role_hint: UtcRoleHint
+}
+
+/** What a package is made of: which UTCs, how many, and what each is for.
+ *
+ *  This was the one part of the catalog with no editor at all — a package
+ *  definition could be created but never corrected, so a package that named
+ *  the wrong extension stayed wrong and every deploy from it started with
+ *  manual surgery. The role hint matters more here than it looks: the deploy
+ *  wizard reads it to preset each queued UTC's role. */
+function PackageUtcEditor({
+  rows,
+  onChange,
+  utcDefs,
+  disabled,
+}: {
+  rows: PackageUtcDraft[]
+  onChange: (next: PackageUtcDraft[]) => void
+  utcDefs: UtcDef[]
+  disabled: boolean
+}) {
+  function update(index: number, patch: Partial<PackageUtcDraft>) {
+    onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {rows.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border p-3 text-[11px] text-muted-foreground">
+          No UTCs yet — a package with none deploys nothing.
+        </p>
+      )}
+      {rows.map((row, index) => {
+        const chosen = row.utc_def_id
+          ? utcDefs.find((u) => u.id === Number(row.utc_def_id))
+          : undefined
+        // A def already on the row but retired out of the list still has to
+        // appear, or editing an unrelated field would silently blank it.
+        const options =
+          chosen && !utcDefs.some((u) => u.id === chosen.id)
+            ? [...utcDefs, chosen]
+            : utcDefs
+        return (
+          // Stacked rather than one wide row: the sheet is narrow enough that
+          // a UTC select sharing a line with role and quantity truncated the
+          // code down to "6KFCP —", which is the only part worth reading.
+          <div
+            key={index}
+            className="flex flex-col gap-1.5 rounded-lg border border-border p-2"
+          >
+            <select
+              aria-label="UTC definition"
+              className={cn(SELECT_CLASS, "h-8 w-full")}
+              value={row.utc_def_id}
+              disabled={disabled}
+              onChange={(e) =>
+                update(index, {
+                  utc_def_id: e.target.value ? Number(e.target.value) : "",
+                })
+              }
+            >
+              <option value="">Select a UTC…</option>
+              {options.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.code} — {u.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                aria-label="Role hint"
+                className={cn(SELECT_CLASS, "h-8 flex-1")}
+                value={row.role_hint}
+                disabled={disabled}
+                onChange={(e) =>
+                  update(index, { role_hint: e.target.value as UtcRoleHint })
+                }
+              >
+                {(Object.keys(ROLE_HINT_LABELS) as UtcRoleHint[]).map((h) => (
+                  <option key={h} value={h}>
+                    {ROLE_HINT_LABELS[h]}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-muted-foreground">×</span>
+              <Input
+                type="number"
+                min={1}
+                aria-label="Quantity"
+                className="h-8 w-16"
+                value={row.quantity}
+                disabled={disabled}
+                onChange={(e) =>
+                  update(index, {
+                    quantity: Math.max(1, Number(e.target.value) || 1),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label="Remove UTC"
+                disabled={disabled}
+                onClick={() => onChange(rows.filter((_, i) => i !== index))}
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+          </div>
+        )
+      })}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-7 self-start text-xs"
+        disabled={disabled}
+        onClick={() =>
+          onChange([...rows, { utc_def_id: "", quantity: 1, role_hint: "either" }])
+        }
+      >
+        <Plus className="size-3.5" />
+        Add UTC
+      </Button>
+    </div>
+  )
+}
+
 export function PackageDefSheet({
   def,
   utcDefs,
@@ -1168,6 +1303,7 @@ export function PackageDefSheet({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<CodeForm | null>(null)
+  const [utcRows, setUtcRows] = useState<PackageUtcDraft[]>([])
 
   useEffect(() => {
     setEditing(false)
@@ -1176,6 +1312,17 @@ export function PackageDefSheet({
       def
         ? { code: def.code, name: def.name, description: def.description ?? "" }
         : null,
+    )
+    setUtcRows(
+      def
+        ? [...def.utcs]
+            .sort((a, b) => a.display_order - b.display_order)
+            .map((u) => ({
+              utc_def_id: u.utc_def_id,
+              quantity: u.quantity,
+              role_hint: u.role_hint,
+            }))
+        : [],
     )
   }, [def])
 
@@ -1194,9 +1341,37 @@ export function PackageDefSheet({
       name: form.name.trim(),
       description: form.description.trim() || null,
     })
-    setPending(false)
     if (err) {
+      setPending(false)
       setError(err)
+      return
+    }
+    // The UTC list has its own wholesale-replace endpoint. Only call it when
+    // something actually changed — order is meaningful here, so this compares
+    // the sequence rather than a sorted set.
+    const payload = utcRows
+      .filter((r) => r.utc_def_id !== "")
+      .map((r) => ({
+        utc_def_id: Number(r.utc_def_id),
+        quantity: r.quantity,
+        role_hint: r.role_hint,
+      }))
+    const key = (r: { utc_def_id: number; quantity: number; role_hint: string }) =>
+      `${r.utc_def_id}:${r.quantity}:${r.role_hint}`
+    const before = [...def.utcs]
+      .sort((a, b) => a.display_order - b.display_order)
+      .map(key)
+      .join("|")
+    const after = payload.map(key).join("|")
+    const utcsErr =
+      before !== after
+        ? await put(`/api/be/package-defs/${def.id}/utcs`, payload)
+        : null
+    setPending(false)
+    if (utcsErr) {
+      // The code/name already saved; say so rather than implying a rollback.
+      setError(`Details saved, but the UTC list failed: ${utcsErr}`)
+      router.refresh()
       return
     }
     setEditing(false)
@@ -1221,7 +1396,23 @@ export function PackageDefSheet({
 
             <div className="flex-1 overflow-y-auto px-4 pb-4">
               {editing && form ? (
-                <CodeFields form={form} setForm={setForm} pending={pending} />
+                <div className="flex flex-col gap-4">
+                  <CodeFields form={form} setForm={setForm} pending={pending} />
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Unit type codes</Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Which UTCs go out under this package, how many of each,
+                      and what each is for. The deploy wizard queues exactly
+                      this list and presets each UTC&apos;s role from its hint.
+                    </p>
+                    <PackageUtcEditor
+                      rows={utcRows}
+                      onChange={setUtcRows}
+                      utcDefs={utcDefs}
+                      disabled={pending}
+                    />
+                  </div>
+                </div>
               ) : (
                 <div className="flex flex-col gap-4">
                   {def.description && (

@@ -20,6 +20,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy import Text, or_
 from sqlalchemy.orm import Session
 
+from action_registry import record_action
 from db import get_db
 from deps import get_current_workspace, requires
 from equipment_codes import resolve_code
@@ -53,6 +54,7 @@ from schemas import (
     EquipmentOut,
     EquipmentPatch,
     EquipmentStatusIn,
+    SubjectKinds,
 )
 
 router = APIRouter(tags=["equipment"])
@@ -523,9 +525,24 @@ def delete_equipment(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    _=Depends(requires("operator")),
+    current_user: User = Depends(requires("operator")),
 ):
     eq = _load_equipment(db, equipment_id, workspace)
+    # Recorded before the delete, while there is still something to describe.
+    # Serialized gear is accountable property — it disappearing with no trace
+    # of who unregistered it is the one thing an audit feed must not allow.
+    record_action(
+        db,
+        action_slug="equipment.deleted",
+        workspace_id=workspace.id,
+        subject_kind=SubjectKinds.EQUIPMENT,
+        subject_id=eq.id,
+        subject_label=eq.equipment_code,
+        user_id=current_user.id,
+        note=(
+            f"Serial {eq.serial_number}" if eq.serial_number else "No serial recorded"
+        ),
+    )
     db.delete(eq)
     notify(background_tasks)
 
