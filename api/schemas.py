@@ -36,6 +36,25 @@ ServiceCategory = Literal["critical", "sustainment", "other"]
 ServiceReach = Literal["local", "external"]
 GatewayKind = Literal["milsat", "commercial", "other"]
 GatewayPace = Literal["primary", "alternate", "contingency", "emergency"]
+# --- Equipment tier (mirrors the tuples in models.py) ---
+EquipmentCategory = Literal[
+    "radio", "satcom", "crypto", "network", "compute", "power", "antenna",
+    "cable", "other",
+]
+CapabilityKind = Literal[
+    "voice", "data", "video", "satcom_rf", "los_rf", "routing", "switching",
+    "crypto", "power", "other",
+]
+# Its own set — gear goes to `maintenance`, services and gateways don't.
+EquipmentStatusValue = Literal[
+    "up", "degraded", "down", "maintenance", "offline", "unknown"
+]
+EquipmentLinkKind = Literal["los", "satcom", "fiber", "cable", "wireless", "other"]
+EquipmentLinkDirection = Literal["bidirectional", "a_to_b"]
+UtcRole = Literal["primary", "extension", "independent"]
+UtcRoleHint = Literal["primary", "extension", "either"]
+CapabilityBindRole = Literal["endpoint", "transport"]
+CapabilitySource = Literal["template", "custom"]
 UserRole = Literal["viewer", "operator", "admin"]
 SubjectKind = Literal[
     "service",
@@ -55,6 +74,10 @@ SubjectKind = Literal[
     "workspace",
     "document",
     "doc_page",
+    "equipment",
+    "equipment_capability",
+    "equipment_link",
+    "utc_instance",
 ]
 # Runtime view of the Literal above. `SubjectKind` stays the single declaration
 # of what a kind may be; anything needing membership at runtime derives it here
@@ -92,6 +115,10 @@ class SubjectKinds:
     WORKSPACE: SubjectKind = "workspace"
     DOCUMENT: SubjectKind = "document"
     DOC_PAGE: SubjectKind = "doc_page"
+    EQUIPMENT: SubjectKind = "equipment"
+    EQUIPMENT_CAPABILITY: SubjectKind = "equipment_capability"
+    EQUIPMENT_LINK: SubjectKind = "equipment_link"
+    UTC_INSTANCE: SubjectKind = "utc_instance"
 
 
 # Adding a kind means adding it to the Literal and to the class above; this
@@ -119,6 +146,12 @@ VALIDATION_SUBJECT_KINDS = {
     SubjectKinds.SITE_FPCON,
     SubjectKinds.SITE_EMCON,
     SubjectKinds.SITE_STATUS,
+    # Equipment and its capabilities carry an operator-validated status, so
+    # their changes belong on the validation feed alongside services and
+    # gateways. Note this does NOT make them cascade into service/gateway
+    # status — see the advisory-only contract in api/effective.py.
+    SubjectKinds.EQUIPMENT,
+    SubjectKinds.EQUIPMENT_CAPABILITY,
 }
 PERSONNEL_SUBJECT_KINDS = {SubjectKinds.PERSONNEL_LOCATION}
 GENERAL_SUBJECT_KINDS = {
@@ -130,6 +163,10 @@ GENERAL_SUBJECT_KINDS = {
     SubjectKinds.UNIT,
     SubjectKinds.WORK_CENTER,
     SubjectKinds.WORKSPACE,
+    # Structural changes, not status changes — a UTC being deployed or a link
+    # being rewired is news, but it isn't a validation.
+    SubjectKinds.EQUIPMENT_LINK,
+    SubjectKinds.UTC_INSTANCE,
 }
 # Free-text scopes — general events on these ride on subject_label alone and
 # have no row to resolve.
@@ -266,10 +303,124 @@ class ExportedWorkspaceMeta(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class ExportedEquipmentTypeCapability(BaseModel):
+    kind: CapabilityKind
+    label: str
+    description: Optional[str] = None
+    display_order: int = 0
+    materialize_by_default: bool = True
+
+
+class ExportedEquipmentType(BaseModel):
+    """A workspace-LOCAL catalog type only.
+
+    Global catalog rows are not exported — they're shared by definition and
+    are resolved on import by title against the target instance's catalog.
+    """
+
+    title: str
+    short_name: Optional[str] = None
+    aliases: list[str] = Field(default_factory=list)
+    nsn: Optional[str] = None
+    lin: Optional[str] = None
+    category: EquipmentCategory = "other"
+    serialized: bool = True
+    id_prefix: str = "R"
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    capabilities: list[ExportedEquipmentTypeCapability] = Field(default_factory=list)
+
+
+class ExportedUtcDefLine(BaseModel):
+    equipment_type_title: str
+    quantity: int = 1
+    notes: Optional[str] = None
+    display_order: int = 0
+
+
+class ExportedUtcDef(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    lines: list[ExportedUtcDefLine] = Field(default_factory=list)
+
+
+class ExportedPackageDefUtc(BaseModel):
+    utc_def_code: str
+    quantity: int = 1
+    role_hint: UtcRoleHint = "either"
+    display_order: int = 0
+
+
+class ExportedPackageDef(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    utcs: list[ExportedPackageDefUtc] = Field(default_factory=list)
+
+
+class ExportedPackageInstance(BaseModel):
+    name: str
+    package_def_code: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ExportedUtcInstance(BaseModel):
+    name: str
+    site_name: str
+    package_name: Optional[str] = None
+    utc_def_code: Optional[str] = None
+    role: UtcRole = "independent"
+    notes: Optional[str] = None
+    display_order: int = 0
+
+
+class ExportedEquipmentCapability(BaseModel):
+    kind: CapabilityKind
+    label: str
+    source: CapabilitySource = "template"
+    notes: Optional[str] = None
+    display_order: int = 0
+    # Bindings travel by name, like everything else in the envelope.
+    service_names: list[str] = Field(default_factory=list)
+    gateway_names: list[str] = Field(default_factory=list)
+
+
+class ExportedEquipment(BaseModel):
+    equipment_code: str
+    serial_number: Optional[str] = None
+    equipment_type_title: str
+    site_name: str
+    utc_name: Optional[str] = None
+    notes: Optional[str] = None
+    capabilities: list[ExportedEquipmentCapability] = Field(default_factory=list)
+
+
+class ExportedEquipmentHolding(BaseModel):
+    utc_name: str
+    equipment_type_title: str
+    authorized_qty: int = 0
+    on_hand_qty: int = 0
+    notes: Optional[str] = None
+
+
+class ExportedEquipmentLink(BaseModel):
+    a_equipment_code: str
+    b_equipment_code: str
+    kind: EquipmentLinkKind = "other"
+    direction: EquipmentLinkDirection = "bidirectional"
+    label: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class WorkspaceExport(BaseModel):
-    # v2 added units / work_centers / teams / personnel. Old (v1) payloads
-    # remain valid — the new lists default to empty.
-    format_version: Literal[1, 2] = 2
+    # v2 added units / work_centers / teams / personnel. v3 added the
+    # equipment tier. Old (v1/v2) payloads remain valid — every newer list
+    # defaults to empty, so importing an older export just yields a
+    # workspace with no equipment.
+    format_version: Literal[1, 2, 3] = 3
     exported_at: datetime.datetime
     workspace: ExportedWorkspaceMeta
     sites: list[ExportedSite] = Field(default_factory=list)
@@ -281,6 +432,15 @@ class WorkspaceExport(BaseModel):
     work_centers: list["ExportedWorkCenter"] = Field(default_factory=list)
     teams: list["ExportedTeam"] = Field(default_factory=list)
     personnel: list["ExportedPersonnel"] = Field(default_factory=list)
+    # --- v3: equipment tier ---
+    equipment_types: list[ExportedEquipmentType] = Field(default_factory=list)
+    utc_defs: list[ExportedUtcDef] = Field(default_factory=list)
+    package_defs: list[ExportedPackageDef] = Field(default_factory=list)
+    package_instances: list[ExportedPackageInstance] = Field(default_factory=list)
+    utc_instances: list[ExportedUtcInstance] = Field(default_factory=list)
+    equipment: list[ExportedEquipment] = Field(default_factory=list)
+    equipment_holdings: list[ExportedEquipmentHolding] = Field(default_factory=list)
+    equipment_links: list[ExportedEquipmentLink] = Field(default_factory=list)
 
 
 class WorkspaceImportIn(BaseModel):
@@ -1515,3 +1675,565 @@ class ExportedPersonnel(BaseModel):
     current_site_name: Optional[str] = None
     current_status_note: Optional[str] = None
     expected_return_at: Optional[datetime.datetime] = None
+
+
+# ===================== Equipment: catalog =====================
+
+
+class EquipmentTypeCapabilityIn(BaseModel):
+    kind: CapabilityKind
+    label: str
+    description: Optional[str] = None
+    display_order: int = 0
+    materialize_by_default: bool = True
+
+
+class EquipmentTypeCapabilityOut(_ORM):
+    id: int
+    equipment_type_id: int
+    kind: CapabilityKind
+    label: str
+    description: Optional[str] = None
+    display_order: int = 0
+    materialize_by_default: bool = True
+
+
+class EquipmentTypeIn(BaseModel):
+    title: str
+    short_name: Optional[str] = None
+    aliases: list[str] = Field(default_factory=list)
+    # Free-form operator facets. Normalized (lowercased, deduped) by the router.
+    tags: list[str] = Field(default_factory=list)
+    nsn: Optional[str] = None
+    lin: Optional[str] = None
+    category: EquipmentCategory = "other"
+    serialized: bool = True
+    id_prefix: str = "R"
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    capabilities: list[EquipmentTypeCapabilityIn] = Field(default_factory=list)
+
+
+class EquipmentTypePatch(BaseModel):
+    title: Optional[str] = None
+    short_name: Optional[str] = None
+    aliases: Optional[list[str]] = None
+    tags: Optional[list[str]] = None
+    nsn: Optional[str] = None
+    lin: Optional[str] = None
+    category: Optional[EquipmentCategory] = None
+    serialized: Optional[bool] = None
+    id_prefix: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    retired: Optional[bool] = None
+
+
+class EquipmentTypeOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    title: str
+    short_name: Optional[str] = None
+    aliases: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    nsn: Optional[str] = None
+    lin: Optional[str] = None
+    category: EquipmentCategory
+    serialized: bool
+    id_prefix: str
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    retired_at: Optional[datetime.datetime] = None
+    capabilities: list[EquipmentTypeCapabilityOut] = Field(default_factory=list)
+    # True when workspace_id is NULL — the UI gates editing on this, since
+    # only admins may touch the global catalog.
+    is_global: bool = False
+
+
+class UtcDefLineIn(BaseModel):
+    equipment_type_id: int
+    quantity: int = 1
+    notes: Optional[str] = None
+    display_order: int = 0
+
+
+class UtcDefLineOut(_ORM):
+    id: int
+    utc_def_id: int
+    equipment_type_id: int
+    quantity: int
+    notes: Optional[str] = None
+    display_order: int = 0
+    # Denormalized for display so the UI doesn't need a second fetch.
+    equipment_type_title: Optional[str] = None
+    equipment_type_short_name: Optional[str] = None
+    serialized: bool = True
+
+
+class UtcDefIn(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    lines: list[UtcDefLineIn] = Field(default_factory=list)
+
+
+class UtcDefPatch(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    retired: Optional[bool] = None
+
+
+class UtcDefOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    code: str
+    name: str
+    description: Optional[str] = None
+    retired_at: Optional[datetime.datetime] = None
+    lines: list[UtcDefLineOut] = Field(default_factory=list)
+    is_global: bool = False
+
+
+class PackageDefUtcIn(BaseModel):
+    utc_def_id: int
+    quantity: int = 1
+    role_hint: UtcRoleHint = "either"
+    display_order: int = 0
+
+
+class PackageDefUtcOut(_ORM):
+    id: int
+    package_def_id: int
+    utc_def_id: int
+    quantity: int
+    role_hint: UtcRoleHint
+    display_order: int = 0
+    utc_def_code: Optional[str] = None
+    utc_def_name: Optional[str] = None
+
+
+class PackageDefIn(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    utcs: list[PackageDefUtcIn] = Field(default_factory=list)
+
+
+class PackageDefPatch(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    retired: Optional[bool] = None
+
+
+class PackageDefOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    code: str
+    name: str
+    description: Optional[str] = None
+    retired_at: Optional[datetime.datetime] = None
+    utcs: list[PackageDefUtcOut] = Field(default_factory=list)
+    is_global: bool = False
+
+
+# ===================== Equipment: deployed instances =====================
+
+
+class PackageInstanceIn(BaseModel):
+    name: str
+    package_def_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class PackageInstancePatch(BaseModel):
+    name: Optional[str] = None
+    package_def_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class PackageInstanceOut(_ORM):
+    id: int
+    workspace_id: int
+    package_def_id: Optional[int] = None
+    name: str
+    notes: Optional[str] = None
+    package_def_code: Optional[str] = None
+    # Sites this package currently touches, derived from its UTCs.
+    site_ids: list[int] = Field(default_factory=list)
+
+
+class UtcInstanceIn(BaseModel):
+    name: str
+    site_id: int
+    package_instance_id: Optional[int] = None
+    utc_def_id: Optional[int] = None
+    role: UtcRole = "independent"
+    notes: Optional[str] = None
+
+
+class UtcInstancePatch(BaseModel):
+    name: Optional[str] = None
+    site_id: Optional[int] = None
+    package_instance_id: Optional[int] = None
+    utc_def_id: Optional[int] = None
+    role: Optional[UtcRole] = None
+    notes: Optional[str] = None
+    display_order: Optional[int] = None
+
+
+class UtcInstanceOut(_ORM):
+    id: int
+    workspace_id: int
+    package_instance_id: Optional[int] = None
+    utc_def_id: Optional[int] = None
+    site_id: int
+    name: str
+    role: UtcRole
+    notes: Optional[str] = None
+    display_order: int = 0
+    utc_def_code: Optional[str] = None
+    site_name: Optional[str] = None
+    package_name: Optional[str] = None
+    # What the link graph says this UTC actually is, independent of the
+    # operator-declared `role`. Null when there aren't enough links to tell.
+    # A mismatch is surfaced in the UI rather than silently reconciled.
+    derived_role: Optional[UtcRole] = None
+
+
+class EquipmentCapabilityIn(BaseModel):
+    kind: CapabilityKind
+    label: str
+    status: EquipmentStatusValue = "unknown"
+    source: CapabilitySource = "custom"
+    notes: Optional[str] = None
+    display_order: int = 0
+
+
+class EquipmentCapabilityPatch(BaseModel):
+    label: Optional[str] = None
+    notes: Optional[str] = None
+    display_order: Optional[int] = None
+
+
+class CapabilityBindingOut(BaseModel):
+    """Where one capability is wired. Both lists are usually short."""
+
+    service_ids: list[int] = Field(default_factory=list)
+    gateway_ids: list[int] = Field(default_factory=list)
+
+
+class EquipmentCapabilityOut(_ORM):
+    id: int
+    equipment_id: int
+    kind: CapabilityKind
+    label: str
+    status: EquipmentStatusValue
+    source: CapabilitySource
+    validated_at: Optional[datetime.datetime] = None
+    validated_by_user_id: Optional[int] = None
+    validated_by_username: Optional[str] = None
+    notes: Optional[str] = None
+    display_order: int = 0
+    bindings: CapabilityBindingOut = Field(default_factory=CapabilityBindingOut)
+
+
+class EquipmentIn(BaseModel):
+    equipment_type_id: int
+    site_id: int
+    serial_number: Optional[str] = None
+    # Omit to let the server generate `<id_prefix><last 4 of serial>`.
+    equipment_code: Optional[str] = None
+    utc_instance_id: Optional[int] = None
+    status: EquipmentStatusValue = "unknown"
+    notes: Optional[str] = None
+    # Which of the type's declared capabilities to materialize. Omit to take
+    # every capability flagged materialize_by_default.
+    capability_kinds: Optional[list[str]] = None
+
+
+class EquipmentPatch(BaseModel):
+    equipment_type_id: Optional[int] = None
+    site_id: Optional[int] = None
+    serial_number: Optional[str] = None
+    equipment_code: Optional[str] = None
+    utc_instance_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class EquipmentStatusIn(BaseModel):
+    status: EquipmentStatusValue
+    note: Optional[str] = None
+    validated_at: Optional[datetime.datetime] = None
+
+
+class EquipmentOut(_ORM):
+    id: int
+    workspace_id: int
+    equipment_type_id: int
+    utc_instance_id: Optional[int] = None
+    site_id: int
+    equipment_code: str
+    serial_number: Optional[str] = None
+    status: EquipmentStatusValue
+    validated_at: Optional[datetime.datetime] = None
+    validated_by_user_id: Optional[int] = None
+    validated_by_username: Optional[str] = None
+    notes: Optional[str] = None
+    # Denormalized catalog fields — the list view needs all of these and
+    # nobody recognizes a piece of gear by type id.
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+    type_category: Optional[EquipmentCategory] = None
+    nsn: Optional[str] = None
+    site_name: Optional[str] = None
+    utc_name: Optional[str] = None
+    capabilities: list[EquipmentCapabilityOut] = Field(default_factory=list)
+
+
+class EquipmentHoldingIn(BaseModel):
+    equipment_type_id: int
+    authorized_qty: int = 0
+    on_hand_qty: int = 0
+    notes: Optional[str] = None
+
+
+class EquipmentHoldingPatch(BaseModel):
+    authorized_qty: Optional[int] = None
+    on_hand_qty: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class EquipmentHoldingOut(_ORM):
+    id: int
+    workspace_id: int
+    utc_instance_id: int
+    equipment_type_id: int
+    authorized_qty: int
+    on_hand_qty: int
+    notes: Optional[str] = None
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+    nsn: Optional[str] = None
+
+
+# --- what a deployed UTC was planned to carry ---
+
+
+class UtcInstanceLineIn(BaseModel):
+    equipment_type_id: int
+    quantity: int = 1
+    notes: Optional[str] = None
+
+
+class UtcInstanceLineOut(_ORM):
+    id: int
+    utc_instance_id: int
+    equipment_type_id: int
+    quantity: int
+    notes: Optional[str] = None
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+    serialized: bool = True
+
+
+# `unknown` is for UTCs deployed before expectations were recorded — no rows
+# means "nobody said", which must not be read as "expected nothing".
+UtcCompletenessStatus = Literal["complete", "short", "over", "unknown"]
+
+
+class UtcCompletenessLine(BaseModel):
+    equipment_type_id: int
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+    serialized: bool = True
+    expected: int
+    actual: int
+    # actual - expected. Negative is short, positive is gear nobody planned for.
+    delta: int
+
+
+class UtcCompletenessOut(BaseModel):
+    """Actual contents measured against this deployment's own expected list.
+
+    Deliberately not measured against `utc_def`: leaving an enclave's stack
+    home is routine, and reporting those omissions as shortfalls forever would
+    train people to ignore the indicator. `def_variance` carries the
+    doctrine comparison separately, as information rather than a warning.
+    """
+
+    utc_instance_id: int
+    status: UtcCompletenessStatus
+    lines: list[UtcCompletenessLine] = Field(default_factory=list)
+    # Expected-vs-doctrine, populated only when the UTC has a utc_def.
+    def_variance: list[UtcCompletenessLine] = Field(default_factory=list)
+
+
+# ===================== Equipment: links and topology =====================
+
+
+class EquipmentLinkIn(BaseModel):
+    a_equipment_id: int
+    b_equipment_id: int
+    a_capability_id: Optional[int] = None
+    b_capability_id: Optional[int] = None
+    kind: EquipmentLinkKind = "other"
+    direction: EquipmentLinkDirection = "bidirectional"
+    label: Optional[str] = None
+    status: EquipmentStatusValue = "unknown"
+    notes: Optional[str] = None
+
+
+class EquipmentLinkPatch(BaseModel):
+    a_capability_id: Optional[int] = None
+    b_capability_id: Optional[int] = None
+    kind: Optional[EquipmentLinkKind] = None
+    direction: Optional[EquipmentLinkDirection] = None
+    label: Optional[str] = None
+    status: Optional[EquipmentStatusValue] = None
+    notes: Optional[str] = None
+
+
+class EquipmentLinkOut(_ORM):
+    id: int
+    workspace_id: int
+    a_equipment_id: int
+    b_equipment_id: int
+    a_capability_id: Optional[int] = None
+    b_capability_id: Optional[int] = None
+    kind: EquipmentLinkKind
+    direction: EquipmentLinkDirection
+    label: Optional[str] = None
+    status: EquipmentStatusValue
+    notes: Optional[str] = None
+    # Denormalized so the canvas can label and group edges in one pass.
+    a_equipment_code: Optional[str] = None
+    b_equipment_code: Optional[str] = None
+    a_site_id: Optional[int] = None
+    b_site_id: Optional[int] = None
+
+
+class BackingCapability(BaseModel):
+    """One capability standing behind a service or gateway."""
+
+    capability_id: int
+    equipment_id: int
+    equipment_code: str
+    label: str
+    kind: CapabilityKind
+    status: EquipmentStatusValue
+    role: Optional[CapabilityBindRole] = None
+
+
+class DerivedStatus(BaseModel):
+    """Advisory comparison of reported vs equipment-derived status.
+
+    This is READ-ONLY on purpose. Equipment never writes gateway or service
+    status — doing so would blank the operator's matrix on every blip (see
+    `cell_status_from_gateway` in api/effective.py) and would erase the
+    human attribution the model records in `validated_by_user_id`. The UI
+    shows `derived` next to `reported` and offers an explicit Apply that
+    goes through the normal validation endpoint under the operator's name.
+    """
+
+    reported: str
+    derived: Optional[EquipmentStatusValue] = None
+    # True when derived is meaningfully worse than reported — what the UI
+    # badges and what the advisory rule fires on.
+    disagrees: bool = False
+    backing: list[BackingCapability] = Field(default_factory=list)
+
+
+class CapabilityWiringIn(BaseModel):
+    """One proposed capability→target binding from the deploy wizard."""
+
+    # Index into the deploy payload's `items` list, since the equipment rows
+    # don't exist yet when the wizard builds this.
+    item_index: int
+    capability_kind: CapabilityKind
+    service_id: Optional[int] = None
+    gateway_id: Optional[int] = None
+    role: CapabilityBindRole = "endpoint"
+
+
+class UtcDeployItemIn(BaseModel):
+    """One serialized item being registered as part of the deploy."""
+
+    equipment_type_id: int
+    serial_number: Optional[str] = None
+    equipment_code: Optional[str] = None
+    status: EquipmentStatusValue = "unknown"
+    notes: Optional[str] = None
+    capability_kinds: Optional[list[str]] = None
+
+
+class UtcDeployIn(BaseModel):
+    """The deploy-a-UTC wizard's single transactional payload.
+
+    Everything lands in one request so a half-built UTC can't exist: the
+    utc_instance, its serialized equipment with materialized capabilities,
+    its bulk holdings, and the operator-accepted capability bindings.
+    """
+
+    site_id: int
+    name: str
+    role: UtcRole = "independent"
+    utc_def_id: Optional[int] = None
+    package_instance_id: Optional[int] = None
+    # Create a new package instance in the same transaction. Ignored when
+    # package_instance_id is set.
+    new_package_name: Optional[str] = None
+    new_package_def_id: Optional[int] = None
+    notes: Optional[str] = None
+    items: list[UtcDeployItemIn] = Field(default_factory=list)
+    holdings: list[EquipmentHoldingIn] = Field(default_factory=list)
+    wiring: list[CapabilityWiringIn] = Field(default_factory=list)
+
+
+class UtcDeployOut(BaseModel):
+    utc_instance: UtcInstanceOut
+    equipment: list[EquipmentOut] = Field(default_factory=list)
+    holdings: list[EquipmentHoldingOut] = Field(default_factory=list)
+    bindings_created: int = 0
+
+
+class TopologySiteNode(BaseModel):
+    site_id: int
+    name: str
+    status: SiteStatusValue
+    utc_instance_ids: list[int] = Field(default_factory=list)
+
+
+class NetworkTopologyOut(BaseModel):
+    """Everything the network canvas needs, in one bundle.
+
+    Built as a single bulk pass in the style of `routers/status.py::rollup` —
+    the canvas is the hottest read in the equipment tier and must not N+1.
+    """
+
+    sites: list[TopologySiteNode] = Field(default_factory=list)
+    utc_instances: list[UtcInstanceOut] = Field(default_factory=list)
+    equipment: list[EquipmentOut] = Field(default_factory=list)
+    links: list[EquipmentLinkOut] = Field(default_factory=list)
+    positions: list["EquipmentPositionOut"] = Field(default_factory=list)
+    # Advisory reported-vs-derived, keyed by id. Never written back.
+    service_derived: dict[int, DerivedStatus] = Field(default_factory=dict)
+    gateway_derived: dict[int, DerivedStatus] = Field(default_factory=dict)
+
+
+class EquipmentPositionIn(BaseModel):
+    x: float
+    y: float
+
+
+class EquipmentPositionOut(BaseModel):
+    equipment_id: int
+    x: float
+    y: float

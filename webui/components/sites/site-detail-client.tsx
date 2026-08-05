@@ -61,6 +61,8 @@ import { SiteCheckInDialog } from "@/components/personnel/site-checkin-dialog"
 import { RollCallDialog } from "@/components/personnel/roll-call-dialog"
 import { SiteEventsTab } from "@/components/events/site-events-tab"
 import { SiteDocumentsTab } from "@/components/documents/site-documents-tab"
+import { DerivedStatusBadge } from "@/components/equipment/derived-status-badge"
+import { SiteEquipmentTab } from "@/components/sites/site-equipment-tab"
 import type {
   Document,
   Event,
@@ -75,6 +77,10 @@ import type {
   ServiceTemplate,
   Site,
   SiteProperty,
+  Equipment,
+  EquipmentHolding,
+  SiteEquipmentAdvisory,
+  UtcInstance,
   SitePropertyTemplate,
   Team,
   Unit,
@@ -99,6 +105,10 @@ interface Props {
   eventTypes: EventTypeDef[]
   siteFolders: Folder[]
   siteDocuments: Document[]
+  equipment: Equipment[]
+  utcs: UtcInstance[]
+  holdings: EquipmentHolding[]
+  advisory: SiteEquipmentAdvisory
 }
 
 type Tab =
@@ -138,6 +148,10 @@ export function SiteDetailClient({
   eventTypes,
   siteFolders,
   siteDocuments,
+  equipment,
+  utcs,
+  holdings,
+  advisory,
 }: Props) {
   const { w } = useWorkspace()
   const router = useRouter()
@@ -228,6 +242,7 @@ export function SiteDetailClient({
           gateways={gateways}
           templates={templates}
           userRole={userRole}
+          advisory={advisory}
         />
       ) : tab === "personnel" ? (
         <SitePersonnelTab
@@ -240,7 +255,7 @@ export function SiteDetailClient({
           canEdit={userRole !== "viewer"}
         />
       ) : tab === "equipment" ? (
-        <PlaceholderTab title="Equipment" description="Site equipment inventory will live here." />
+        <SiteEquipmentTab equipment={equipment} utcs={utcs} holdings={holdings} />
       ) : tab === "documents" ? (
         <SiteDocumentsTab
           siteId={site.id}
@@ -280,6 +295,7 @@ function ServicesTab({
   gateways,
   templates,
   userRole,
+  advisory,
 }: {
   site: Site
   sites: Site[]
@@ -287,6 +303,7 @@ function ServicesTab({
   gateways: Gateway[]
   templates: ServiceTemplate[]
   userRole?: Role
+  advisory: SiteEquipmentAdvisory
 }) {
   const [view, setView] = useState<"list" | "graph" | "matrix">("matrix")
   const { w } = useWorkspace()
@@ -365,13 +382,21 @@ function ServicesTab({
                           )}
                         </div>
                       </div>
-                      <GatewayStatusPill
-                        gatewayId={g.id}
-                        gatewayName={g.name}
-                        status={g.status}
-                        lastValidatedAt={g.validated_at}
-                        lastValidatedBy={g.validated_by_username}
-                      />
+                      <div className="flex shrink-0 items-center gap-2">
+                        <DerivedStatusBadge
+                          derived={advisory.gateway_derived[g.id]}
+                          target="gateway"
+                          targetId={g.id}
+                          targetName={g.name}
+                        />
+                        <GatewayStatusPill
+                          gatewayId={g.id}
+                          gatewayName={g.name}
+                          status={g.status}
+                          lastValidatedAt={g.validated_at}
+                          lastValidatedBy={g.validated_by_username}
+                        />
+                      </div>
                     </li>
                   )
                 })}
@@ -413,15 +438,23 @@ function ServicesTab({
                             )}
                           </div>
                         </Link>
-                        <ServiceStatusPill
-                          serviceId={s.id}
-                          serviceName={s.name}
-                          status={s.status}
-                          effectiveStatus={s.effective_status}
-                          lastValidatedAt={s.validated_at}
-                          lastValidatedBy={s.validated_by_username}
-                          allowedStatuses={s.allowed_statuses}
-                        />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <DerivedStatusBadge
+                            derived={advisory.service_derived[s.id]}
+                            target="service"
+                            targetId={s.id}
+                            targetName={s.name}
+                          />
+                          <ServiceStatusPill
+                            serviceId={s.id}
+                            serviceName={s.name}
+                            status={s.status}
+                            effectiveStatus={s.effective_status}
+                            lastValidatedAt={s.validated_at}
+                            lastValidatedBy={s.validated_by_username}
+                            allowedStatuses={s.allowed_statuses}
+                          />
+                        </div>
                       </li>
                     )
                   })}

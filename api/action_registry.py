@@ -63,6 +63,39 @@ ACTIONS: dict[str, Action] = {
         event_type="personnel",
         kinds=(SubjectKinds.PERSONNEL_LOCATION,),
     ),
+    # ---------- Equipment tier ----------
+    "equipment.status": Action(
+        record_class="event", severity="notice", kinds=(SubjectKinds.EQUIPMENT,)
+    ),
+    "equipment.capability.status": Action(
+        record_class="event",
+        severity="notice",
+        kinds=(SubjectKinds.EQUIPMENT_CAPABILITY,),
+    ),
+    "equipment.registered": Action(
+        record_class="log", severity="info", kinds=(SubjectKinds.EQUIPMENT,)
+    ),
+    # The advisory record: a capability went bad while the service or gateway
+    # it backs is still reported healthy. Deliberately a warning-severity
+    # `event`, not a log — it exists to be noticed, because nothing in the
+    # system will auto-correct the reported status (see equipment_status.py).
+    "equipment.derived.disagreement": Action(
+        record_class="event",
+        severity="warning",
+        kinds=(SubjectKinds.EQUIPMENT_CAPABILITY,),
+    ),
+    "equipment.link.changed": Action(
+        record_class="event",
+        severity="notice",
+        event_type="general",
+        kinds=(SubjectKinds.EQUIPMENT_LINK,),
+    ),
+    "utc.deployed": Action(
+        record_class="event",
+        severity="notice",
+        event_type="general",
+        kinds=(SubjectKinds.UTC_INSTANCE,),
+    ),
 }
 
 

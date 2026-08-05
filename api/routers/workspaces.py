@@ -18,7 +18,19 @@ from db import get_db
 from deps import requires
 from models import (
     CanvasAnnotation,
+    CapabilityGatewayLink,
+    CapabilityServiceLink,
+    Equipment,
+    EquipmentCanvasPosition,
+    EquipmentCapability,
+    EquipmentHolding,
+    EquipmentLink,
+    EquipmentType,
+    EquipmentTypeCapability,
     Gateway,
+    PackageDef,
+    PackageDefUtc,
+    PackageInstance,
     Personnel,
     Service,
     ServiceTemplate,
@@ -27,6 +39,9 @@ from models import (
     Team,
     Unit,
     User,
+    UtcDef,
+    UtcDefLine,
+    UtcInstance,
     WorkCenter,
     Workspace,
 )
@@ -34,13 +49,25 @@ from pubsub import notify
 from workspace_slug import unique_workspace_slug
 from schemas import (
     ExportedAnnotation,
+    ExportedEquipment,
+    ExportedEquipmentCapability,
+    ExportedEquipmentHolding,
+    ExportedEquipmentLink,
+    ExportedEquipmentType,
+    ExportedEquipmentTypeCapability,
     ExportedGateway,
+    ExportedPackageDef,
+    ExportedPackageDefUtc,
+    ExportedPackageInstance,
     ExportedPersonnel,
     ExportedPosition,
     ExportedService,
     ExportedSite,
     ExportedTeam,
     ExportedUnit,
+    ExportedUtcDef,
+    ExportedUtcDefLine,
+    ExportedUtcInstance,
     ExportedWorkCenter,
     ExportedWorkspaceMeta,
     WorkspaceDuplicateIn,
@@ -183,42 +210,48 @@ def duplicate_workspace(
         db.flush()
         site_id_map[site.id] = new_site.id
 
+    # Services and gateways keep their new ids in maps because the equipment
+    # capability bindings below point at them.
+    service_id_map: dict[int, int] = {}
+    gateway_id_map: dict[int, int] = {}
     if site_id_map:
         for svc in (
             db.query(Service).filter(Service.site_id.in_(site_id_map.keys())).all()
         ):
-            db.add(
-                Service(
-                    site_id=site_id_map[svc.site_id],
-                    service_template_id=svc.service_template_id,
-                    name=svc.name,
-                    kind=svc.kind,
-                    category=svc.category,
-                    reach=svc.reach,
-                    icon=svc.icon,
-                    description=svc.description,
-                    # status left as default ("unknown"); no validated_* fields.
-                    display_order=svc.display_order,
-                    notes=svc.notes,
-                    enabled_pace=list(svc.enabled_pace),
-                )
+            new_svc = Service(
+                site_id=site_id_map[svc.site_id],
+                service_template_id=svc.service_template_id,
+                name=svc.name,
+                kind=svc.kind,
+                category=svc.category,
+                reach=svc.reach,
+                icon=svc.icon,
+                description=svc.description,
+                # status left as default ("unknown"); no validated_* fields.
+                display_order=svc.display_order,
+                notes=svc.notes,
+                enabled_pace=list(svc.enabled_pace),
             )
+            db.add(new_svc)
+            db.flush()
+            service_id_map[svc.id] = new_svc.id
 
         for gw in (
             db.query(Gateway).filter(Gateway.site_id.in_(site_id_map.keys())).all()
         ):
-            db.add(
-                Gateway(
-                    site_id=site_id_map[gw.site_id],
-                    name=gw.name,
-                    kind=gw.kind,
-                    provider=gw.provider,
-                    pace=gw.pace,
-                    # status left as default ("unknown"); no validated_* fields.
-                    display_order=gw.display_order,
-                    notes=gw.notes,
-                )
+            new_gw = Gateway(
+                site_id=site_id_map[gw.site_id],
+                name=gw.name,
+                kind=gw.kind,
+                provider=gw.provider,
+                pace=gw.pace,
+                # status left as default ("unknown"); no validated_* fields.
+                display_order=gw.display_order,
+                notes=gw.notes,
             )
+            db.add(new_gw)
+            db.flush()
+            gateway_id_map[gw.id] = new_gw.id
 
         for pos in (
             db.query(SiteCanvasPosition)
@@ -335,9 +368,563 @@ def duplicate_workspace(
                 personnel_id_map[p.supervisor_id]
             )
 
+    _duplicate_equipment(
+        db, source, dest, site_id_map, service_id_map, gateway_id_map
+    )
+
     db.flush()
     notify(background_tasks)
     return dest
+
+
+def _duplicate_equipment(
+    db: Session,
+    source: Workspace,
+    dest: Workspace,
+    site_id_map: dict[int, int],
+    service_id_map: dict[int, int],
+    gateway_id_map: dict[int, int],
+) -> None:
+    """Copy the equipment tier into the destination workspace.
+
+    Follows the same convention as services and gateways: structure is copied,
+    live status is not. Equipment, capabilities, and links all land at their
+    default `unknown` with no `validated_*` fields, because a duplicate is a
+    planning scenario and inheriting yesterday's validations at another site
+    would be a lie about who checked what.
+
+    Serial numbers ARE copied. The uniqueness constraint is per workspace, so
+    this is legal, and a planning copy that lost its serials would be useless
+    for the thing people duplicate a workspace to do. The UI should make the
+    provenance obvious.
+
+    Catalog rows are not copied: global ones are shared by definition, and
+    workspace-local ones are re-pointed below only when they belong to the
+    source, in which case they're duplicated first so the copy is self-contained.
+    """
+    # --- workspace-local catalog rows the copy will need ---
+    equipment_type_map: dict[int, int] = {}
+    for t in (
+        db.query(EquipmentType)
+        .filter(EquipmentType.workspace_id == source.id)
+        .all()
+    ):
+        new_t = EquipmentType(
+            workspace_id=dest.id,
+            title=t.title,
+            short_name=t.short_name,
+            aliases=list(t.aliases or []),
+            nsn=t.nsn,
+            lin=t.lin,
+            category=t.category,
+            serialized=t.serialized,
+            id_prefix=t.id_prefix,
+            manufacturer=t.manufacturer,
+            model=t.model,
+            icon=t.icon,
+            description=t.description,
+            retired_at=t.retired_at,
+        )
+        db.add(new_t)
+        db.flush()
+        equipment_type_map[t.id] = new_t.id
+        for cap in (
+            db.query(EquipmentTypeCapability)
+            .filter(EquipmentTypeCapability.equipment_type_id == t.id)
+            .all()
+        ):
+            db.add(
+                EquipmentTypeCapability(
+                    equipment_type_id=new_t.id,
+                    kind=cap.kind,
+                    label=cap.label,
+                    description=cap.description,
+                    display_order=cap.display_order,
+                    materialize_by_default=cap.materialize_by_default,
+                )
+            )
+
+    utc_def_map: dict[int, int] = {}
+    for d in db.query(UtcDef).filter(UtcDef.workspace_id == source.id).all():
+        new_d = UtcDef(
+            workspace_id=dest.id,
+            code=d.code,
+            name=d.name,
+            description=d.description,
+            retired_at=d.retired_at,
+        )
+        db.add(new_d)
+        db.flush()
+        utc_def_map[d.id] = new_d.id
+        for line in db.query(UtcDefLine).filter(UtcDefLine.utc_def_id == d.id).all():
+            db.add(
+                UtcDefLine(
+                    utc_def_id=new_d.id,
+                    # A local UTC may reference a global type, which is not
+                    # remapped — hence the fallback to the original id.
+                    equipment_type_id=equipment_type_map.get(
+                        line.equipment_type_id, line.equipment_type_id
+                    ),
+                    quantity=line.quantity,
+                    notes=line.notes,
+                    display_order=line.display_order,
+                )
+            )
+
+    package_def_map: dict[int, int] = {}
+    for pd in db.query(PackageDef).filter(PackageDef.workspace_id == source.id).all():
+        new_pd = PackageDef(
+            workspace_id=dest.id,
+            code=pd.code,
+            name=pd.name,
+            description=pd.description,
+            retired_at=pd.retired_at,
+        )
+        db.add(new_pd)
+        db.flush()
+        package_def_map[pd.id] = new_pd.id
+        for pu in (
+            db.query(PackageDefUtc).filter(PackageDefUtc.package_def_id == pd.id).all()
+        ):
+            db.add(
+                PackageDefUtc(
+                    package_def_id=new_pd.id,
+                    utc_def_id=utc_def_map.get(pu.utc_def_id, pu.utc_def_id),
+                    quantity=pu.quantity,
+                    role_hint=pu.role_hint,
+                    display_order=pu.display_order,
+                )
+            )
+
+    # --- deployed instances ---
+    package_map: dict[int, int] = {}
+    for p in (
+        db.query(PackageInstance)
+        .filter(PackageInstance.workspace_id == source.id)
+        .all()
+    ):
+        new_p = PackageInstance(
+            workspace_id=dest.id,
+            package_def_id=package_def_map.get(p.package_def_id, p.package_def_id),
+            name=p.name,
+            notes=p.notes,
+        )
+        db.add(new_p)
+        db.flush()
+        package_map[p.id] = new_p.id
+
+    utc_map: dict[int, int] = {}
+    for u in (
+        db.query(UtcInstance).filter(UtcInstance.workspace_id == source.id).all()
+    ):
+        if u.site_id not in site_id_map:
+            continue
+        new_u = UtcInstance(
+            workspace_id=dest.id,
+            package_instance_id=package_map.get(u.package_instance_id),
+            utc_def_id=utc_def_map.get(u.utc_def_id, u.utc_def_id),
+            site_id=site_id_map[u.site_id],
+            name=u.name,
+            role=u.role,
+            notes=u.notes,
+            display_order=u.display_order,
+        )
+        db.add(new_u)
+        db.flush()
+        utc_map[u.id] = new_u.id
+
+    equipment_map: dict[int, int] = {}
+    capability_map: dict[int, int] = {}
+    for e in db.query(Equipment).filter(Equipment.workspace_id == source.id).all():
+        if e.site_id not in site_id_map:
+            continue
+        new_e = Equipment(
+            workspace_id=dest.id,
+            equipment_type_id=equipment_type_map.get(
+                e.equipment_type_id, e.equipment_type_id
+            ),
+            utc_instance_id=utc_map.get(e.utc_instance_id),
+            site_id=site_id_map[e.site_id],
+            equipment_code=e.equipment_code,
+            serial_number=e.serial_number,
+            # status left as default ("unknown"); no validated_* fields.
+            notes=e.notes,
+        )
+        db.add(new_e)
+        db.flush()
+        equipment_map[e.id] = new_e.id
+        for cap in (
+            db.query(EquipmentCapability)
+            .filter(EquipmentCapability.equipment_id == e.id)
+            .all()
+        ):
+            new_cap = EquipmentCapability(
+                equipment_id=new_e.id,
+                kind=cap.kind,
+                label=cap.label,
+                # status left as default; see the docstring.
+                source=cap.source,
+                notes=cap.notes,
+                display_order=cap.display_order,
+            )
+            db.add(new_cap)
+            db.flush()
+            capability_map[cap.id] = new_cap.id
+
+    for h in (
+        db.query(EquipmentHolding)
+        .filter(EquipmentHolding.workspace_id == source.id)
+        .all()
+    ):
+        if h.utc_instance_id not in utc_map:
+            continue
+        db.add(
+            EquipmentHolding(
+                workspace_id=dest.id,
+                utc_instance_id=utc_map[h.utc_instance_id],
+                equipment_type_id=equipment_type_map.get(
+                    h.equipment_type_id, h.equipment_type_id
+                ),
+                authorized_qty=h.authorized_qty,
+                on_hand_qty=h.on_hand_qty,
+                notes=h.notes,
+            )
+        )
+
+    # --- bindings and links, once every id is known ---
+    if capability_map:
+        for link in db.query(CapabilityServiceLink).filter(
+            CapabilityServiceLink.equipment_capability_id.in_(capability_map.keys())
+        ):
+            if link.service_id not in service_id_map:
+                continue
+            db.add(
+                CapabilityServiceLink(
+                    equipment_capability_id=capability_map[
+                        link.equipment_capability_id
+                    ],
+                    service_id=service_id_map[link.service_id],
+                    role=link.role,
+                )
+            )
+        for link in db.query(CapabilityGatewayLink).filter(
+            CapabilityGatewayLink.equipment_capability_id.in_(capability_map.keys())
+        ):
+            if link.gateway_id not in gateway_id_map:
+                continue
+            db.add(
+                CapabilityGatewayLink(
+                    equipment_capability_id=capability_map[
+                        link.equipment_capability_id
+                    ],
+                    gateway_id=gateway_id_map[link.gateway_id],
+                )
+            )
+
+    for link in (
+        db.query(EquipmentLink).filter(EquipmentLink.workspace_id == source.id).all()
+    ):
+        if (
+            link.a_equipment_id not in equipment_map
+            or link.b_equipment_id not in equipment_map
+        ):
+            continue
+        db.add(
+            EquipmentLink(
+                workspace_id=dest.id,
+                a_equipment_id=equipment_map[link.a_equipment_id],
+                b_equipment_id=equipment_map[link.b_equipment_id],
+                a_capability_id=capability_map.get(link.a_capability_id),
+                b_capability_id=capability_map.get(link.b_capability_id),
+                kind=link.kind,
+                direction=link.direction,
+                label=link.label,
+                # status left as default; see the docstring.
+                notes=link.notes,
+            )
+        )
+
+    # Canvas layout is structure, not status — worth carrying over so a
+    # duplicated workspace doesn't open to a pile of nodes at the origin.
+    if equipment_map:
+        for pos in db.query(EquipmentCanvasPosition).filter(
+            EquipmentCanvasPosition.equipment_id.in_(equipment_map.keys())
+        ):
+            db.add(
+                EquipmentCanvasPosition(
+                    equipment_id=equipment_map[pos.equipment_id], x=pos.x, y=pos.y
+                )
+            )
+
+    db.flush()
+
+
+def _export_equipment(
+    db: Session, ws: Workspace, site_name_by_id: dict[int, str]
+) -> dict:
+    """Serialize the equipment tier by name, ID-free like the rest of the envelope.
+
+    Global catalog rows are deliberately NOT included: they're shared across
+    instances by definition, so exporting them would create duplicates on
+    import. They're referenced by title/code and re-resolved on the far side;
+    an instance missing a global type fails the import loudly rather than
+    silently dropping the gear that pointed at it.
+
+    Live status is omitted, matching the rest of the export — this is
+    structure, not a snapshot of who validated what.
+    """
+    site_ids = list(site_name_by_id.keys())
+
+    local_types = (
+        db.query(EquipmentType).filter(EquipmentType.workspace_id == ws.id).all()
+    )
+    # Titles resolve across both scopes on import, so the lookup here has to
+    # cover global rows too — most gear points at the global catalog.
+    all_type_titles = {
+        t.id: t.title
+        for t in db.query(EquipmentType).filter(
+            (EquipmentType.workspace_id == ws.id)
+            | (EquipmentType.workspace_id.is_(None))
+        )
+    }
+    local_utc_defs = db.query(UtcDef).filter(UtcDef.workspace_id == ws.id).all()
+    all_utc_codes = {
+        d.id: d.code
+        for d in db.query(UtcDef).filter(
+            (UtcDef.workspace_id == ws.id) | (UtcDef.workspace_id.is_(None))
+        )
+    }
+    local_package_defs = (
+        db.query(PackageDef).filter(PackageDef.workspace_id == ws.id).all()
+    )
+    all_package_codes = {
+        p.id: p.code
+        for p in db.query(PackageDef).filter(
+            (PackageDef.workspace_id == ws.id) | (PackageDef.workspace_id.is_(None))
+        )
+    }
+
+    packages = (
+        db.query(PackageInstance)
+        .filter(PackageInstance.workspace_id == ws.id)
+        .order_by(PackageInstance.name)
+        .all()
+    )
+    package_name_by_id = {p.id: p.name for p in packages}
+    utcs = (
+        db.query(UtcInstance)
+        .filter(UtcInstance.workspace_id == ws.id)
+        .order_by(UtcInstance.name)
+        .all()
+    )
+    utc_name_by_id = {u.id: u.name for u in utcs}
+    equipment = (
+        db.query(Equipment)
+        .filter(Equipment.workspace_id == ws.id)
+        .order_by(Equipment.equipment_code)
+        .all()
+    )
+    equipment_code_by_id = {e.id: e.equipment_code for e in equipment}
+
+    caps = (
+        db.query(EquipmentCapability)
+        .filter(EquipmentCapability.equipment_id.in_(equipment_code_by_id.keys()))
+        .order_by(EquipmentCapability.display_order)
+        .all()
+        if equipment_code_by_id
+        else []
+    )
+    cap_ids = [c.id for c in caps]
+    service_names = {
+        s.id: s.name
+        for s in (
+            db.query(Service).filter(Service.site_id.in_(site_ids)) if site_ids else []
+        )
+    }
+    gateway_names = {
+        g.id: g.name
+        for g in (
+            db.query(Gateway).filter(Gateway.site_id.in_(site_ids)) if site_ids else []
+        )
+    }
+    svc_binding: dict[int, list[str]] = {}
+    gw_binding: dict[int, list[str]] = {}
+    if cap_ids:
+        for link in db.query(CapabilityServiceLink).filter(
+            CapabilityServiceLink.equipment_capability_id.in_(cap_ids)
+        ):
+            name = service_names.get(link.service_id)
+            if name:
+                svc_binding.setdefault(link.equipment_capability_id, []).append(name)
+        for link in db.query(CapabilityGatewayLink).filter(
+            CapabilityGatewayLink.equipment_capability_id.in_(cap_ids)
+        ):
+            name = gateway_names.get(link.gateway_id)
+            if name:
+                gw_binding.setdefault(link.equipment_capability_id, []).append(name)
+    caps_by_equipment: dict[int, list] = {}
+    for c in caps:
+        caps_by_equipment.setdefault(c.equipment_id, []).append(c)
+
+    holdings = (
+        db.query(EquipmentHolding)
+        .filter(EquipmentHolding.workspace_id == ws.id)
+        .all()
+    )
+    links = (
+        db.query(EquipmentLink).filter(EquipmentLink.workspace_id == ws.id).all()
+    )
+
+    return {
+        "equipment_types": [
+            ExportedEquipmentType(
+                title=t.title,
+                short_name=t.short_name,
+                aliases=list(t.aliases or []),
+                nsn=t.nsn,
+                lin=t.lin,
+                category=t.category,
+                serialized=t.serialized,
+                id_prefix=t.id_prefix,
+                manufacturer=t.manufacturer,
+                model=t.model,
+                icon=t.icon,
+                description=t.description,
+                capabilities=[
+                    ExportedEquipmentTypeCapability(
+                        kind=c.kind,
+                        label=c.label,
+                        description=c.description,
+                        display_order=c.display_order,
+                        materialize_by_default=c.materialize_by_default,
+                    )
+                    for c in db.query(EquipmentTypeCapability)
+                    .filter(EquipmentTypeCapability.equipment_type_id == t.id)
+                    .order_by(EquipmentTypeCapability.display_order)
+                ],
+            )
+            for t in local_types
+        ],
+        "utc_defs": [
+            ExportedUtcDef(
+                code=d.code,
+                name=d.name,
+                description=d.description,
+                lines=[
+                    ExportedUtcDefLine(
+                        equipment_type_title=all_type_titles.get(
+                            line.equipment_type_id, ""
+                        ),
+                        quantity=line.quantity,
+                        notes=line.notes,
+                        display_order=line.display_order,
+                    )
+                    for line in db.query(UtcDefLine)
+                    .filter(UtcDefLine.utc_def_id == d.id)
+                    .order_by(UtcDefLine.display_order)
+                    if all_type_titles.get(line.equipment_type_id)
+                ],
+            )
+            for d in local_utc_defs
+        ],
+        "package_defs": [
+            ExportedPackageDef(
+                code=p.code,
+                name=p.name,
+                description=p.description,
+                utcs=[
+                    ExportedPackageDefUtc(
+                        utc_def_code=all_utc_codes.get(pu.utc_def_id, ""),
+                        quantity=pu.quantity,
+                        role_hint=pu.role_hint,
+                        display_order=pu.display_order,
+                    )
+                    for pu in db.query(PackageDefUtc)
+                    .filter(PackageDefUtc.package_def_id == p.id)
+                    .order_by(PackageDefUtc.display_order)
+                    if all_utc_codes.get(pu.utc_def_id)
+                ],
+            )
+            for p in local_package_defs
+        ],
+        "package_instances": [
+            ExportedPackageInstance(
+                name=p.name,
+                package_def_code=all_package_codes.get(p.package_def_id)
+                if p.package_def_id
+                else None,
+                notes=p.notes,
+            )
+            for p in packages
+        ],
+        "utc_instances": [
+            ExportedUtcInstance(
+                name=u.name,
+                site_name=site_name_by_id[u.site_id],
+                package_name=package_name_by_id.get(u.package_instance_id)
+                if u.package_instance_id
+                else None,
+                utc_def_code=all_utc_codes.get(u.utc_def_id) if u.utc_def_id else None,
+                role=u.role,
+                notes=u.notes,
+                display_order=u.display_order,
+            )
+            for u in utcs
+            if u.site_id in site_name_by_id
+        ],
+        "equipment": [
+            ExportedEquipment(
+                equipment_code=e.equipment_code,
+                serial_number=e.serial_number,
+                equipment_type_title=all_type_titles.get(e.equipment_type_id, ""),
+                site_name=site_name_by_id[e.site_id],
+                utc_name=utc_name_by_id.get(e.utc_instance_id)
+                if e.utc_instance_id
+                else None,
+                notes=e.notes,
+                capabilities=[
+                    ExportedEquipmentCapability(
+                        kind=c.kind,
+                        label=c.label,
+                        source=c.source,
+                        notes=c.notes,
+                        display_order=c.display_order,
+                        service_names=svc_binding.get(c.id, []),
+                        gateway_names=gw_binding.get(c.id, []),
+                    )
+                    for c in caps_by_equipment.get(e.id, [])
+                ],
+            )
+            for e in equipment
+            if e.site_id in site_name_by_id
+            and all_type_titles.get(e.equipment_type_id)
+        ],
+        "equipment_holdings": [
+            ExportedEquipmentHolding(
+                utc_name=utc_name_by_id[h.utc_instance_id],
+                equipment_type_title=all_type_titles.get(h.equipment_type_id, ""),
+                authorized_qty=h.authorized_qty,
+                on_hand_qty=h.on_hand_qty,
+                notes=h.notes,
+            )
+            for h in holdings
+            if h.utc_instance_id in utc_name_by_id
+            and all_type_titles.get(h.equipment_type_id)
+        ],
+        "equipment_links": [
+            ExportedEquipmentLink(
+                a_equipment_code=equipment_code_by_id[link.a_equipment_id],
+                b_equipment_code=equipment_code_by_id[link.b_equipment_id],
+                kind=link.kind,
+                direction=link.direction,
+                label=link.label,
+                notes=link.notes,
+            )
+            for link in links
+            if link.a_equipment_id in equipment_code_by_id
+            and link.b_equipment_id in equipment_code_by_id
+        ],
+    }
 
 
 @router.get("/{workspace_id}/export", response_model=WorkspaceExport)
@@ -428,6 +1015,8 @@ def export_workspace(
         p.id: f"{p.last_name}, {p.first_name}" for p in people
     }
 
+    equipment_export = _export_equipment(db, ws, site_name_by_id)
+
     return WorkspaceExport(
         exported_at=datetime.datetime.now(datetime.timezone.utc),
         workspace=ExportedWorkspaceMeta(
@@ -435,6 +1024,7 @@ def export_workspace(
             description=ws.description,
             tags=list(ws.tags),
         ),
+        **equipment_export,
         units=[
             ExportedUnit(
                 name=u.name,
@@ -642,39 +1232,46 @@ def import_workspace(
         ):
             template_id_by_name[tpl.name] = tpl.id
 
+    # (site name, service name) → id, because service names are only unique
+    # within a site. The equipment capability bindings resolve through these.
+    service_id_by_key: dict[tuple[str, str], int] = {}
+    gateway_id_by_key: dict[tuple[str, str], int] = {}
+
     for svc in payload.services:
-        db.add(
-            Service(
-                site_id=site_id_by_name[svc.site_name],
-                service_template_id=(
-                    template_id_by_name.get(svc.service_template_name)
-                    if svc.service_template_name
-                    else None
-                ),
-                name=svc.name,
-                kind=svc.kind,
-                category=svc.category,
-                reach=svc.reach,
-                icon=svc.icon,
-                description=svc.description,
-                display_order=svc.display_order,
-                notes=svc.notes,
-                enabled_pace=list(svc.enabled_pace),
-            )
+        new_svc = Service(
+            site_id=site_id_by_name[svc.site_name],
+            service_template_id=(
+                template_id_by_name.get(svc.service_template_name)
+                if svc.service_template_name
+                else None
+            ),
+            name=svc.name,
+            kind=svc.kind,
+            category=svc.category,
+            reach=svc.reach,
+            icon=svc.icon,
+            description=svc.description,
+            display_order=svc.display_order,
+            notes=svc.notes,
+            enabled_pace=list(svc.enabled_pace),
         )
+        db.add(new_svc)
+        db.flush()
+        service_id_by_key[(svc.site_name, svc.name)] = new_svc.id
 
     for gw in payload.gateways:
-        db.add(
-            Gateway(
-                site_id=site_id_by_name[gw.site_name],
-                name=gw.name,
-                kind=gw.kind,
-                provider=gw.provider,
-                pace=gw.pace,
-                display_order=gw.display_order,
-                notes=gw.notes,
-            )
+        new_gw = Gateway(
+            site_id=site_id_by_name[gw.site_name],
+            name=gw.name,
+            kind=gw.kind,
+            provider=gw.provider,
+            pace=gw.pace,
+            display_order=gw.display_order,
+            notes=gw.notes,
         )
+        db.add(new_gw)
+        db.flush()
+        gateway_id_by_key[(gw.site_name, gw.name)] = new_gw.id
 
     for pos in payload.positions:
         db.add(
@@ -780,9 +1377,280 @@ def import_workspace(
         if sup_key and sup_key in personnel_id_by_key:
             new_p.supervisor_id = personnel_id_by_key[sup_key]
 
+    _import_equipment(
+        db, ws, payload, site_id_by_name, service_id_by_key, gateway_id_by_key
+    )
+
     db.flush()
     notify(background_tasks)
     return ws
+
+
+def _import_equipment(
+    db: Session,
+    ws: Workspace,
+    payload: WorkspaceExport,
+    site_id_by_name: dict[str, int],
+    service_id_by_key: dict[tuple[str, str], int],
+    gateway_id_by_key: dict[tuple[str, str], int],
+) -> None:
+    """Rebuild the equipment tier from a v3 envelope.
+
+    v1 and v2 payloads simply have empty lists here, so older exports import
+    into an equipment-free workspace rather than failing.
+
+    Catalog types resolve by title against the target instance: a workspace-
+    local row from the envelope first, then the shared global catalog. A type
+    that resolves to neither is a hard 422 — importing gear whose identity
+    can't be established would produce records nobody can act on, and failing
+    loudly is the only honest option.
+    """
+    type_id_by_title: dict[str, int] = {}
+    for t in payload.equipment_types:
+        new_t = EquipmentType(
+            workspace_id=ws.id,
+            title=t.title,
+            short_name=t.short_name,
+            aliases=list(t.aliases),
+            nsn=t.nsn,
+            lin=t.lin,
+            category=t.category,
+            serialized=t.serialized,
+            id_prefix=t.id_prefix,
+            manufacturer=t.manufacturer,
+            model=t.model,
+            icon=t.icon,
+            description=t.description,
+        )
+        db.add(new_t)
+        db.flush()
+        type_id_by_title[t.title] = new_t.id
+        for order, cap in enumerate(t.capabilities):
+            db.add(
+                EquipmentTypeCapability(
+                    equipment_type_id=new_t.id,
+                    kind=cap.kind,
+                    label=cap.label,
+                    description=cap.description,
+                    display_order=order,
+                    materialize_by_default=cap.materialize_by_default,
+                )
+            )
+
+    def resolve_type(title: str, context: str) -> int:
+        if title in type_id_by_title:
+            return type_id_by_title[title]
+        row = (
+            db.query(EquipmentType)
+            .filter(
+                EquipmentType.workspace_id.is_(None), EquipmentType.title == title
+            )
+            .first()
+        )
+        if row is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"{context} references equipment type '{title}', which is not in "
+                "this instance's global catalog and was not included in the "
+                "export. Add the type to the catalog and re-import.",
+            )
+        type_id_by_title[title] = row.id
+        return row.id
+
+    utc_def_id_by_code: dict[str, int] = {}
+    for d in payload.utc_defs:
+        new_d = UtcDef(
+            workspace_id=ws.id, code=d.code, name=d.name, description=d.description
+        )
+        db.add(new_d)
+        db.flush()
+        utc_def_id_by_code[d.code] = new_d.id
+        for order, line in enumerate(d.lines):
+            db.add(
+                UtcDefLine(
+                    utc_def_id=new_d.id,
+                    equipment_type_id=resolve_type(
+                        line.equipment_type_title, f"UTC definition '{d.code}'"
+                    ),
+                    quantity=line.quantity,
+                    notes=line.notes,
+                    display_order=order,
+                )
+            )
+
+    def resolve_utc_def(code: str) -> int | None:
+        if code in utc_def_id_by_code:
+            return utc_def_id_by_code[code]
+        row = (
+            db.query(UtcDef)
+            .filter(UtcDef.workspace_id.is_(None), UtcDef.code == code)
+            .first()
+        )
+        if row is not None:
+            utc_def_id_by_code[code] = row.id
+            return row.id
+        # A missing UTC *definition* is survivable — the deployed UTC keeps its
+        # name and gear, it just loses the link to its bill of materials.
+        return None
+
+    package_def_id_by_code: dict[str, int] = {}
+    for p in payload.package_defs:
+        new_pd = PackageDef(
+            workspace_id=ws.id, code=p.code, name=p.name, description=p.description
+        )
+        db.add(new_pd)
+        db.flush()
+        package_def_id_by_code[p.code] = new_pd.id
+        for order, pu in enumerate(p.utcs):
+            utc_def_id = resolve_utc_def(pu.utc_def_code)
+            if utc_def_id is None:
+                continue
+            db.add(
+                PackageDefUtc(
+                    package_def_id=new_pd.id,
+                    utc_def_id=utc_def_id,
+                    quantity=pu.quantity,
+                    role_hint=pu.role_hint,
+                    display_order=order,
+                )
+            )
+
+    package_id_by_name: dict[str, int] = {}
+    for p in payload.package_instances:
+        package_def_id = None
+        if p.package_def_code:
+            package_def_id = package_def_id_by_code.get(p.package_def_code)
+            if package_def_id is None:
+                row = (
+                    db.query(PackageDef)
+                    .filter(
+                        PackageDef.workspace_id.is_(None),
+                        PackageDef.code == p.package_def_code,
+                    )
+                    .first()
+                )
+                package_def_id = row.id if row else None
+        new_p = PackageInstance(
+            workspace_id=ws.id,
+            package_def_id=package_def_id,
+            name=p.name,
+            notes=p.notes,
+        )
+        db.add(new_p)
+        db.flush()
+        package_id_by_name[p.name] = new_p.id
+
+    utc_id_by_name: dict[str, int] = {}
+    for u in payload.utc_instances:
+        if u.site_name not in site_id_by_name:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"UTC '{u.name}' references unknown site '{u.site_name}'",
+            )
+        new_u = UtcInstance(
+            workspace_id=ws.id,
+            package_instance_id=package_id_by_name.get(u.package_name)
+            if u.package_name
+            else None,
+            utc_def_id=resolve_utc_def(u.utc_def_code) if u.utc_def_code else None,
+            site_id=site_id_by_name[u.site_name],
+            name=u.name,
+            role=u.role,
+            notes=u.notes,
+            display_order=u.display_order,
+        )
+        db.add(new_u)
+        db.flush()
+        utc_id_by_name[u.name] = new_u.id
+
+    equipment_id_by_code: dict[str, int] = {}
+    for e in payload.equipment:
+        if e.site_name not in site_id_by_name:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Equipment '{e.equipment_code}' references unknown site "
+                f"'{e.site_name}'",
+            )
+        new_e = Equipment(
+            workspace_id=ws.id,
+            equipment_type_id=resolve_type(
+                e.equipment_type_title, f"Equipment '{e.equipment_code}'"
+            ),
+            utc_instance_id=utc_id_by_name.get(e.utc_name) if e.utc_name else None,
+            site_id=site_id_by_name[e.site_name],
+            equipment_code=e.equipment_code,
+            serial_number=e.serial_number,
+            # status left as model default; imports are structural.
+            notes=e.notes,
+        )
+        db.add(new_e)
+        db.flush()
+        equipment_id_by_code[e.equipment_code] = new_e.id
+
+        for order, cap in enumerate(e.capabilities):
+            new_cap = EquipmentCapability(
+                equipment_id=new_e.id,
+                kind=cap.kind,
+                label=cap.label,
+                source=cap.source,
+                notes=cap.notes,
+                display_order=order,
+            )
+            db.add(new_cap)
+            db.flush()
+            for svc_name in cap.service_names:
+                svc_id = service_id_by_key.get((e.site_name, svc_name))
+                if svc_id is not None:
+                    db.add(
+                        CapabilityServiceLink(
+                            equipment_capability_id=new_cap.id, service_id=svc_id
+                        )
+                    )
+            for gw_name in cap.gateway_names:
+                gw_id = gateway_id_by_key.get((e.site_name, gw_name))
+                if gw_id is not None:
+                    db.add(
+                        CapabilityGatewayLink(
+                            equipment_capability_id=new_cap.id, gateway_id=gw_id
+                        )
+                    )
+
+    for h in payload.equipment_holdings:
+        utc_id = utc_id_by_name.get(h.utc_name)
+        if utc_id is None:
+            continue
+        db.add(
+            EquipmentHolding(
+                workspace_id=ws.id,
+                utc_instance_id=utc_id,
+                equipment_type_id=resolve_type(
+                    h.equipment_type_title, f"Holding on UTC '{h.utc_name}'"
+                ),
+                authorized_qty=h.authorized_qty,
+                on_hand_qty=h.on_hand_qty,
+                notes=h.notes,
+            )
+        )
+
+    for link in payload.equipment_links:
+        a = equipment_id_by_code.get(link.a_equipment_code)
+        b = equipment_id_by_code.get(link.b_equipment_code)
+        if a is None or b is None or a == b:
+            continue
+        db.add(
+            EquipmentLink(
+                workspace_id=ws.id,
+                a_equipment_id=a,
+                b_equipment_id=b,
+                kind=link.kind,
+                direction=link.direction,
+                label=link.label,
+                # status left as model default; imports are structural.
+                notes=link.notes,
+            )
+        )
+
+    db.flush()
 
 
 me_router = APIRouter(prefix="/me", tags=["me"])

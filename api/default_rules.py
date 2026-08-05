@@ -267,4 +267,99 @@ DEFAULT_RULES: list[dict[str, Any]] = [
             }
         ],
     },
+    # ---------- Equipment tier ----------
+    {
+        **_COMMON,
+        "key": "record-equipment-status",
+        "version": 1,
+        "name": "Record equipment status changes",
+        "description": "Append a feed record whenever a piece of gear changes status.",
+        "trigger": "equipment.status_changed",
+        "conditions": None,
+        "actions": _create_event("equipment.status", "validation", "event", "notice"),
+    },
+    {
+        **_COMMON,
+        "key": "record-equipment-capability-status",
+        "version": 1,
+        "name": "Record capability status changes",
+        "description": (
+            "Append a feed record when a specific capability on a piece of gear "
+            "changes status — the voice side of a radio going down is different "
+            "news from the whole radio going down."
+        ),
+        "trigger": "equipment.capability_status_changed",
+        "conditions": None,
+        "actions": _create_event(
+            "equipment.capability.status", "validation", "event", "notice"
+        ),
+    },
+    {
+        **_COMMON,
+        "key": "record-equipment-registered",
+        "version": 1,
+        "name": "Record equipment registration",
+        "description": "Append an audit record whenever serialized gear is registered.",
+        "trigger": "equipment.registered",
+        "conditions": None,
+        "actions": _create_event("equipment.registered", "validation", "log", "info"),
+    },
+    {
+        **_COMMON,
+        "key": "record-utc-deployed",
+        "version": 1,
+        "name": "Record UTC deployments",
+        "description": "Append a feed record whenever a UTC is deployed to a site.",
+        "trigger": "utc.deployed",
+        "conditions": None,
+        "actions": _create_event("utc.deployed", "general", "event", "notice"),
+    },
+    {
+        **_COMMON,
+        "key": "record-equipment-link-changed",
+        "version": 1,
+        "name": "Record equipment link changes",
+        "description": (
+            "Append a feed record when the physical/RF topology changes — "
+            "rewiring an extension shot is a significant event."
+        ),
+        "trigger": "equipment.link_changed",
+        "conditions": None,
+        "actions": _create_event("equipment.link.changed", "general", "event", "notice"),
+    },
+    # The advisory alert. This is the ONLY thing that happens automatically
+    # when equipment contradicts the reported picture — a warning on the feed.
+    # Nothing writes the service or gateway status; see api/equipment_status.py
+    # for why that stays a human decision. `_ALERT` (on_error="skip") so a
+    # problem here can never roll back the capability status change itself.
+    {
+        **_ALERT,
+        "key": "equipment-contradicts-reported-status",
+        "version": 1,
+        "name": "Equipment contradicts reported status",
+        "description": (
+            "Warn when a capability goes down or degraded while a service or "
+            "gateway it backs is still reported healthy. Advisory only — an "
+            "operator decides whether to change the reported status."
+        ),
+        "trigger": "equipment.capability_status_changed",
+        "conditions": {
+            "and": [
+                {"in": [{"var": "new_status"}, ["down", "degraded", "offline", "maintenance"]]},
+                {"==": [{"var": "contradicts_reported"}, True]},
+            ]
+        },
+        "enrichers": [],
+        "computed": [],
+        "actions": [
+            {
+                "action": "create_event",
+                "params": {
+                    "severity": "warning",
+                    "type_slug": "equipment.derived.disagreement",
+                    "record_class": "event",
+                },
+            }
+        ],
+    },
 ]

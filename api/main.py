@@ -18,10 +18,14 @@ from models import Rule, User, Workspace
 from routers import (
     auth,
     canvas,
+    deployments,
     doc_pages,
     doc_sections,
     documents,
     enclave_sources,
+    equipment,
+    equipment_catalog,
+    equipment_topology,
     event_types,
     events,
     folders,
@@ -157,6 +161,12 @@ app.include_router(units.router)
 app.include_router(work_centers.router)
 app.include_router(teams.router)
 app.include_router(personnel.router)
+# Equipment tier. Catalog first, then instances, then topology — the order
+# only matters for how routes group in the OpenAPI docs.
+app.include_router(equipment_catalog.router)
+app.include_router(equipment.router)
+app.include_router(deployments.router)
+app.include_router(equipment_topology.router)
 
 
 @app.get("/health")

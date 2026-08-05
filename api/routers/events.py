@@ -27,6 +27,9 @@ from action_registry import lookup_catalog_type, record_action
 from db import get_db
 from deps import get_current_workspace, requires
 from models import (
+    Equipment,
+    EquipmentCapability,
+    EquipmentLink,
     Event,
     Gateway,
     Personnel,
@@ -36,6 +39,7 @@ from models import (
     Team,
     Unit,
     User,
+    UtcInstance,
     WorkCenter,
     Workspace,
 )
@@ -143,6 +147,53 @@ def _enrich(db: Session, v: Event) -> EventOut:
             ws = db.get(Workspace, v.subject_id)
             if ws:
                 out.subject_name = ws.name
+        elif v.subject_kind == SubjectKinds.EQUIPMENT:
+            eq = db.get(Equipment, v.subject_id)
+            if eq:
+                # People identify gear by its equipment ID (R7421), never by
+                # the type title, so that's the display name.
+                out.subject_name = eq.equipment_code
+                out.site_id = eq.site_id
+                site = db.get(Site, eq.site_id)
+                if site:
+                    out.site_name = site.name
+        elif v.subject_kind == SubjectKinds.EQUIPMENT_CAPABILITY:
+            # subject_id is the capability; second_subject_id is its equipment.
+            cap = db.get(EquipmentCapability, v.subject_id)
+            eq = db.get(Equipment, cap.equipment_id) if cap else None
+            if eq is None and v.second_subject_id is not None:
+                eq = db.get(Equipment, v.second_subject_id)
+            if cap and eq:
+                out.subject_name = f"{eq.equipment_code} {cap.label}"
+            elif cap:
+                out.subject_name = cap.label
+            if eq:
+                out.site_id = eq.site_id
+                site = db.get(Site, eq.site_id)
+                if site:
+                    out.site_name = site.name
+        elif v.subject_kind == SubjectKinds.EQUIPMENT_LINK:
+            link = db.get(EquipmentLink, v.subject_id)
+            if link:
+                a = db.get(Equipment, link.a_equipment_id)
+                b = db.get(Equipment, link.b_equipment_id)
+                if a and b:
+                    out.subject_name = f"{a.equipment_code} → {b.equipment_code}"
+                # A link can span two sites; attribute it to the A end so the
+                # events table's site column has something concrete to show.
+                if a:
+                    out.site_id = a.site_id
+                    site = db.get(Site, a.site_id)
+                    if site:
+                        out.site_name = site.name
+        elif v.subject_kind == SubjectKinds.UTC_INSTANCE:
+            utc = db.get(UtcInstance, v.subject_id)
+            if utc:
+                out.subject_name = utc.name
+                out.site_id = utc.site_id
+                site = db.get(Site, utc.site_id)
+                if site:
+                    out.site_name = site.name
     # For general events, fall back to the free-text label as the display name.
     if out.subject_name is None and v.subject_label:
         out.subject_name = v.subject_label
@@ -167,6 +218,14 @@ def _resolve_subject(db: Session, subject_kind: str, subject_id: int):
         obj = db.get(WorkCenter, subject_id)
     elif subject_kind == SubjectKinds.WORKSPACE:
         obj = db.get(Workspace, subject_id)
+    elif subject_kind == SubjectKinds.EQUIPMENT:
+        obj = db.get(Equipment, subject_id)
+    elif subject_kind == SubjectKinds.EQUIPMENT_CAPABILITY:
+        obj = db.get(EquipmentCapability, subject_id)
+    elif subject_kind == SubjectKinds.EQUIPMENT_LINK:
+        obj = db.get(EquipmentLink, subject_id)
+    elif subject_kind == SubjectKinds.UTC_INSTANCE:
+        obj = db.get(UtcInstance, subject_id)
     else:
         obj = None
     if obj is None:

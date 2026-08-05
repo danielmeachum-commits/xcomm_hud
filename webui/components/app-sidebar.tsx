@@ -6,12 +6,14 @@ import { useEffect, useState } from "react"
 import {
   Bell,
   BookOpen,
+  Boxes,
   ChevronRight,
   ChevronUp,
   ExternalLink,
   FileText,
   Flag,
   Globe,
+  HardDrive,
   ListChecks,
   LogOut,
   MapPin,
@@ -59,6 +61,7 @@ import { useWorkspace } from "@/lib/workspace"
 
 const SECONDARY_NAV_ITEMS = [
   { path: "/services", label: "Services", icon: Radio },
+  { path: "/equipment", label: "Equipment", icon: HardDrive },
   { path: "/events", label: "Events", icon: Bell },
   { path: "/documents", label: "Documents", icon: FileText },
 ]
@@ -80,6 +83,7 @@ const WORKSPACE_ADMIN_ITEMS = [
   { path: "/settings/event-types", label: "Event types", icon: Shapes },
   { path: "/settings/rules", label: "Rules", icon: Workflow },
   { path: "/admin/gateways", label: "Gateways", icon: Network },
+  { path: "/admin/equipment-catalog", label: "Equipment catalog", icon: Boxes },
   { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
   { path: "/admin/work-centers", label: "Work centers", icon: Users },
   { path: "/admin/teams", label: "Teams", icon: Users },

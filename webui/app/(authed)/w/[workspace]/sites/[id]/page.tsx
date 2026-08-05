@@ -4,6 +4,10 @@ import { requireSession } from "@/lib/auth"
 import { apiGet, ApiError } from "@/lib/api"
 import { SiteDetailClient } from "@/components/sites/site-detail-client"
 import type {
+  Equipment,
+  EquipmentHolding,
+  SiteEquipmentAdvisory,
+  UtcInstance,
   Document,
   Event,
   EventTypeDef,
@@ -54,6 +58,9 @@ export default async function SiteDetailPage({ params }: PageProps) {
     eventTypes,
     siteFolders,
     siteDocuments,
+    equipment,
+    utcs,
+    advisory,
   ] = await Promise.all([
     apiGet<Service[]>(`/services`).catch(() => [] as Service[]),
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
@@ -79,7 +86,30 @@ export default async function SiteDetailPage({ params }: PageProps) {
     apiGet<Document[]>(`/documents?site_id=${siteId}`).catch(
       () => [] as Document[],
     ),
+    apiGet<Equipment[]>(`/equipment?site_id=${siteId}`).catch(
+      () => [] as Equipment[],
+    ),
+    apiGet<UtcInstance[]>(`/utcs?site_id=${siteId}`).catch(
+      () => [] as UtcInstance[],
+    ),
+    // Advisory only — reported-vs-equipment-derived, never written back.
+    apiGet<SiteEquipmentAdvisory>(`/sites/${siteId}/equipment-advisory`).catch(
+      () => ({ service_derived: {}, gateway_derived: {} }) as SiteEquipmentAdvisory,
+    ),
   ])
+
+  // Holdings hang off each UTC rather than off the site, so they need one
+  // fetch per deployed UTC. Done after the batch above because the UTC ids
+  // aren't known until it resolves.
+  const holdings = (
+    await Promise.all(
+      utcs.map((u) =>
+        apiGet<EquipmentHolding[]>(`/utcs/${u.id}/holdings`).catch(
+          () => [] as EquipmentHolding[],
+        ),
+      ),
+    )
+  ).flat()
 
   const siteServices = allServices.filter((s) => s.site_id === siteId)
 
@@ -102,6 +132,10 @@ export default async function SiteDetailPage({ params }: PageProps) {
       eventTypes={eventTypes}
       siteFolders={siteFolders}
       siteDocuments={siteDocuments}
+      equipment={equipment}
+      utcs={utcs}
+      holdings={holdings}
+      advisory={advisory}
     />
   )
 }

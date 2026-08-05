@@ -45,6 +45,7 @@ export type AnyStatus =
   | ServiceStatus
   | GatewayStatus
   | SiteStatus
+  | EquipmentStatus
   | Fpcon
   | Emcon
   | PersonnelStatus
@@ -696,4 +697,374 @@ export interface DocSection {
 
 export interface ApiError {
   detail: string
+}
+
+// ===================== Equipment tier =====================
+
+export type EquipmentCategory =
+  | "radio"
+  | "satcom"
+  | "crypto"
+  | "network"
+  | "compute"
+  | "power"
+  | "antenna"
+  | "cable"
+  | "other"
+
+export type CapabilityKind =
+  | "voice"
+  | "data"
+  | "video"
+  | "satcom_rf"
+  | "los_rf"
+  | "routing"
+  | "switching"
+  | "crypto"
+  | "power"
+  | "other"
+
+/** Its own set — gear goes to `maintenance`, services and gateways don't. */
+export type EquipmentStatus =
+  | "up"
+  | "degraded"
+  | "down"
+  | "maintenance"
+  | "offline"
+  | "unknown"
+
+export type EquipmentLinkKind =
+  | "los"
+  | "satcom"
+  | "fiber"
+  | "cable"
+  | "wireless"
+  | "other"
+
+export type EquipmentLinkDirection = "bidirectional" | "a_to_b"
+export type UtcRole = "primary" | "extension" | "independent"
+export type UtcRoleHint = "primary" | "extension" | "either"
+export type CapabilityBindRole = "endpoint" | "transport"
+export type CapabilitySource = "template" | "custom"
+
+// --- catalog ---
+
+export interface EquipmentTypeCapability {
+  id: number
+  equipment_type_id: number
+  kind: CapabilityKind
+  label: string
+  description: string | null
+  display_order: number
+  materialize_by_default: boolean
+}
+
+export interface EquipmentType {
+  id: number
+  /** null = a global, admin-managed catalog row. */
+  workspace_id: number | null
+  title: string
+  short_name: string | null
+  /** What people actually call it — "117G", "radio". Searched. */
+  aliases: string[]
+  /** Free-form operator facets — "cci", "hand-receipt". Lowercased by the API.
+   *  Nothing branches on these; they exist so units can track what we don't
+   *  model. Searched and filterable. */
+  tags: string[]
+  nsn: string | null
+  lin: string | null
+  category: EquipmentCategory
+  serialized: boolean
+  id_prefix: string
+  manufacturer: string | null
+  model: string | null
+  icon: string | null
+  description: string | null
+  retired_at: string | null
+  capabilities: EquipmentTypeCapability[]
+  is_global: boolean
+}
+
+export interface UtcDefLine {
+  id: number
+  utc_def_id: number
+  equipment_type_id: number
+  quantity: number
+  notes: string | null
+  display_order: number
+  equipment_type_title: string | null
+  equipment_type_short_name: string | null
+  serialized: boolean
+}
+
+export interface UtcDef {
+  id: number
+  workspace_id: number | null
+  code: string
+  name: string
+  description: string | null
+  retired_at: string | null
+  lines: UtcDefLine[]
+  is_global: boolean
+}
+
+export interface PackageDefUtc {
+  id: number
+  package_def_id: number
+  utc_def_id: number
+  quantity: number
+  role_hint: UtcRoleHint
+  display_order: number
+  utc_def_code: string | null
+  utc_def_name: string | null
+}
+
+export interface PackageDef {
+  id: number
+  workspace_id: number | null
+  code: string
+  name: string
+  description: string | null
+  retired_at: string | null
+  utcs: PackageDefUtc[]
+  is_global: boolean
+}
+
+// --- deployed instances ---
+
+export interface PackageInstance {
+  id: number
+  workspace_id: number
+  package_def_id: number | null
+  name: string
+  notes: string | null
+  package_def_code: string | null
+  site_ids: number[]
+}
+
+export interface UtcInstance {
+  id: number
+  workspace_id: number
+  package_instance_id: number | null
+  utc_def_id: number | null
+  site_id: number
+  name: string
+  /** What the operator declared this UTC is for. */
+  role: UtcRole
+  notes: string | null
+  display_order: number
+  utc_def_code: string | null
+  site_name: string | null
+  package_name: string | null
+  /** What the link graph says it actually is. null = not enough links to
+   *  tell. A mismatch with `role` is shown, not silently reconciled. */
+  derived_role: UtcRole | null
+}
+
+/** What a deployed UTC was planned to carry — snapshotted at deploy from what
+ *  the operator confirmed, not copied from the def. See UtcCompleteness. */
+export interface UtcInstanceLine {
+  id: number
+  utc_instance_id: number
+  equipment_type_id: number
+  quantity: number
+  notes: string | null
+  type_title: string | null
+  type_short_name: string | null
+  serialized: boolean
+}
+
+/** `unknown` = deployed before expectations were recorded. Not the same as
+ *  "expected nothing", so it must not render as complete. */
+export type UtcCompletenessStatus = "complete" | "short" | "over" | "unknown"
+
+export interface UtcCompletenessLine {
+  equipment_type_id: number
+  type_title: string | null
+  type_short_name: string | null
+  serialized: boolean
+  expected: number
+  actual: number
+  /** actual - expected. Negative is short, positive is unplanned gear. */
+  delta: number
+}
+
+export interface UtcCompleteness {
+  utc_instance_id: number
+  status: UtcCompletenessStatus
+  lines: UtcCompletenessLine[]
+  /** How this deployment differs from doctrine. Informational — a tailored
+   *  UTC that left an enclave's stack home is correct, not deficient. */
+  def_variance: UtcCompletenessLine[]
+}
+
+export interface CapabilityBindings {
+  service_ids: number[]
+  gateway_ids: number[]
+}
+
+export interface EquipmentCapability {
+  id: number
+  equipment_id: number
+  kind: CapabilityKind
+  label: string
+  status: EquipmentStatus
+  source: CapabilitySource
+  validated_at: string | null
+  validated_by_user_id: number | null
+  validated_by_username: string | null
+  notes: string | null
+  display_order: number
+  bindings: CapabilityBindings
+}
+
+export interface Equipment {
+  id: number
+  workspace_id: number
+  equipment_type_id: number
+  utc_instance_id: number | null
+  site_id: number
+  /** The human-facing "Equipment ID" — R7421. Not the row id. */
+  equipment_code: string
+  serial_number: string | null
+  status: EquipmentStatus
+  validated_at: string | null
+  validated_by_user_id: number | null
+  validated_by_username: string | null
+  notes: string | null
+  type_title: string | null
+  type_short_name: string | null
+  type_category: EquipmentCategory | null
+  nsn: string | null
+  site_name: string | null
+  utc_name: string | null
+  capabilities: EquipmentCapability[]
+}
+
+export interface EquipmentHolding {
+  id: number
+  workspace_id: number
+  utc_instance_id: number
+  equipment_type_id: number
+  authorized_qty: number
+  on_hand_qty: number
+  notes: string | null
+  type_title: string | null
+  type_short_name: string | null
+  nsn: string | null
+}
+
+// --- links and topology ---
+
+export interface EquipmentLink {
+  id: number
+  workspace_id: number
+  a_equipment_id: number
+  b_equipment_id: number
+  a_capability_id: number | null
+  b_capability_id: number | null
+  kind: EquipmentLinkKind
+  direction: EquipmentLinkDirection
+  label: string | null
+  status: EquipmentStatus
+  notes: string | null
+  a_equipment_code: string | null
+  b_equipment_code: string | null
+  a_site_id: number | null
+  b_site_id: number | null
+}
+
+export interface BackingCapability {
+  capability_id: number
+  equipment_id: number
+  equipment_code: string
+  label: string
+  kind: CapabilityKind
+  status: EquipmentStatus
+  role: CapabilityBindRole | null
+}
+
+/** Advisory comparison of reported vs equipment-derived status.
+ *  Read-only: equipment never writes service or gateway status. */
+export interface DerivedStatus {
+  reported: string
+  derived: EquipmentStatus | null
+  /** True only when equipment says things are meaningfully *worse*. */
+  disagrees: boolean
+  backing: BackingCapability[]
+}
+
+export interface EquipmentPosition {
+  equipment_id: number
+  x: number
+  y: number
+}
+
+export interface TopologySiteNode {
+  site_id: number
+  name: string
+  status: SiteStatus
+  utc_instance_ids: number[]
+}
+
+export interface NetworkTopology {
+  sites: TopologySiteNode[]
+  utc_instances: UtcInstance[]
+  equipment: Equipment[]
+  links: EquipmentLink[]
+  positions: EquipmentPosition[]
+  service_derived: Record<number, DerivedStatus>
+  gateway_derived: Record<number, DerivedStatus>
+}
+
+export interface SiteEquipmentAdvisory {
+  service_derived: Record<number, DerivedStatus>
+  gateway_derived: Record<number, DerivedStatus>
+}
+
+// --- deploy wizard payload ---
+
+export interface UtcDeployItem {
+  equipment_type_id: number
+  serial_number?: string | null
+  equipment_code?: string | null
+  status?: EquipmentStatus
+  notes?: string | null
+  capability_kinds?: string[] | null
+}
+
+export interface CapabilityWiring {
+  /** Index into the deploy payload's `items` — the equipment rows don't
+   *  exist yet when the wizard builds this. */
+  item_index: number
+  capability_kind: CapabilityKind
+  service_id?: number | null
+  gateway_id?: number | null
+  role?: CapabilityBindRole
+}
+
+export interface UtcDeployPayload {
+  site_id: number
+  name: string
+  role: UtcRole
+  utc_def_id?: number | null
+  package_instance_id?: number | null
+  new_package_name?: string | null
+  new_package_def_id?: number | null
+  notes?: string | null
+  items: UtcDeployItem[]
+  holdings: {
+    equipment_type_id: number
+    authorized_qty: number
+    on_hand_qty: number
+    notes?: string | null
+  }[]
+  wiring: CapabilityWiring[]
+}
+
+export interface UtcDeployResult {
+  utc_instance: UtcInstance
+  equipment: Equipment[]
+  holdings: EquipmentHolding[]
+  bindings_created: number
 }

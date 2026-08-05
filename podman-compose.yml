@@ -68,20 +68,29 @@ services:
         condition: service_healthy
     command: sh -c "uv sync && uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
-  webui:
-    build:
-      context: ./webui
-      target: dev
-    environment:
-      API_URL: http://api:8000
-    ports:
-      - "3001:3000"
-    volumes:
-      - ./webui:/app:z
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      - api
+  # The webui normally runs on the host (`npm run dev:host` in ./webui) so that
+  # Domscribe works: its relay, the bundler plugin, the MCP server, and the
+  # browser must all share one loopback. Arbitration goes through
+  # .domscribe/relay.lock, which is gated on a PID liveness check — across a
+  # container boundary each side reads the other's pid as dead and evicts it.
+  #
+  # Uncomment to run the webui in a container again; Domscribe will not connect
+  # from the browser in that mode.
+  #
+  # webui:
+  #   build:
+  #     context: ./webui
+  #     target: dev
+  #   environment:
+  #     API_URL: http://api:8000
+  #   ports:
+  #     - "3001:3000"
+  #   volumes:
+  #     - ./webui:/app:z
+  #     - /app/node_modules
+  #     - /app/.next
+  #   depends_on:
+  #     - api
 
 volumes:
   pgdata:

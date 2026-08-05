@@ -41,6 +41,8 @@ from sqlalchemy.orm import Session
 from action_registry import record_action
 from models import (
     EMCON_LEVELS,
+    EQUIPMENT_LINK_KINDS,
+    EQUIPMENT_STATUS_VALUES,
     FPCON_LEVELS,
     GATEWAY_STATUS_VALUES,
     PERSONNEL_STATUS_VALUES,
@@ -520,6 +522,114 @@ TRIGGERS: dict[str, TriggerDef] = {
                 "subject_label": ctx.get("personnel_name"),
             },
             event_type="personnel",
+        ),
+        # ---------- Equipment tier ----------
+        # Note what is NOT here: there is no trigger that writes service or
+        # gateway status from equipment. Equipment status is advisory (see
+        # api/equipment_status.py); these triggers record what happened and,
+        # in the disagreement case, raise a flag for a human.
+        TriggerDef(
+            "equipment.status_changed",
+            "Equipment status changed",
+            [
+                _f("equipment_code", "Equipment ID"),
+                _f("equipment_title", "Equipment type"),
+                _f("prev_status", "Previous status", "enum", list(EQUIPMENT_STATUS_VALUES)),
+                _f("new_status", "New status", "enum", list(EQUIPMENT_STATUS_VALUES)),
+                *_COMMON_FIELDS,
+            ],
+            ("site_context",),
+            lambda ctx: {
+                "subject_kind": SubjectKinds.EQUIPMENT,
+                "subject_id": ctx.get("equipment_id"),
+                "subject_label": ctx.get("equipment_code"),
+            },
+        ),
+        TriggerDef(
+            "equipment.capability_status_changed",
+            "Equipment capability status changed",
+            [
+                _f("equipment_code", "Equipment ID"),
+                _f("capability_label", "Capability"),
+                _f("capability_kind", "Capability kind"),
+                _f("prev_status", "Previous status", "enum", list(EQUIPMENT_STATUS_VALUES)),
+                _f("new_status", "New status", "enum", list(EQUIPMENT_STATUS_VALUES)),
+                # True when this capability backs a service or gateway that is
+                # still reported healthy — the condition the advisory rule
+                # keys on so it doesn't fire for unbound gear.
+                _f("contradicts_reported", "Contradicts reported status", "bool"),
+                _f("bound_targets", "Bound services/gateways"),
+                *_COMMON_FIELDS,
+            ],
+            ("site_context",),
+            lambda ctx: {
+                "subject_kind": SubjectKinds.EQUIPMENT_CAPABILITY,
+                "subject_id": ctx.get("capability_id"),
+                "second_subject_id": ctx.get("equipment_id"),
+                "subject_label": (
+                    f"{ctx.get('equipment_code')} {ctx.get('capability_label')}"
+                ),
+            },
+        ),
+        TriggerDef(
+            "equipment.registered",
+            "Equipment registered",
+            [
+                _f("equipment_code", "Equipment ID"),
+                _f("equipment_title", "Equipment type"),
+                _f("serial_number", "Serial number"),
+                _f("site_name", "Site name"),
+                *_COMMON_FIELDS,
+            ],
+            ("site_context",),
+            lambda ctx: {
+                "subject_kind": SubjectKinds.EQUIPMENT,
+                "subject_id": ctx.get("equipment_id"),
+                "subject_label": ctx.get("equipment_code"),
+            },
+        ),
+        TriggerDef(
+            "equipment.link_changed",
+            "Equipment link changed",
+            [
+                _f("a_equipment_code", "From"),
+                _f("b_equipment_code", "To"),
+                _f("link_kind", "Link kind", "enum", list(EQUIPMENT_LINK_KINDS)),
+                _f("prev_status", "Previous status"),
+                _f("new_status", "New status"),
+                _f("source_flow", "Source flow", "enum", ["create", "update", "delete"]),
+                _f("crosses_sites", "Crosses sites", "bool"),
+                *_COMMON_FIELDS,
+            ],
+            (),
+            lambda ctx: {
+                "subject_kind": SubjectKinds.EQUIPMENT_LINK,
+                "subject_id": ctx.get("link_id"),
+                "subject_label": (
+                    f"{ctx.get('a_equipment_code')} → {ctx.get('b_equipment_code')}"
+                ),
+            },
+            event_type="general",
+        ),
+        TriggerDef(
+            "utc.deployed",
+            "UTC deployed",
+            [
+                _f("utc_name", "UTC name"),
+                _f("utc_code", "UTC code"),
+                _f("site_name", "Site name"),
+                _f("role", "Role", "enum", ["primary", "extension", "independent"]),
+                _f("equipment_count", "Serialized items", "number"),
+                *_COMMON_FIELDS,
+            ],
+            ("site_context",),
+            lambda ctx: {
+                "subject_kind": SubjectKinds.UTC_INSTANCE,
+                "subject_id": ctx.get("utc_instance_id"),
+                "second_subject_id": ctx.get("site_id"),
+                "subject_label": ctx.get("utc_name"),
+            },
+            event_type="general",
         ),
     ]
 }

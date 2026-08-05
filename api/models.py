@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -97,6 +98,65 @@ PERSONNEL_STATUS_VALUES = (
 )
 # Hard cap on a single document upload (enforced by the documents router).
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+# ---------- Equipment tier ----------
+# Broad shelf a piece of gear sits on. Drives the default icon and the default
+# equipment-ID prefix (a radio becomes R<last4>, a crypto device K<last4>, ...).
+EQUIPMENT_CATEGORIES = (
+    "radio",
+    "satcom",
+    "crypto",
+    "network",
+    "compute",
+    "power",
+    "antenna",
+    "cable",
+    "other",
+)
+# What a box can *do*. Declared once per equipment_type in the catalog, then
+# materialized onto each registered instance so an operator can drop the ones
+# a particular kit doesn't have. A capability is the thing that binds to a
+# service or a gateway — which is how one radio is simultaneously a service
+# endpoint (voice, data) and a transport path (satcom_rf).
+CAPABILITY_KINDS = (
+    "voice",
+    "data",
+    "video",
+    "satcom_rf",
+    "los_rf",
+    "routing",
+    "switching",
+    "crypto",
+    "power",
+    "other",
+)
+# Deliberately its own set rather than reusing SERVICE/GATEWAY statuses: gear
+# goes to `maintenance`, services and gateways don't. Ranked in
+# api/effective.py (EQUIPMENT_STATUS_RANK) for worst-of rollups.
+EQUIPMENT_STATUS_VALUES = (
+    "up",
+    "degraded",
+    "down",
+    "maintenance",
+    "offline",
+    "unknown",
+)
+EQUIPMENT_LINK_KINDS = ("los", "satcom", "fiber", "cable", "wireless", "other")
+# `a_to_b` is the extension shot (A feeds B); `bidirectional` is a peer trunk.
+# The topology view derives primary-vs-extension from these.
+EQUIPMENT_LINK_DIRECTIONS = ("bidirectional", "a_to_b")
+# Operator's *declaration* of what a deployed UTC is for. The link graph
+# derives the same thing independently; the view shows both so a disagreement
+# between plan and reality is visible.
+UTC_ROLES = ("primary", "extension", "independent")
+# How a package definition expects one of its UTCs to be used.
+UTC_ROLE_HINTS = ("primary", "extension", "either")
+# `endpoint` = this box is where the service is delivered; `transport` = it
+# only carries the service through.
+CAPABILITY_BIND_ROLES = ("endpoint", "transport")
+# Whether a capability row came from the type's declaration or was added by
+# hand to this one instance.
+CAPABILITY_SOURCES = ("template", "custom")
 
 
 class Workspace(Base):
@@ -1264,6 +1324,661 @@ class DocSection(Base):
     created_by: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+# ===================== Equipment: catalog =====================
+# Catalog rows follow the same global-vs-workspace pattern as Rule and
+# EventTypeDef: `workspace_id IS NULL` means a globally-seeded, admin-managed
+# row (NSNs and UTC composition are service-wide facts, not workspace
+# opinions); a non-null workspace_id is a local addition.
+
+
+class EquipmentType(Base):
+    """A model of gear in the catalog — "AN/PRC-117G", not a specific radio.
+
+    Nobody says the title out loud, so `short_name` ("117G") and `aliases`
+    (["117G", "radio"]) are first-class and both are searched.
+    """
+
+    __tablename__ = "equipment_type"
+    __table_args__ = (
+        Index(
+            "uq_equipment_type_global_title",
+            "title",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+        UniqueConstraint(
+            "workspace_id", "title", name="uq_equipment_type_workspace_title"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    short_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Free-list of what people actually call it. Matched by GET /equipment?search=.
+    aliases: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    # Operator-defined facets ("cci", "hand-receipt", "low-power"). Free-form on
+    # purpose: the fixed fields above cover what the system reasons about, and
+    # this covers everything a unit tracks that we shouldn't model for them.
+    # Lowercased on the way in so filtering stays case-insensitive.
+    tags: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    nsn: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    lin: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
+    category: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
+    # False = tracked as a bulk quantity (equipment_holding), not per serial.
+    serialized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Prefix for the generated equipment ID: "R" + last 4 of serial = R7421.
+    id_prefix: Mapped[str] = mapped_column(String(4), nullable=False, default="R")
+    manufacturer: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Soft delete — retired types stay resolvable for existing instances.
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    capabilities: Mapped[list["EquipmentTypeCapability"]] = relationship(
+        "EquipmentTypeCapability",
+        back_populates="equipment_type",
+        cascade="all, delete-orphan",
+        order_by="EquipmentTypeCapability.display_order",
+    )
+
+
+class EquipmentTypeCapability(Base):
+    """What this model of gear can do, declared once in the catalog.
+
+    Registering an instance copies these into `equipment_capability` rows the
+    operator can then edit or delete per kit.
+    """
+
+    __tablename__ = "equipment_type_capability"
+    __table_args__ = (
+        UniqueConstraint(
+            "equipment_type_id",
+            "kind",
+            "label",
+            name="uq_equipment_type_capability_kind_label",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    label: Mapped[str] = mapped_column(String(96), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Unchecked capabilities are offered in the register/deploy wizard but not
+    # created by default (e.g. an optional LOS antenna kit).
+    materialize_by_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+
+    equipment_type: Mapped["EquipmentType"] = relationship(
+        "EquipmentType", back_populates="capabilities"
+    )
+
+
+class UtcDef(Base):
+    """A Unit Type Code definition — the authorized bill of materials."""
+
+    __tablename__ = "utc_def"
+    __table_args__ = (
+        Index(
+            "uq_utc_def_global_code",
+            "code",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+        UniqueConstraint("workspace_id", "code", name="uq_utc_def_workspace_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    lines: Mapped[list["UtcDefLine"]] = relationship(
+        "UtcDefLine",
+        back_populates="utc_def",
+        cascade="all, delete-orphan",
+        order_by="UtcDefLine.display_order",
+    )
+
+
+class UtcDefLine(Base):
+    """One line item of a UTC's bill of materials.
+
+    Serialized-vs-bulk is not stored here — it comes from
+    `equipment_type.serialized`, so a type can never disagree with itself
+    across two UTCs.
+    """
+
+    __tablename__ = "utc_def_line"
+    __table_args__ = (
+        UniqueConstraint(
+            "utc_def_id", "equipment_type_id", name="uq_utc_def_line_type"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_def_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("utc_def.id", ondelete="CASCADE"), nullable=False
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="lines")
+
+
+class PackageDef(Base):
+    """A high-level package definition (FCP, etc.) composed of UTCs."""
+
+    __tablename__ = "package_def"
+    __table_args__ = (
+        Index(
+            "uq_package_def_global_code",
+            "code",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+        UniqueConstraint("workspace_id", "code", name="uq_package_def_workspace_code"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    utcs: Mapped[list["PackageDefUtc"]] = relationship(
+        "PackageDefUtc",
+        back_populates="package_def",
+        cascade="all, delete-orphan",
+        order_by="PackageDefUtc.display_order",
+    )
+
+
+class PackageDefUtc(Base):
+    """Which UTCs a package definition is built from, and in what role."""
+
+    __tablename__ = "package_def_utc"
+    __table_args__ = (
+        UniqueConstraint(
+            "package_def_id", "utc_def_id", name="uq_package_def_utc_pair"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    package_def_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("package_def.id", ondelete="CASCADE"), nullable=False
+    )
+    utc_def_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("utc_def.id", ondelete="RESTRICT"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Seeds the deploy wizard's role picker; not a constraint.
+    role_hint: Mapped[str] = mapped_column(String(16), nullable=False, default="either")
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    package_def: Mapped["PackageDef"] = relationship(
+        "PackageDef", back_populates="utcs"
+    )
+
+
+# ===================== Equipment: deployed instances =====================
+
+
+class PackageInstance(Base):
+    """A deployed package. Deliberately NOT site-scoped — an FCP spans sites,
+    which is the whole point of the extension topology."""
+
+    __tablename__ = "package_instance"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_package_instance_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    package_def_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("package_def.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class UtcInstance(Base):
+    """A UTC deployed to a site.
+
+    `role` is the operator's declaration (what was planned). The topology
+    view independently derives primary-vs-extension from the equipment_link
+    graph and shows both, so plan-vs-reality drift is visible rather than
+    silently resolved.
+    """
+
+    __tablename__ = "utc_instance"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_utc_instance_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    package_instance_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("package_instance.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    utc_def_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("utc_def.id", ondelete="SET NULL"), nullable=True
+    )
+    site_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="independent")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class UtcInstanceLine(Base):
+    """What this deployed UTC was planned to carry — one row per type.
+
+    Snapshotted at deploy from what the operator actually confirmed, NOT copied
+    from `utc_def_line`. A UTC routinely ships without the stack for a network
+    enclave the team isn't supporting, and those omissions are deliberate:
+    measuring completeness against doctrine would report them as shortfalls
+    forever, which trains people to ignore the indicator.
+
+    This is the middle layer of the same plan-vs-reality split `role` and
+    `derived_role` already use on UtcInstance: doctrine (`utc_def_line`), what
+    we meant to bring (here), what is actually present (`equipment` rows and
+    `equipment_holding` quantities). A snapshot rather than a pointer at def
+    lines, because defs stay editable and `utc_def_id` is nullable-on-delete —
+    a later catalog edit must not silently rewrite what a past deployment
+    expected.
+
+    Editable after deploy: "we're leaving the SIPR stack home" is sometimes
+    decided mid-mission, not at the wizard.
+    """
+
+    __tablename__ = "utc_instance_line"
+    __table_args__ = (
+        UniqueConstraint(
+            "utc_instance_id",
+            "equipment_type_id",
+            name="uq_utc_instance_line_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_instance_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("utc_instance.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class Equipment(Base):
+    """One serialized piece of gear.
+
+    NOTE the column naming: `equipment_code` is the human-facing "equipment
+    ID" (R7421 — prefix plus last 4 of the serial). It is deliberately NOT
+    called `equipment_id`, because every foreign key in this file that points
+    at this table is named `equipment_id`, and having that mean two different
+    things would be a standing footgun. The UI labels it "Equipment ID".
+
+    `site_id` is denormalized from the UTC on purpose: gear can sit at a site
+    without belonging to a deployed UTC, and every topology query filters by
+    site.
+    """
+
+    __tablename__ = "equipment"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "equipment_code", name="uq_equipment_code"),
+        Index(
+            "uq_equipment_serial",
+            "workspace_id",
+            "serial_number",
+            unique=True,
+            postgresql_where=text("serial_number IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    utc_instance_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("utc_instance.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    site_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    equipment_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    serial_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    capabilities: Mapped[list["EquipmentCapability"]] = relationship(
+        "EquipmentCapability",
+        back_populates="equipment",
+        cascade="all, delete-orphan",
+        order_by="EquipmentCapability.display_order",
+    )
+
+
+class EquipmentHolding(Base):
+    """The unserialized tier — bulk gear counted per deployed UTC.
+
+    Serialized items get their own `equipment` row; everything else (cables,
+    connectors, batteries) is a quantity here.
+    """
+
+    __tablename__ = "equipment_holding"
+    __table_args__ = (
+        UniqueConstraint(
+            "utc_instance_id", "equipment_type_id", name="uq_equipment_holding_type"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    utc_instance_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("utc_instance.id", ondelete="CASCADE"), nullable=False
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    authorized_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    on_hand_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class EquipmentCapability(Base):
+    """A capability materialized onto one specific piece of gear.
+
+    Copied from the type's declaration at registration, then editable — an
+    operator can delete `los_rf` from a kit that shipped without the antenna.
+    Carries its own status so a radio with a dead data port but working voice
+    is expressible, which a single status field on `equipment` could not do.
+    """
+
+    __tablename__ = "equipment_capability"
+    __table_args__ = (
+        UniqueConstraint(
+            "equipment_id", "kind", "label", name="uq_equipment_capability_kind_label"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    equipment_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    label: Mapped[str] = mapped_column(String(96), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="template")
+    validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validated_by_user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    equipment: Mapped["Equipment"] = relationship(
+        "Equipment", back_populates="capabilities"
+    )
+
+
+class EquipmentCanvasPosition(Base):
+    """Saved node position on the network topology canvas.
+
+    Separate table rather than x/y columns on `equipment`, mirroring the
+    existing `site_canvas_position`, so a layout change never touches the
+    equipment row's updated_at.
+    """
+
+    __tablename__ = "equipment_canvas_position"
+
+    equipment_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+
+
+# ===================== Equipment: bindings and links =====================
+# Two concrete join tables rather than one polymorphic (target_kind,
+# target_id) table — real foreign keys, real cascades, and it matches the
+# precedent set by service_gateway_status.
+
+
+class CapabilityServiceLink(Base):
+    """This capability backs that service."""
+
+    __tablename__ = "capability_service_link"
+
+    equipment_capability_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_capability.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    service_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("service.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="endpoint")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class CapabilityGatewayLink(Base):
+    """This capability realizes that PACE transport path."""
+
+    __tablename__ = "capability_gateway_link"
+
+    equipment_capability_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_capability.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    gateway_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("gateway.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class EquipmentLink(Base):
+    """A physical/RF connection between two pieces of gear.
+
+    These rows are the truth about the network topology, including across
+    sites — an RFK at Site A shooting to an RFK at Site B is what makes B an
+    extension of A. The optional capability columns say which port carried it
+    ("the shot leaves the los_rf, not the satcom_rf"); most links won't bother.
+    """
+
+    __tablename__ = "equipment_link"
+    __table_args__ = (
+        CheckConstraint(
+            "a_equipment_id <> b_equipment_id", name="ck_equipment_link_distinct"
+        ),
+        UniqueConstraint(
+            "a_equipment_id", "b_equipment_id", "kind", name="uq_equipment_link_pair"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    a_equipment_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    b_equipment_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    a_capability_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_capability.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    b_capability_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_capability.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
+    direction: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="bidirectional"
+    )
+    label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
