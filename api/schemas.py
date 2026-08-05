@@ -177,6 +177,10 @@ LABEL_ONLY_SUBJECT_KINDS = {
 }
 Fpcon = Literal["normal", "alpha", "bravo", "charlie", "delta"]
 Emcon = Literal["a", "b", "c", "d"]
+# Static on purpose: classification levels are stable enough that a managed
+# lookup table would be ceremony around a constant. Descriptive metadata only —
+# nothing orders, ranks or branches on these. See the Enclave model docstring.
+Classification = Literal["unclassified", "cui", "secret", "top_secret"]
 
 
 class _ORM(BaseModel):
@@ -315,6 +319,7 @@ class ExportedEnclave(BaseModel):
     name: str
     short_name: Optional[str] = None
     color: Optional[str] = None
+    classification: Optional[Classification] = None
     display_order: int = 0
     parent_name: Optional[str] = None
     notes: Optional[str] = None
@@ -1720,6 +1725,9 @@ class EnclaveIn(BaseModel):
     parent_id: Optional[int] = None
     # Hex ("#8b5a2b"). Null for the transport layer, which has no color.
     color: Optional[str] = None
+    # What this enclave is understood to carry. Null is a real answer — an
+    # enclave need not declare one. Display metadata; never branched on.
+    classification: Optional[Classification] = None
     display_order: int = 0
     notes: Optional[str] = None
 
@@ -1729,6 +1737,7 @@ class EnclavePatch(BaseModel):
     short_name: Optional[str] = None
     parent_id: Optional[int] = None
     color: Optional[str] = None
+    classification: Optional[Classification] = None
     display_order: Optional[int] = None
     notes: Optional[str] = None
     retired: Optional[bool] = None
@@ -1741,6 +1750,7 @@ class EnclaveOut(_ORM):
     name: str
     short_name: Optional[str] = None
     color: Optional[str] = None
+    classification: Optional[Classification] = None
     display_order: int = 0
     retired_at: Optional[datetime.datetime] = None
     notes: Optional[str] = None

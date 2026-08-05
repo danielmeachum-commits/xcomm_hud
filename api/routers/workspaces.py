@@ -210,6 +210,7 @@ def duplicate_workspace(
             name=en.name,
             short_name=en.short_name,
             color=en.color,
+            classification=en.classification,
             display_order=en.display_order,
             retired_at=en.retired_at,
             notes=en.notes,
@@ -831,6 +832,7 @@ def _export_equipment(
                 name=e.name,
                 short_name=e.short_name,
                 color=e.color,
+                classification=e.classification,
                 display_order=e.display_order,
                 parent_name=enclave_name_by_id.get(e.parent_id)
                 if e.parent_id
@@ -1301,6 +1303,7 @@ def import_workspace(
             name=en.name,
             short_name=en.short_name,
             color=en.color,
+            classification=en.classification,
             display_order=en.display_order,
             notes=en.notes,
         )

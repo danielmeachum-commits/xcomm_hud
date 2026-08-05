@@ -239,7 +239,12 @@ export function EquipmentPageClient({
                 className="rounded-xl border border-border p-4"
               >
                 <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{u.name}</span>
+                  <Link
+                    href={w(`/equipment/utc/${u.id}`)}
+                    className="font-medium hover:underline"
+                  >
+                    {u.name}
+                  </Link>
                   {u.utc_def_code && (
                     <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
                       {u.utc_def_code}

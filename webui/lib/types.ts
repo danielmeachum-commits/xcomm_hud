@@ -754,13 +754,18 @@ export type CapabilitySource = "template" | "custom"
 
 // --- enclaves ---
 
+/** Static vocabulary, mirroring `schemas.Classification`. Hardcoded rather than
+ *  a managed lookup because the levels are stable. */
+export type Classification = "unclassified" | "cui" | "secret" | "top_secret"
+
 /** A network gear and services belong to — NIPR, SIPR, ACBN, BICES.
  *
  *  Flat over the wire: `parent_id` only, tree assembled client-side, same as
  *  Folder and DocPage. `color` is a hex string and is null for the transport
  *  layer, which operators describe as colorless.
  *
- *  Not a classification level — deliberately no ordering or severity. */
+ *  Not DEFINED BY a classification level, though it may HAVE one — see
+ *  `classification`. Deliberately no ordering or severity. */
 export interface Enclave {
   id: number
   /** null = a global, admin-managed row. */
@@ -769,6 +774,10 @@ export interface Enclave {
   name: string
   short_name: string | null
   color: string | null
+  /** What this enclave is generally understood to carry. Display metadata:
+   *  never ordered, ranked, or branched on. Null is a real answer — Transport
+   *  declares nothing. */
+  classification: Classification | null
   display_order: number
   retired_at: string | null
   notes: string | null

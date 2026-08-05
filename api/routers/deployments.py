@@ -409,6 +409,24 @@ def list_utcs(
     return [_utc_out(db, r, equipment_by_utc, links) for r in rows]
 
 
+@router.get("/utcs/{utc_id}", response_model=UtcInstanceOut)
+def get_utc(
+    utc_id: int,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    """One deployed UTC, with `derived_role` resolved like the list does.
+
+    The role comes from the link graph, so it needs the same context the list
+    builds — a UTC read on its own must not report a different role than the
+    same UTC read in a list.
+    """
+    row = _load_utc(db, utc_id, workspace)
+    equipment_by_utc, links = _utc_role_context(db, workspace)
+    return _utc_out(db, row, equipment_by_utc, links)
+
+
 @router.post("/utcs", response_model=UtcInstanceOut, status_code=status.HTTP_201_CREATED)
 def create_utc(
     body: UtcInstanceIn,

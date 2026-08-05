@@ -162,21 +162,34 @@ export function aggregateCapabilities(
   return [...seen]
 }
 
-function groupLinesByCategory(
+/** Read-view sections, mirroring `UtcLineEditor`: enclaves in catalog order,
+ *  then the untagged lines as "common" — the tail of the packing list, not the
+ *  headline. Enclaves the def says nothing about are omitted entirely; an
+ *  empty section would read as a stack that was deliberately left out.
+ *
+ *  Grouped by enclave rather than by equipment category because that is how the
+ *  UTC is described out loud: what are we supporting, and what does each one
+ *  need. */
+function groupLinesByEnclave(
   lines: UtcDefLine[],
-  byId: Map<number, EquipmentType>,
-): [EquipmentCategory, UtcDefLine[]][] {
-  const groups = new Map<EquipmentCategory, UtcDefLine[]>()
-  for (const l of lines) {
-    const cat = byId.get(l.equipment_type_id)?.category ?? "other"
-    const bucket = groups.get(cat)
-    if (bucket) bucket.push(l)
-    else groups.set(cat, [l])
-  }
-  return CATEGORY_VALUES.filter((c) => groups.has(c)).map((c) => [
-    c,
-    groups.get(c)!,
-  ])
+  enclaves: Enclave[],
+): { enclave: Enclave | null; lines: UtcDefLine[] }[] {
+  const sections = enclaves
+    .map((e) => ({
+      enclave: e as Enclave | null,
+      lines: lines.filter((l) => l.enclave_id === e.id),
+    }))
+    .filter((s) => s.lines.length > 0)
+  // A line tagged with an enclave this sheet wasn't handed (retired, or from
+  // another workspace) still has to appear — falling through to "common" is
+  // wrong but visible, where dropping it silently is not.
+  const known = new Set(enclaves.map((e) => e.id))
+  const common = lines.filter(
+    (l) => l.enclave_id === null || !known.has(l.enclave_id),
+  )
+  return common.length > 0
+    ? [...sections, { enclave: null, lines: common }]
+    : sections
 }
 
 function SaveBar({
@@ -908,8 +921,6 @@ export function UtcDefSheet({
     setActiveEnclaves(activeEnclavesFrom(drafts))
   }, [def])
 
-  const enclaveById = new Map(enclaves.map((e) => [e.id, e]))
-
   const byId = new Map(types.map((t) => [t.id, t]))
 
   async function save() {
@@ -1012,60 +1023,57 @@ export function UtcDefSheet({
                     />
                   </Field>
                   <div className="flex flex-col gap-3">
-                    {groupLinesByCategory(def.lines, byId).map(
-                      ([cat, lines]) => {
-                        const Icon = equipmentIcon(cat)
-                        return (
-                          <div key={cat} className="flex flex-col gap-1">
-                            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                              <Icon className="size-3.5" />
-                              {EQUIPMENT_CATEGORY_LABELS[cat]}
-                            </div>
-                            <ul className="flex flex-col gap-1 text-sm">
-                              {lines.map((l) => (
-                                <li
-                                  key={l.id}
-                                  className="flex justify-between gap-2 border-b border-border/50 pb-1"
+                    {groupLinesByEnclave(def.lines, enclaves).map(
+                      ({ enclave, lines }) => (
+                        <div
+                          key={enclave?.id ?? "common"}
+                          className="flex flex-col gap-1.5 rounded-lg border border-border p-2.5"
+                        >
+                          <div className="flex items-center gap-2">
+                            {enclave ? (
+                              <>
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                                    enclaveChipClass(enclave.color),
+                                  )}
+                                  style={enclaveChipStyle(enclave.color)}
                                 >
-                                  <span>
-                                    {l.equipment_type_short_name ??
-                                      l.equipment_type_title}
-                                    {!l.serialized && (
-                                      <span className="ml-1 text-xs text-muted-foreground">
-                                        (bulk)
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="flex items-center gap-1.5">
-                                    {l.enclave_id !== null &&
-                                      enclaveById.has(l.enclave_id) && (
-                                        <span
-                                          className={cn(
-                                            "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
-                                            enclaveChipClass(
-                                              enclaveById.get(l.enclave_id)!
-                                                .color,
-                                            ),
-                                          )}
-                                          style={enclaveChipStyle(
-                                            enclaveById.get(l.enclave_id)!.color,
-                                          )}
-                                        >
-                                          {enclaveById.get(l.enclave_id)!
-                                            .short_name ||
-                                            enclaveById.get(l.enclave_id)!.name}
-                                        </span>
-                                      )}
-                                    <span className="font-mono text-muted-foreground">
-                                      ×{l.quantity}
-                                    </span>
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
+                                  {enclave.short_name || enclave.name}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground">
+                                  {enclave.name}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                Common to every enclave
+                              </span>
+                            )}
                           </div>
-                        )
-                      },
+                          <ul className="flex flex-col gap-1 text-sm">
+                            {lines.map((l) => (
+                              <li
+                                key={l.id}
+                                className="flex justify-between gap-2 border-b border-border/50 pb-1 last:border-b-0 last:pb-0"
+                              >
+                                <span>
+                                  {l.equipment_type_short_name ??
+                                    l.equipment_type_title}
+                                  {!l.serialized && (
+                                    <span className="ml-1 text-xs text-muted-foreground">
+                                      (bulk)
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="font-mono text-muted-foreground">
+                                  ×{l.quantity}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ),
                     )}
                   </div>
                 </div>

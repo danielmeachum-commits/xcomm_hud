@@ -28,11 +28,25 @@ import {
   enclaveDepth,
   enclaveTreeOrder,
 } from "@/lib/enclave-meta"
-import type { Enclave } from "@/lib/types"
+import type { Classification, Enclave } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+
+/** A static vocabulary, not a managed list — the levels are stable. Listed
+ *  in the order an operator would recite them, which is NOT a ranking the app
+ *  uses for anything: nothing sorts or branches on classification. */
+const CLASSIFICATION_LABELS: Record<Classification, string> = {
+  unclassified: "Unclassified",
+  cui: "CUI",
+  secret: "Secret",
+  top_secret: "Top Secret",
+}
+
+const CLASSIFICATION_VALUES = Object.keys(
+  CLASSIFICATION_LABELS,
+) as Classification[]
 
 /** Suggested swatches. Free-text hex is still allowed — these just save the
  *  operator from picking a color that reads as a status. */
@@ -53,6 +67,8 @@ interface Form {
   short_name: string
   parent_id: number | ""
   color: string
+  /** "" is the "None" option — an enclave declaring no level. */
+  classification: Classification | ""
   display_order: number
   notes: string
 }
@@ -63,6 +79,7 @@ function emptyForm(): Form {
     short_name: "",
     parent_id: "",
     color: "",
+    classification: "",
     display_order: 0,
     notes: "",
   }
@@ -74,6 +91,7 @@ function formOf(e: Enclave): Form {
     short_name: e.short_name ?? "",
     parent_id: e.parent_id ?? "",
     color: e.color ?? "",
+    classification: e.classification ?? "",
     display_order: e.display_order,
     notes: e.notes ?? "",
   }
@@ -176,6 +194,7 @@ export function EnclavesClient({
       short_name: form.short_name.trim() || null,
       parent_id: form.parent_id === "" ? null : Number(form.parent_id),
       color: form.color.trim() || null,
+      classification: form.classification || null,
       display_order: form.display_order,
       notes: form.notes.trim() || null,
     }
@@ -229,6 +248,7 @@ export function EnclavesClient({
         <TableHeader>
           <TableRow>
             <TableHead>Enclave</TableHead>
+            <TableHead className="w-32">Classification</TableHead>
             <TableHead className="w-24 text-right">Scope</TableHead>
             <TableHead className="w-20" />
           </TableRow>
@@ -261,6 +281,15 @@ export function EnclavesClient({
                     </span>
                   )}
                 </span>
+              </TableCell>
+              {/* Plain muted text, no badge: this is metadata about the
+                  network, not a status or a marking on anything. */}
+              <TableCell className="text-xs text-muted-foreground">
+                {e.classification ? (
+                  CLASSIFICATION_LABELS[e.classification]
+                ) : (
+                  <span className="opacity-60">—</span>
+                )}
               </TableCell>
               <TableCell className="text-right">
                 {e.is_global ? (
@@ -352,6 +381,35 @@ export function EnclavesClient({
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="enc-class">Classification</Label>
+              <select
+                id="enc-class"
+                className={SELECT_CLASS}
+                value={form.classification}
+                disabled={pending}
+                onChange={(ev) =>
+                  setForm({
+                    ...form,
+                    classification: ev.target.value as Classification | "",
+                  })
+                }
+              >
+                <option value="">None</option>
+                {CLASSIFICATION_VALUES.map((c) => (
+                  <option key={c} value={c}>
+                    {CLASSIFICATION_LABELS[c]}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                What this network is understood to carry. Descriptive only —
+                nothing in the app is gated or ordered by it, and an enclave is
+                still not the same thing as a classification. Leave as None for
+                transport, which carries no marking of its own.
+              </p>
             </div>
 
             <div className="flex flex-col gap-1">

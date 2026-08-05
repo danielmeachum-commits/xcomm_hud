@@ -1362,11 +1362,17 @@ class Enclave(Base):
     Transport sits at the top with no parent and no color; NIPR and SIPR hang
     off it; ACBN and BICES hang off those.
 
-    NOT a classification level. Enclaves correlate with classification and are
-    not the same thing — a `SECRET` marking and "is on SIPR" answer different
-    questions. There is deliberately no ordering, no severity, and no link to
-    the `--classification-surface` banner tints. Adding one turns this into a
-    different feature.
+    NOT DEFINED BY a classification level, but it may HAVE one. An enclave and a
+    classification answer different questions — a `SECRET` marking and "is on
+    SIPR" are not the same fact, and gear moves between enclaves without its
+    markings changing. `classification` is descriptive metadata for display: it
+    records what an enclave is generally understood to carry (SIPR is secret,
+    Transport declares nothing at all). Nothing may branch on it.
+
+    So the original rule still stands where it counts: there is deliberately no
+    ordering, no severity, no ranking of enclaves by classification, and no link
+    to the `--classification-surface` banner tints. Giving the column any of
+    those turns this into a different feature.
     """
 
     __tablename__ = "enclave"
@@ -1398,6 +1404,11 @@ class Enclave(Base):
     # Hex string, matching EventTypeDef.color and Team.color. Null on purpose
     # for the transport layer, which operators describe as having no color.
     color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # What this enclave is generally understood to carry. A static vocabulary
+    # (schemas.Classification), not a managed lookup table — the levels are
+    # stable. Nullable because an enclave need not declare one: Transport
+    # realistically has none. Display only; see the class docstring.
+    classification: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Soft delete: tagged equipment and services hold FKs to these rows.
     retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
