@@ -3,7 +3,6 @@ import {
   Battery,
   Boxes,
   Cable,
-  Cpu,
   KeyRound,
   Merge,
   Network,

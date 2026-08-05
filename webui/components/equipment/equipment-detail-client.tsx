@@ -13,7 +13,7 @@ import {
   LINK_KIND_LABELS,
   equipmentIcon,
 } from "@/lib/equipment-meta"
-import { statusBadgeClass, statusLabel, statusToIndicatorState } from "@/lib/status"
+import { statusBadgeClass, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
   Enclave,

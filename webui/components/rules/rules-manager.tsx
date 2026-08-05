@@ -291,7 +291,7 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
               <p className="py-1 text-xs text-muted-foreground">Loading…</p>
             ) : runs.length === 0 ? (
               <p className="py-1 text-xs text-muted-foreground">
-                This rule hasn't fired yet.
+                This rule hasn&apos;t fired yet.
               </p>
             ) : (
               <ul className="flex flex-col gap-0.5 py-1">
@@ -355,7 +355,8 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
         <h2 className="text-sm font-medium">Built-in</h2>
         <p className="text-xs text-muted-foreground">
           The system record-keeping — these rules write the feed rows for
-          validations, sign-ins, and posture changes. They're managed centrally
+          validations, sign-ins, and posture changes. They&apos;re managed
+          centrally
           and shared across every workspace; you can turn one off for this
           workspace, or duplicate it into an editable workspace rule.
         </p>

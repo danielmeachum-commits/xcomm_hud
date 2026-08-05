@@ -173,7 +173,7 @@ export function SitePropertyTemplateDetail({ template }: Props) {
 
   async function addSection() {
     // Nudge unique default names — "New section", "New section 2", …
-    let base = "New section"
+    const base = "New section"
     const existing = new Set(template.group_order)
     let candidate = base
     let n = 2
@@ -443,7 +443,7 @@ export function SitePropertyTemplateDetail({ template }: Props) {
         ))}
         {sections.length === 0 && (
           <div className="rounded-lg border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
-            No sections yet. Click "Add section" to start.
+            No sections yet. Click &quot;Add section&quot; to start.
           </div>
         )}
       </div>
@@ -506,7 +506,6 @@ function SectionBlock({
   ) => void
 }) {
   const isNamed = section.name !== null
-  const sectionKey = section.name ?? UNGROUPED
   const sectionDrafts = drafts.filter((d) => (d.group ?? null) === section.name)
   const isBeingDragged =
     drag?.kind === "section" && isNamed && drag.name === section.name
@@ -623,7 +622,8 @@ function SectionBlock({
               "bg-accent/40",
           )}
         >
-          No fields in this section. Drop a field here or click "Add field".
+          No fields in this section. Drop a field here or click &quot;Add
+          field&quot;.
         </div>
       ) : (
         <div className="overflow-auto">

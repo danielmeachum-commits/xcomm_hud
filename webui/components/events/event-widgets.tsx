@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card"
 import { TimeAgo } from "@/components/time-display"
 import { SEVERITY_LABELS, SEVERITY_ORDER, severityDotClass } from "@/lib/severity"
 import { cn } from "@/lib/utils"
-import type { EventSummary, Severity } from "@/lib/types"
+import type { EventSummary } from "@/lib/types"
 
 /** Horizontal row of summary stat tiles above the events views.
  *

@@ -16,7 +16,6 @@ export function ReaderControls() {
   useEffect(() => {
     const stored = parseFloat(localStorage.getItem(KEY) ?? "")
     if (!Number.isNaN(stored)) apply(stored)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function apply(value: number) {

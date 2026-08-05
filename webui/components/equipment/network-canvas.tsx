@@ -230,10 +230,6 @@ function NetworkCanvasInner({
     [visibleEquipment],
   )
 
-  const equipmentById = useMemo(
-    () => new Map(topology.equipment.map((e) => [e.id, e])),
-    [topology.equipment],
-  )
   const utcById = useMemo(
     () => new Map(topology.utc_instances.map((u) => [u.id, u])),
     [topology.utc_instances],

@@ -44,7 +44,6 @@ import type {
   Role,
   Service,
   ServiceGatewayStatus,
-  ServiceStatus,
 } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 
@@ -288,7 +287,7 @@ function bestCellForTier(
 
 export function SiteMatrix({ services, gateways, userRole }: Props) {
   const isOperator = userRole === "operator" || userRole === "admin"
-  const [density, setDensity] = useState<Density>("full")
+  const [density] = useState<Density>("full")
 
   const {
     corePace,
@@ -450,9 +449,15 @@ function MatrixGridSection({
   // dead/empty tiers without depending on gwByPace/columnOverride (which
   // would re-fire and clobber user intent every time a gateway status
   // changes). Refs are updated on every render.
+  // Written during render on purpose: these are a snapshot of the current
+  // render, read only by the mount effect. Moving the writes into an effect
+  // would make them lag the render that produced them, which is the one thing
+  // this pattern exists to avoid. Hence the targeted disables below.
   const gwByPaceRef = useRef(gwByPace)
+  // eslint-disable-next-line react-hooks/refs -- deliberate render-time snapshot
   gwByPaceRef.current = gwByPace
   const columnOverrideRef = useRef(columnOverride)
+  // eslint-disable-next-line react-hooks/refs -- deliberate render-time snapshot
   columnOverrideRef.current = columnOverride
 
   // Set to true only after a user-initiated toggle. Keeps the save effect
@@ -806,33 +811,6 @@ function MatrixGridSection({
 
 /* ---------------- Header tiles ---------------- */
 
-function ColumnHeaderLabel({
-  label,
-  col,
-  hoveredCol,
-}: {
-  label: string
-  col: number
-  hoveredCol: number | null
-}) {
-  // The col=0 "Service" header is sticky-pinned so it stays visible when the
-  // matrix is scrolled horizontally. The solid bg-background hides scrolled
-  // PACE-tile content sliding under it; the border-r signals the boundary.
-  const isServiceCol = col === 0
-  return (
-    <div
-      data-col={col}
-      className={cn(
-        "flex items-end px-2 pb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground",
-        hoveredCol === col && "text-foreground",
-        isServiceCol && "sticky left-0 z-20 bg-background border-r border-border/60",
-      )}
-    >
-      {label}
-    </div>
-  )
-}
-
 /** Header pill for the local-availability column. Visually parallels
  *  PaceHeaderLabel (same bordered-pill footprint so the header row reads
  *  as a row of labeled reachability columns) but uses a neutral slate
@@ -1117,7 +1095,6 @@ function GatewayCard({
 
 type Hover = { col: number | null; row: number | null }
 
-const BASE_TILE_CLASS = "rounded-md border border-border transition-colors"
 
 /** Tile with real data. Row-or-column hover swaps the tile's border to
  *  sky-blue so the crosshair reads across the section without washing out

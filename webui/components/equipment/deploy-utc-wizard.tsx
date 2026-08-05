@@ -2,7 +2,7 @@
 
 import { Check, Plus, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -181,10 +181,10 @@ export function DeployUtcWizard({
     role,
   ])
 
-  useEffect(() => {
-    if (nameTouched) return
-    setName(suggestedName)
-  }, [suggestedName, nameTouched])
+  /** What the field shows and what gets submitted. Derived rather than synced
+   *  into state by an effect: until the operator types, the name simply IS the
+   *  suggestion, so there is nothing to keep in step. */
+  const resolvedName = nameTouched ? name : suggestedName
 
   function goTo(i: number) {
     if (i <= maxVisited) setStep(i)
@@ -375,7 +375,7 @@ export function DeployUtcWizard({
       })
     return {
       site_id: Number(siteId),
-      name: name.trim(),
+      name: resolvedName.trim(),
       role,
       utc_def_id: utcDefId ? Number(utcDefId) : null,
       package_instance_id:
@@ -452,7 +452,7 @@ export function DeployUtcWizard({
       case "utc":
         return true
       case "site":
-        return siteId !== "" && name.trim().length > 0
+        return siteId !== "" && resolvedName.trim().length > 0
       default:
         return true
     }
@@ -733,7 +733,7 @@ export function DeployUtcWizard({
                   UTC name
                 </label>
                 <input
-                  value={name}
+                  value={resolvedName}
                   onChange={(e) => {
                     setNameTouched(true)
                     setName(e.target.value)
@@ -1215,7 +1215,7 @@ export function DeployUtcWizard({
                 </dd>
                 <dt className="text-xs text-muted-foreground">UTC</dt>
                 <dd className="col-span-2">
-                  {name || "—"}{" "}
+                  {resolvedName || "—"}{" "}
                   <span className="text-muted-foreground">
                     ({UTC_ROLE_LABELS[role]})
                   </span>
@@ -1286,7 +1286,7 @@ export function DeployUtcWizard({
               type="button"
               size="sm"
               onClick={submit}
-              disabled={pending || !siteId || !name.trim()}
+              disabled={pending || !siteId || !resolvedName.trim()}
             >
               {pending ? "Deploying…" : "Deploy UTC"}
             </Button>

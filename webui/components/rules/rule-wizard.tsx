@@ -475,7 +475,7 @@ function ComputedRowEditor({
           </div>
           <p className="text-[10px] text-muted-foreground">
             Ordered lowest → highest, comma-separated. Result is 0-based; a
-            value not in the list yields nothing (comparisons won't match).
+            value not in the list yields nothing (comparisons won&apos;t match).
           </p>
         </div>
       )}
@@ -1170,8 +1170,8 @@ export function RuleWizard({
               <div className="space-y-1.5">
                 <Label>Conditions (JSON)</Label>
                 <p className="text-[10px] text-muted-foreground">
-                  This rule's conditions were authored in a shape the row
-                  editor can't represent — edit the raw tree instead.
+                  This rule&apos;s conditions were authored in a shape the row
+                  editor can&apos;t represent — edit the raw tree instead.
                 </p>
                 <Textarea
                   value={rawCond}
@@ -1361,7 +1361,7 @@ export function RuleWizard({
                       ))}
                     </select>
                     <p className="text-[10px] text-muted-foreground">
-                      The field's value must be “log” or “event”; anything
+                      The field&apos;s value must be “log” or “event”; anything
                       else falls back to the type default.
                     </p>
                   </div>
@@ -1403,7 +1403,7 @@ export function RuleWizard({
                       ))}
                     </select>
                     <p className="text-[10px] text-muted-foreground">
-                      The field's value must be info / notice / warning /
+                      The field&apos;s value must be info / notice / warning /
                       critical — anything else falls back to the type
                       default. Use a “Map values” computed field to translate
                       (e.g. escalation yes → critical, no → info).
@@ -1415,7 +1415,7 @@ export function RuleWizard({
                 <Label>
                   Note template
                   <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                    (optional — overrides the operator's note)
+                    (optional — overrides the operator&apos;s note)
                   </span>
                 </Label>
                 <Textarea

@@ -17,7 +17,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
 import type { DocPage, DocSection } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 import { DocsSearch } from "./docs-search"

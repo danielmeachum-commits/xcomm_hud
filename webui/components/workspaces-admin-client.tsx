@@ -78,7 +78,8 @@ export function WorkspacesAdminClient({ initialWorkspaces }: Props) {
           <h1 className="text-lg font-semibold tracking-tight">Workspaces</h1>
           <p className="text-xs text-muted-foreground">
             Each workspace holds one operating picture. Duplicate a workspace
-            to seed the next exercise; tag with "archived" to hide it from the
+            to seed the next exercise; tag with &quot;archived&quot; to hide it
+            from the
             switcher.
           </p>
         </div>
@@ -284,7 +285,8 @@ function EditWorkspaceButton({
               placeholder="exercise, planning"
             />
             <span className="text-[11px] text-muted-foreground">
-              Comma-separated. Use "archived" to hide from the switcher.
+              Comma-separated. Use &quot;archived&quot; to hide from the
+              switcher.
             </span>
           </div>
           <DialogFooter>
@@ -368,7 +370,8 @@ function CreateWorkspaceButton({ onCreated }: { onCreated: () => void }) {
               placeholder="exercise, planning"
             />
             <span className="text-[11px] text-muted-foreground">
-              Comma-separated. Use "archived" to hide from the switcher.
+              Comma-separated. Use &quot;archived&quot; to hide from the
+              switcher.
             </span>
           </div>
           <DialogFooter>
@@ -431,7 +434,7 @@ function DuplicateWorkspaceButton({
       <DialogContent>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>Duplicate "{source.name}"</DialogTitle>
+            <DialogTitle>Duplicate &quot;{source.name}&quot;</DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground">
             Copies sites, services, gateways, canvas positions, and annotations

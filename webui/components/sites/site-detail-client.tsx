@@ -482,21 +482,6 @@ function ServicesTab({
   )
 }
 
-function PlaceholderTab({
-  title,
-  description,
-}: {
-  title: string
-  description: string
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-center">
-      <p className="text-sm font-medium">{title}</p>
-      <p className="text-xs text-muted-foreground">{description}</p>
-    </div>
-  )
-}
-
 type PersonnelGroupMode = "group" | "status" | "work_center" | "team" | "unit"
 
 const PERSONNEL_GROUP_MODES: PersonnelGroupMode[] = [

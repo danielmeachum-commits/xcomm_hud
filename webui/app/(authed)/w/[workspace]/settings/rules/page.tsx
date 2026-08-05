@@ -22,7 +22,7 @@ export default async function RulesPage() {
         <h1 className="text-lg font-semibold tracking-tight">Rules</h1>
         <p className="text-xs text-muted-foreground">
           When something happens (a trigger), rules decide the reaction —
-          today that's recording events and logs; notifications and more
+          today that&apos;s recording events and logs; notifications and more
           plug in later. Built-in rules are the system record-keeping.
         </p>
       </div>

@@ -54,7 +54,6 @@ import type {
   AnyStatus,
   Emcon,
   Event,
-  EventType,
   EventTypeDef,
   Fpcon,
   Gateway,
