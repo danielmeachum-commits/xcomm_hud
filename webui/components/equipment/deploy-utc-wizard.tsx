@@ -12,10 +12,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { enclaveChipStyle } from "@/lib/enclave-meta"
 import { CAPABILITY_LABELS, UTC_ROLE_LABELS } from "@/lib/equipment-meta"
 import { cn } from "@/lib/utils"
 import type {
   CapabilityKind,
+  Enclave,
   EquipmentType,
   Gateway,
   PackageDef,
@@ -30,6 +32,7 @@ import type {
 const STEPS = [
   { key: "package", label: "Package" },
   { key: "utc", label: "UTC" },
+  { key: "enclaves", label: "Enclaves" },
   { key: "site", label: "Site & role" },
   { key: "items", label: "Serialized" },
   { key: "bulk", label: "Bulk" },
@@ -44,6 +47,9 @@ interface ItemDraft {
   equipment_type_id: number
   serial_number: string
   equipment_code: string
+  /** Carried from the UTC line this came from, so the gear arrives tagged
+   *  instead of needing a second pass through the equipment list. */
+  enclave_id: number | null
   /** Which declared capabilities this particular kit actually has. */
   capability_kinds: string[]
 }
@@ -52,6 +58,7 @@ interface BulkDraft {
   equipment_type_id: number
   authorized_qty: number
   on_hand_qty: number
+  enclave_id: number | null
 }
 
 /** `<prefix><last 4 of serial>`, mirroring api/equipment_codes.py so the
@@ -64,6 +71,7 @@ function proposeCode(type: EquipmentType | undefined, serial: string): string {
 
 interface Props {
   sites: Site[]
+  enclaves: Enclave[]
   types: EquipmentType[]
   utcDefs: UtcDef[]
   packages: PackageInstance[]
@@ -74,6 +82,7 @@ interface Props {
 
 export function DeployUtcWizard({
   sites,
+  enclaves,
   types,
   utcDefs,
   packages,
@@ -106,6 +115,10 @@ export function DeployUtcWizard({
   const [bulk, setBulk] = useState<BulkDraft[]>([])
   // step 6 — wiring: "<itemIndex>:<kind>" -> {service|gateway}:<id>
   const [wiring, setWiring] = useState<Record<string, string>>({})
+  // Enclaves this deployment supports. null until a def is chosen — an empty
+  // Set is a real answer ("supporting none of them"), so it can't double as
+  // "not asked yet".
+  const [supported, setSupported] = useState<Set<number> | null>(null)
 
   const typeById = useMemo(() => new Map(types.map((t) => [t.id, t])), [types])
   const selectedUtcDef = utcDefId ? utcDefs.find((d) => d.id === utcDefId) : null
@@ -126,6 +139,7 @@ export function DeployUtcWizard({
     setItems([])
     setBulk([])
     setWiring({})
+    setSupported(null)
     setError(null)
   }
 
@@ -139,19 +153,34 @@ export function DeployUtcWizard({
     setMaxVisited((m) => Math.max(m, n))
   }
 
-  /** Prefill contents from the chosen UTC's bill of materials — this is the
-   *  payoff for declaring capabilities in the catalog: the operator confirms
-   *  and types serials rather than building the list from nothing. */
-  function applyUtcDef(defId: number | "") {
-    setUtcDefId(defId)
-    if (!defId) return
+  /** Enclaves this UTC's bill of materials mentions, in catalog order. Lines
+   *  with no enclave (power, cables, the RF shot) are common to every one and
+   *  never appear here — they ship regardless of what's supported. */
+  const defEnclaves = useMemo(() => {
+    if (!selectedUtcDef) return []
+    const ids = new Set(
+      selectedUtcDef.lines
+        .map((l) => l.enclave_id)
+        .filter((id): id is number => id !== null),
+    )
+    return enclaves.filter((e) => ids.has(e.id))
+  }, [selectedUtcDef, enclaves])
+
+  /** Prefill contents from the chosen UTC's bill of materials, keeping only
+   *  the enclaves this deployment supports — this is what turns "we're leaving
+   *  the SIPR stack home" into one checkbox instead of a row-by-row delete. */
+  function buildContents(defId: number | "", keep: Set<number> | null) {
+    if (!defId) return { items: [] as ItemDraft[], bulk: [] as BulkDraft[] }
     const def = utcDefs.find((d) => d.id === defId)
-    if (!def) return
+    if (!def) return { items: [] as ItemDraft[], bulk: [] as BulkDraft[] }
     const nextItems: ItemDraft[] = []
     const nextBulk: BulkDraft[] = []
     for (const line of def.lines) {
       const t = typeById.get(line.equipment_type_id)
       if (!t) continue
+      // Untagged lines are common to every enclave, so they always ship.
+      if (line.enclave_id !== null && keep && !keep.has(line.enclave_id))
+        continue
       if (t.serialized) {
         // One row per unit — each needs its own serial.
         for (let i = 0; i < line.quantity; i++) {
@@ -159,6 +188,7 @@ export function DeployUtcWizard({
             equipment_type_id: t.id,
             serial_number: "",
             equipment_code: "",
+            enclave_id: line.enclave_id,
             capability_kinds: t.capabilities
               .filter((c) => c.materialize_by_default)
               .map((c) => c.kind),
@@ -169,16 +199,61 @@ export function DeployUtcWizard({
           equipment_type_id: t.id,
           authorized_qty: line.quantity,
           on_hand_qty: line.quantity,
+          enclave_id: line.enclave_id,
         })
       }
     }
-    setItems(nextItems)
-    setBulk(nextBulk)
+    return { items: nextItems, bulk: nextBulk }
+  }
+
+  function applyUtcDef(defId: number | "") {
+    setUtcDefId(defId)
+    setWiring({})
+    if (!defId) {
+      setSupported(null)
+      setItems([])
+      setBulk([])
+      return
+    }
+    const def = utcDefs.find((d) => d.id === defId)
+    // Everything checked by default: the common case is bringing the whole
+    // UTC, and unchecking is the deliberate act.
+    const all = new Set(
+      (def?.lines ?? [])
+        .map((l) => l.enclave_id)
+        .filter((id): id is number => id !== null),
+    )
+    setSupported(all)
+    const built = buildContents(defId, all)
+    setItems(built.items)
+    setBulk(built.bulk)
+  }
+
+  /** Re-derive contents when the supported set changes. Rebuilding from the
+   *  def rather than filtering the current drafts means re-checking an enclave
+   *  restores its rows — but it also discards typed serials, so this only runs
+   *  on an actual toggle. */
+  function toggleEnclave(id: number) {
+    const next = new Set(supported ?? [])
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSupported(next)
+    const built = buildContents(utcDefId, next)
+    setItems(built.items)
+    setBulk(built.bulk)
+    setWiring({})
   }
 
   /** Propose bindings by matching each item's capabilities against the
    *  site's existing services and gateways. Suggestions only — the operator
-   *  unchecks what doesn't apply on the wiring step. */
+   *  unchecks what doesn't apply on the wiring step.
+   *
+   *  Enclave is matched before kind. Before enclaves existed this took the
+   *  first service of a matching kind, which silently wired SIPR gear to NIPR
+   *  Web whenever both existed — they are both kind="data" and nothing else
+   *  told them apart. When the enclave can't disambiguate a genuinely
+   *  ambiguous choice, propose nothing: a wrong pre-checked binding is worse
+   *  than an empty one, because the operator has no reason to look at it. */
   function proposeWiring(targetSiteId: number) {
     const proposals: Record<string, string> = {}
     const svc = services.filter((s) => s.site_id === targetSiteId)
@@ -190,7 +265,17 @@ export function DeployUtcWizard({
         // Service kinds and capability kinds share vocabulary for voice/data,
         // which is exactly the common case worth auto-proposing.
         if (kind === "voice" || kind === "data") {
-          const match = svc.find((s) => s.kind === kind)
+          const ofKind = svc.filter((s) => s.kind === kind)
+          const sameEnclave =
+            item.enclave_id !== null
+              ? ofKind.filter((s) => s.enclave_id === item.enclave_id)
+              : []
+          const match =
+            sameEnclave.length === 1
+              ? sameEnclave[0]
+              : sameEnclave.length === 0 && ofKind.length === 1
+                ? ofKind[0]
+                : null
           if (match) proposals[`${index}:${kind}`] = `service:${match.id}`
         }
         if (kind === "satcom_rf") {
@@ -235,13 +320,20 @@ export function DeployUtcWizard({
         equipment_code:
           i.equipment_code.trim() ||
           proposeCode(typeById.get(i.equipment_type_id), i.serial_number),
+        enclave_id: i.enclave_id,
         capability_kinds: i.capability_kinds,
       })),
-      holdings: bulk.map((b) => ({
-        equipment_type_id: b.equipment_type_id,
-        authorized_qty: b.authorized_qty,
-        on_hand_qty: b.on_hand_qty,
-      })),
+      // Drop zeroed rows. Sending them created a quantity-0 expectation line,
+      // so "we're not bringing any of these" was recorded as "we expect zero"
+      // — indistinguishable from a real expectation in the completeness view.
+      holdings: bulk
+        .filter((b) => b.authorized_qty > 0 || b.on_hand_qty > 0)
+        .map((b) => ({
+          equipment_type_id: b.equipment_type_id,
+          authorized_qty: b.authorized_qty,
+          on_hand_qty: b.on_hand_qty,
+          enclave_id: b.enclave_id,
+        })),
       wiring: wiringOut,
     }
   }
@@ -471,8 +563,74 @@ export function DeployUtcWizard({
             </div>
           )}
 
-          {/* ---- 3. site & role ---- */}
+          {/* ---- 3. enclaves supported ---- */}
           {step === 2 && (
+            <div className="space-y-3">
+              {defEnclaves.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                  {utcDefId
+                    ? "No line in this UTC is tagged with an enclave, so there is nothing to leave home. Tag the UTC definition's lines in the equipment catalog to use this step."
+                    : "Pick a UTC definition to choose which enclaves it supports."}
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Which enclaves is this deployment supporting? Unchecking one
+                    drops its whole stack — and records that it was never
+                    expected here, so completeness won&apos;t report it as
+                    missing. Gear common to every enclave (power, cables, the RF
+                    shot) ships either way.
+                  </p>
+                  <div className="space-y-1.5">
+                    {defEnclaves.map((en) => {
+                      const on = supported?.has(en.id) ?? false
+                      const lines =
+                        selectedUtcDef?.lines.filter(
+                          (l) => l.enclave_id === en.id,
+                        ) ?? []
+                      const units = lines.reduce((n, l) => n + l.quantity, 0)
+                      return (
+                        <label
+                          key={en.id}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors",
+                            on ? "border-border" : "border-dashed opacity-60",
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleEnclave(en.id)}
+                          />
+                          <span
+                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                            style={enclaveChipStyle(en.color)}
+                          >
+                            {en.short_name || en.name}
+                          </span>
+                          <span className="flex-1 text-sm">{en.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {lines.length} line
+                            {lines.length === 1 ? "" : "s"} · {units} unit
+                            {units === 1 ? "" : "s"}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  {supported?.size === 0 && (
+                    <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+                      Nothing enclave-specific will ship. That&apos;s a valid
+                      deployment — only the common gear goes.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ---- 4. site & role ---- */}
+          {step === 3 && (
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium">Site</label>
@@ -528,8 +686,8 @@ export function DeployUtcWizard({
             </div>
           )}
 
-          {/* ---- 4. serialized items ---- */}
-          {step === 3 && (
+          {/* ---- 5. serialized items ---- */}
+          {step === 4 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
@@ -547,6 +705,10 @@ export function DeployUtcWizard({
                         equipment_type_id: t.id,
                         serial_number: "",
                         equipment_code: "",
+                        // Hand-added gear isn't coming from a UTC line, so
+                        // there's no enclave to inherit. Tagged later from the
+                        // equipment list if it belongs to one.
+                        enclave_id: null,
                         capability_kinds: t.capabilities
                           .filter((c) => c.materialize_by_default)
                           .map((c) => c.kind),
@@ -687,8 +849,8 @@ export function DeployUtcWizard({
             </div>
           )}
 
-          {/* ---- 5. bulk ---- */}
-          {step === 4 && (
+          {/* ---- 6. bulk ---- */}
+          {step === 5 && (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Unserialized gear is counted, not tracked per item.
@@ -742,14 +904,28 @@ export function DeployUtcWizard({
                       }
                       className="h-8 w-16 rounded-md border border-input bg-background px-2 text-sm"
                     />
+                    {/* Bulk had no way to drop a row — the only option was
+                        zeroing both numbers, which still recorded an
+                        expectation. */}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      aria-label="Remove bulk line"
+                      onClick={() =>
+                        setBulk((prev) => prev.filter((_, i) => i !== index))
+                      }
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
                   </div>
                 )
               })}
             </div>
           )}
 
-          {/* ---- 6. wiring ---- */}
-          {step === 5 && (
+          {/* ---- 7. wiring ---- */}
+          {step === 6 && (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Which service or gateway each capability backs. Pre-checked
@@ -825,8 +1001,8 @@ export function DeployUtcWizard({
             </div>
           )}
 
-          {/* ---- 7. review ---- */}
-          {step === 6 && (
+          {/* ---- 8. review ---- */}
+          {step === 7 && (
             <div className="space-y-3 text-sm">
               <dl className="grid grid-cols-3 gap-y-2">
                 <dt className="text-xs text-muted-foreground">Site</dt>

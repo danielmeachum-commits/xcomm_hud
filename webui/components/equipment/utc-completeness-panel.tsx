@@ -2,16 +2,19 @@
 
 import { AlertTriangle, Check, HelpCircle, PackagePlus, Pencil } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type {
+  Enclave,
   UtcCompleteness,
+  UtcCompletenessLine,
   UtcCompletenessStatus,
   UtcInstance,
   UtcInstanceLine,
 } from "@/lib/types"
+import { enclaveChipStyle } from "@/lib/enclave-meta"
 import { cn } from "@/lib/utils"
 
 const STATUS_META: Record<
@@ -71,7 +74,13 @@ function label(line: { type_short_name: string | null; type_title: string | null
  *  expected list. Editing after deploy is the point: "we're leaving the SIPR
  *  stack home" is sometimes decided mid-mission, and without this the operator
  *  stares at a shortfall they have no way to acknowledge. */
-export function UtcCompletenessPanel({ utc }: { utc: UtcInstance }) {
+export function UtcCompletenessPanel({
+  utc,
+  enclaves = [],
+}: {
+  utc: UtcInstance
+  enclaves?: Enclave[]
+}) {
   const router = useRouter()
   const [data, setData] = useState<UtcCompleteness | null>(null)
   const [loading, setLoading] = useState(true)
@@ -79,6 +88,44 @@ export function UtcCompletenessPanel({ utc }: { utc: UtcInstance }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<number, number>>({})
   const [pending, setPending] = useState(false)
+
+  const enclaveById = useMemo(
+    () => new Map(enclaves.map((e) => [e.id, e])),
+    [enclaves],
+  )
+
+  /** Rows bucketed by enclave, with untagged gear last under "common". Order
+   *  follows the enclave list so the grouping is stable between UTCs. */
+  const grouped = useMemo(() => {
+    if (!data) return []
+    const buckets = new Map<number | null, UtcCompletenessLine[]>()
+    for (const line of data.lines) {
+      const key = line.enclave_id ?? null
+      const bucket = buckets.get(key)
+      if (bucket) bucket.push(line)
+      else buckets.set(key, [line])
+    }
+    const out: { enclave: Enclave | null; lines: UtcCompletenessLine[] }[] = []
+    for (const e of enclaves) {
+      const lines = buckets.get(e.id)
+      if (lines) out.push({ enclave: e, lines })
+    }
+    // Anything tagged with an enclave we can't resolve still has to render.
+    for (const [key, lines] of buckets) {
+      if (key !== null && !enclaveById.has(key)) out.push({ enclave: null, lines })
+    }
+    const common = buckets.get(null)
+    if (common) out.push({ enclave: null, lines: common })
+    return out
+  }, [data, enclaves, enclaveById])
+
+  const unsupported = useMemo(
+    () =>
+      (data?.unsupported_enclave_ids ?? [])
+        .map((id) => enclaveById.get(id))
+        .filter((e): e is Enclave => e !== undefined),
+    [data, enclaveById],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -205,7 +252,27 @@ export function UtcCompletenessPanel({ utc }: { utc: UtcInstance }) {
             </tr>
           </thead>
           <tbody>
-            {data.lines.map((line) => (
+            {grouped.map(({ enclave, lines }) => (
+              <Fragment key={enclave?.id ?? "common"}>
+                {grouped.length > 1 && (
+                  <tr>
+                    <td colSpan={4} className="pt-3 pb-1">
+                      {enclave ? (
+                        <span
+                          className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                          style={enclaveChipStyle(enclave.color)}
+                        >
+                          {enclave.short_name || enclave.name}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          Common to every enclave
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {lines.map((line) => (
               <tr
                 key={line.equipment_type_id}
                 className="border-t border-border/50"
@@ -249,9 +316,36 @@ export function UtcCompletenessPanel({ utc }: { utc: UtcInstance }) {
                   {line.delta > 0 ? `+${line.delta}` : line.delta}
                 </td>
               </tr>
+                ))}
+              </Fragment>
             ))}
           </tbody>
         </table>
+      )}
+
+      {unsupported.length > 0 && (
+        <div className="rounded-lg border border-border bg-muted/30 p-3">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Not supported on this deployment
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {utc.utc_def_code ?? "The definition"} includes a stack for{" "}
+            {unsupported.length === 1 ? "this enclave" : "these enclaves"}, and
+            this deployment never expected {unsupported.length === 1 ? "it" : "them"}.
+            A decision, not a shortfall — nothing is missing.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {unsupported.map((e) => (
+              <span
+                key={e.id}
+                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                style={enclaveChipStyle(e.color)}
+              >
+                {e.short_name || e.name}
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
       {data.def_variance.length > 0 && (

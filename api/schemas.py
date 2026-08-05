@@ -2115,6 +2115,7 @@ class UtcCompletenessLine(BaseModel):
     equipment_type_id: int
     type_title: Optional[str] = None
     type_short_name: Optional[str] = None
+    enclave_id: Optional[int] = None
     serialized: bool = True
     expected: int
     actual: int
@@ -2136,6 +2137,11 @@ class UtcCompletenessOut(BaseModel):
     lines: list[UtcCompletenessLine] = Field(default_factory=list)
     # Expected-vs-doctrine, populated only when the UTC has a utc_def.
     def_variance: list[UtcCompletenessLine] = Field(default_factory=list)
+    # Enclaves the def calls for that this deployment expects nothing from —
+    # the stack was left home. DERIVED from the snapshot rather than stored, so
+    # it stays correct when the expected list is edited mid-mission. These are
+    # not shortfalls and must not be rendered as ones.
+    unsupported_enclave_ids: list[int] = Field(default_factory=list)
 
 
 # ===================== Equipment: links and topology =====================
@@ -2259,11 +2265,6 @@ class UtcDeployIn(BaseModel):
     items: list[UtcDeployItemIn] = Field(default_factory=list)
     holdings: list[EquipmentHoldingIn] = Field(default_factory=list)
     wiring: list[CapabilityWiringIn] = Field(default_factory=list)
-    # Enclaves the operator confirmed this deployment supports. Recorded so an
-    # enclave deliberately left home reads as "not supported here" rather than
-    # as a shortfall. Empty means the question was never asked (a UTC with no
-    # enclave-tagged lines), which is different from "supports none".
-    supported_enclave_ids: Optional[list[int]] = None
 
 
 class UtcDeployOut(BaseModel):

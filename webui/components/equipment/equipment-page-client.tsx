@@ -148,6 +148,7 @@ export function EquipmentPageClient({
         </div>
         <DeployUtcWizard
           sites={sites}
+          enclaves={enclaves}
           types={types}
           utcDefs={utcDefs}
           packages={packages}
@@ -248,7 +249,7 @@ export function EquipmentPageClient({
                     {siteById.get(u.site_id)?.name ?? u.site_name}
                   </span>
                 </div>
-                <UtcCompletenessPanel utc={u} />
+                <UtcCompletenessPanel utc={u} enclaves={enclaves} />
               </section>
             ))}
           </div>

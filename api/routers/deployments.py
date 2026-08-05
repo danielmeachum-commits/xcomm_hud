@@ -195,10 +195,16 @@ def _actual_counts(db: Session, utc_id: int) -> dict[int, int]:
 
 
 def _compare(
-    db: Session, expected: dict[int, int], actual: dict[int, int]
+    db: Session,
+    expected: dict[int, int],
+    actual: dict[int, int],
+    enclave_by_type: dict[int, int | None] | None = None,
 ) -> list[UtcCompletenessLine]:
     """One row per type appearing on either side, so surplus is as visible as
-    shortfall — gear nobody planned for is its own kind of problem."""
+    shortfall — gear nobody planned for is its own kind of problem.
+
+    `enclave_by_type` only labels the rows for grouping in the UI; the
+    comparison itself stays per type."""
     lines: list[UtcCompletenessLine] = []
     for type_id in sorted(set(expected) | set(actual)):
         t = db.get(EquipmentType, type_id)
@@ -209,6 +215,7 @@ def _compare(
                 equipment_type_id=type_id,
                 type_title=t.title if t else None,
                 type_short_name=t.short_name if t else None,
+                enclave_id=(enclave_by_type or {}).get(type_id),
                 serialized=t.serialized if t else True,
                 expected=exp,
                 actual=act,
@@ -216,6 +223,33 @@ def _compare(
             )
         )
     return lines
+
+
+def _unsupported_enclaves(
+    db: Session, utc: UtcInstance, expected_rows: list[UtcInstanceLine]
+) -> list[int]:
+    """Enclaves the def calls for that this deployment expects nothing from.
+
+    Derived rather than stored. A stored "supported" set would go stale the
+    moment someone edits the expected list mid-mission — which is a first-class
+    workflow here, not an edge case — and the snapshot already carries the
+    answer: an enclave with doctrine lines and no expectation lines was left
+    home. That is a decision, not a shortfall, and the UI must not show it as
+    one.
+    """
+    if utc.utc_def_id is None:
+        return []
+    doctrine_enclaves = {
+        e
+        for (e,) in db.query(UtcDefLine.enclave_id).filter(
+            UtcDefLine.utc_def_id == utc.utc_def_id,
+            UtcDefLine.enclave_id.isnot(None),
+        )
+    }
+    if not doctrine_enclaves:
+        return []
+    expected_enclaves = {r.enclave_id for r in expected_rows if r.enclave_id}
+    return sorted(doctrine_enclaves - expected_enclaves)
 
 
 def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
@@ -238,7 +272,8 @@ def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
         )
 
     expected = {r.equipment_type_id: r.quantity for r in expected_rows}
-    lines = _compare(db, expected, actual)
+    enclave_by_type = {r.equipment_type_id: r.enclave_id for r in expected_rows}
+    lines = _compare(db, expected, actual, enclave_by_type)
     if any(l.delta < 0 for l in lines):
         status_value = "short"
     elif any(l.delta > 0 for l in lines):
@@ -258,7 +293,8 @@ def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
         # Reuse the same shape with doctrine as the baseline: `expected` here
         # is what the def calls for and `actual` is what we planned to bring.
         def_variance = [
-            l for l in _compare(db, doctrine, expected) if l.delta != 0
+            l for l in _compare(db, doctrine, expected, enclave_by_type)
+            if l.delta != 0
         ]
 
     return UtcCompletenessOut(
@@ -266,6 +302,7 @@ def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
         status=status_value,
         lines=lines,
         def_variance=def_variance,
+        unsupported_enclave_ids=_unsupported_enclaves(db, utc, expected_rows),
     )
 
 

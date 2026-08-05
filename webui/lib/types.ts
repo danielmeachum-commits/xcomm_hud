@@ -914,6 +914,8 @@ export interface UtcCompletenessLine {
   equipment_type_id: number
   type_title: string | null
   type_short_name: string | null
+  /** Labels the row for grouping only — the comparison stays per type. */
+  enclave_id: number | null
   serialized: boolean
   expected: number
   actual: number
@@ -928,6 +930,11 @@ export interface UtcCompleteness {
   /** How this deployment differs from doctrine. Informational — a tailored
    *  UTC that left an enclave's stack home is correct, not deficient. */
   def_variance: UtcCompletenessLine[]
+  /** Enclaves the def calls for that this deployment expects nothing from.
+   *  Derived from the snapshot, so it stays right when the expected list is
+   *  edited mid-mission. These are decisions, NOT shortfalls — never render
+   *  them as a problem. */
+  unsupported_enclave_ids: number[]
 }
 
 export interface CapabilityBindings {
@@ -1093,6 +1100,9 @@ export interface UtcDeployPayload {
     equipment_type_id: number
     authorized_qty: number
     on_hand_qty: number
+    /** Carried for the expectation snapshot only — bulk gear itself isn't
+     *  tagged, since a box of cables serves every enclave. */
+    enclave_id?: number | null
     notes?: string | null
   }[]
   wiring: CapabilityWiring[]
