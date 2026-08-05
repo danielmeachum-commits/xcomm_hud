@@ -3,6 +3,7 @@
 import { Boxes, Globe, Package, Radio, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 
+import { CatalogCreateDialog } from "@/components/equipment/catalog-create-dialog"
 import {
   CATEGORY_VALUES,
   CodeBadge,
@@ -139,16 +140,26 @@ export function EquipmentCatalogClient({
 
   return (
     <>
-      <ViewTabs<Tab>
-        value={tab}
-        onChange={setTab}
-        variant="line"
-        options={[
-          { value: "types", label: "Equipment types", icon: Radio },
-          { value: "utcs", label: "UTC definitions", icon: Boxes },
-          { value: "packages", label: "Packages", icon: Package },
-        ]}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ViewTabs<Tab>
+          value={tab}
+          onChange={setTab}
+          variant="line"
+          options={[
+            { value: "types", label: "Equipment types", icon: Radio },
+            { value: "utcs", label: "UTC definitions", icon: Boxes },
+            { value: "packages", label: "Packages", icon: Package },
+          ]}
+        />
+        {/* Creates whatever the active tab lists, so there's one button
+            rather than three competing for the header. */}
+        <CatalogCreateDialog
+          kind={tab}
+          types={types}
+          utcDefs={utcDefs}
+          isAdmin={isAdmin}
+        />
+      </div>
 
       <p className="text-xs text-muted-foreground">
         {tab === "types" &&
@@ -350,7 +361,7 @@ export function EquipmentCatalogClient({
             <TableRow>
               <TableHead className="w-28">Code</TableHead>
               <TableHead>Name</TableHead>
-              <TableHead className="w-20 text-right">Lines</TableHead>
+              <TableHead className="w-24 text-right">Line items</TableHead>
               <TableHead>Capabilities</TableHead>
               <TableHead className="w-24 text-right">Scope</TableHead>
             </TableRow>

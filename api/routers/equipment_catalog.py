@@ -34,6 +34,7 @@ from models import (
 )
 from pubsub import notify
 from schemas import (
+    EquipmentTypeCapabilityIn,
     EquipmentTypeIn,
     EquipmentTypeOut,
     EquipmentTypePatch,
@@ -188,7 +189,7 @@ def patch_equipment_type(
 )
 def replace_type_capabilities(
     type_id: int,
-    body: list[dict],
+    body: list[EquipmentTypeCapabilityIn],
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
@@ -210,11 +211,11 @@ def replace_type_capabilities(
         db.add(
             EquipmentTypeCapability(
                 equipment_type_id=row.id,
-                kind=cap["kind"],
-                label=cap["label"],
-                description=cap.get("description"),
+                kind=cap.kind,
+                label=cap.label,
+                description=cap.description,
                 display_order=order,
-                materialize_by_default=cap.get("materialize_by_default", True),
+                materialize_by_default=cap.materialize_by_default,
             )
         )
     db.flush()

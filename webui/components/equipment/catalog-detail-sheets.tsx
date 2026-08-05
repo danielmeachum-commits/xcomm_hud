@@ -1,5 +1,6 @@
 "use client"
 
+import { Plus, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -44,9 +45,13 @@ const ROLE_HINT_LABELS: Record<UtcRoleHint, string> = {
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
 
-async function patch(url: string, body: unknown): Promise<string | null> {
+async function send(
+  method: "PATCH" | "PUT",
+  url: string,
+  body: unknown,
+): Promise<string | null> {
   const res = await fetch(url, {
-    method: "PATCH",
+    method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
@@ -54,6 +59,9 @@ async function patch(url: string, body: unknown): Promise<string | null> {
   const detail = await res.json().catch(() => ({}))
   return typeof detail.detail === "string" ? detail.detail : "Failed to save"
 }
+
+const patch = (url: string, body: unknown) => send("PATCH", url, body)
+const put = (url: string, body: unknown) => send("PUT", url, body)
 
 /** Code pill for a UTC or package. Mirrors the transport-badge shape so codes
  *  read as identifiers rather than prose. */
@@ -93,17 +101,30 @@ function Field({
   )
 }
 
-function CapabilityChips({ kinds }: { kinds: CapabilityKind[] }) {
-  if (kinds.length === 0)
+/** `kinds` shows the catalog's generic name for each kind — right for an
+ *  aggregate across types. `caps` shows a type's own labels, which may be
+ *  hand-written ("SIPR data" rather than "Data"). */
+function CapabilityChips({
+  kinds,
+  caps,
+}: {
+  kinds?: CapabilityKind[]
+  caps?: { kind: CapabilityKind; label: string }[]
+}) {
+  const chips =
+    caps?.map((c, i) => ({ key: `${c.kind}-${i}`, text: c.label })) ??
+    kinds?.map((k) => ({ key: k, text: CAPABILITY_LABELS[k] })) ??
+    []
+  if (chips.length === 0)
     return <span className="text-xs text-muted-foreground">None</span>
   return (
     <div className="flex flex-wrap gap-1">
-      {kinds.map((k) => (
+      {chips.map((c) => (
         <span
-          key={k}
+          key={c.key}
           className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
         >
-          {CAPABILITY_LABELS[k]}
+          {c.text}
         </span>
       ))}
     </div>
@@ -187,6 +208,139 @@ function SaveBar({
 
 // ===================== Equipment type =====================
 
+export const CAPABILITY_VALUES = Object.keys(
+  CAPABILITY_LABELS,
+) as CapabilityKind[]
+
+/** Editable shape of one declared capability. No `id` — the save path replaces
+ *  the whole list, so rows only need to survive until the PUT. */
+export interface CapabilityDraft {
+  kind: CapabilityKind
+  label: string
+  materialize_by_default: boolean
+}
+
+/** Rows the operator edits in place. Order is meaningful: it becomes
+ *  `display_order` server-side. */
+export function CapabilityEditor({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: CapabilityDraft[]
+  onChange: (next: CapabilityDraft[]) => void
+  disabled: boolean
+}) {
+  function update(index: number, patch: Partial<CapabilityDraft>) {
+    onChange(value.map((c, i) => (i === index ? { ...c, ...patch } : c)))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {value.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          None declared. Capabilities are what this gear can provide — they
+          become the checkboxes when a kit is registered.
+        </p>
+      )}
+      {value.map((cap, i) => (
+        <div key={i} className="flex flex-col gap-1.5 rounded-md border p-2">
+          <div className="flex gap-1.5">
+            <select
+              aria-label="Capability kind"
+              className={SELECT_CLASS + " flex-1"}
+              value={cap.kind}
+              disabled={disabled}
+              onChange={(e) => {
+                const kind = e.target.value as CapabilityKind
+                // Keep a hand-written label, but retitle one the operator
+                // never touched so it follows the kind they just picked.
+                const renamed =
+                  cap.label === CAPABILITY_LABELS[cap.kind] || !cap.label.trim()
+                update(i, {
+                  kind,
+                  ...(renamed ? { label: CAPABILITY_LABELS[kind] } : {}),
+                })
+              }}
+            >
+              {CAPABILITY_VALUES.map((k) => (
+                <option key={k} value={k}>
+                  {CAPABILITY_LABELS[k]}
+                </option>
+              ))}
+            </select>
+            <Input
+              aria-label="Capability label"
+              className="flex-1"
+              value={cap.label}
+              placeholder="Label"
+              disabled={disabled}
+              onChange={(e) => update(i, { label: e.target.value })}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Remove capability"
+              disabled={disabled}
+              onClick={() => onChange(value.filter((_, x) => x !== i))}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={cap.materialize_by_default}
+              disabled={disabled}
+              onChange={(e) =>
+                update(i, { materialize_by_default: e.target.checked })
+              }
+            />
+            Checked by default when a kit is registered
+          </label>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="self-start"
+        disabled={disabled}
+        onClick={() =>
+          onChange([
+            ...value,
+            {
+              kind: "other",
+              label: CAPABILITY_LABELS.other,
+              materialize_by_default: true,
+            },
+          ])
+        }
+      >
+        <Plus className="size-4" />
+        Add capability
+      </Button>
+    </div>
+  )
+}
+
+/** Order counts — it becomes `display_order` — so compare positionally. */
+function capabilitiesChanged(
+  type: EquipmentType,
+  drafts: CapabilityDraft[],
+): boolean {
+  if (type.capabilities.length !== drafts.length) return true
+  return type.capabilities.some((c, i) => {
+    const d = drafts[i]
+    return (
+      c.kind !== d.kind ||
+      c.label !== (d.label.trim() || CAPABILITY_LABELS[d.kind]) ||
+      c.materialize_by_default !== d.materialize_by_default
+    )
+  })
+}
+
 interface TypeForm {
   title: string
   short_name: string
@@ -200,6 +354,7 @@ interface TypeForm {
   id_prefix: string
   serialized: boolean
   description: string
+  capabilities: CapabilityDraft[]
 }
 
 function typeForm(t: EquipmentType): TypeForm {
@@ -216,6 +371,11 @@ function typeForm(t: EquipmentType): TypeForm {
     id_prefix: t.id_prefix,
     serialized: t.serialized,
     description: t.description ?? "",
+    capabilities: t.capabilities.map((c) => ({
+      kind: c.kind,
+      label: c.label,
+      materialize_by_default: c.materialize_by_default,
+    })),
   }
 }
 
@@ -263,9 +423,29 @@ export function EquipmentTypeSheet({
       serialized: form.serialized,
       description: form.description.trim() || null,
     })
-    setPending(false)
     if (err) {
+      setPending(false)
       setError(err)
+      return
+    }
+    // Capabilities live on their own endpoint (wholesale replace), so this is
+    // a second call. Only make it when the list actually changed — an
+    // unnecessary replace churns rows other UTCs read.
+    const capsErr = capabilitiesChanged(type, form.capabilities)
+      ? await put(
+          `/api/be/equipment-types/${type.id}/capabilities`,
+          form.capabilities.map((c) => ({
+            kind: c.kind,
+            label: c.label.trim() || CAPABILITY_LABELS[c.kind],
+            materialize_by_default: c.materialize_by_default,
+          })),
+        )
+      : null
+    setPending(false)
+    if (capsErr) {
+      // The type fields already saved; say so rather than implying a rollback.
+      setError(`Details saved, but capabilities failed: ${capsErr}`)
+      router.refresh()
       return
     }
     setEditing(false)
@@ -445,6 +625,16 @@ export function EquipmentTypeSheet({
                       disabled={pending}
                     />
                   </div>
+                  <div className="flex flex-col gap-1">
+                    <Label>Capabilities</Label>
+                    <CapabilityEditor
+                      value={form.capabilities}
+                      onChange={(capabilities) =>
+                        setForm({ ...form, capabilities })
+                      }
+                      disabled={pending}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
@@ -487,9 +677,7 @@ export function EquipmentTypeSheet({
                     )}
                   </Field>
                   <Field label="Capabilities">
-                    <CapabilityChips
-                      kinds={type.capabilities.map((c) => c.kind)}
-                    />
+                    <CapabilityChips caps={type.capabilities} />
                   </Field>
                 </div>
               )}
