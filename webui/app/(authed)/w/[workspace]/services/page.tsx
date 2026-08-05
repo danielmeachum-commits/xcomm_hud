@@ -3,6 +3,7 @@ import Link from "next/link"
 import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
+import { EnclaveChip } from "@/components/enclaves/enclaves-client"
 import { ServiceForm } from "@/components/services/service-form"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { LocalTime } from "@/components/time-display"
@@ -13,7 +14,7 @@ import {
   serviceIcon,
 } from "@/lib/service-meta"
 import { formatZulu } from "@/lib/time"
-import type { Service, ServiceTemplate, Site } from "@/lib/types"
+import type { Enclave, Service, ServiceTemplate, Site } from "@/lib/types"
 
 export default async function ServicesPage({
   params,
@@ -27,15 +28,17 @@ export default async function ServicesPage({
   const w = (path: string) => `/w/${slug}${path.startsWith("/") ? path : `/${path}`}`
   await requireSession()
 
-  const [services, sites, templates] = await Promise.all([
+  const [services, sites, templates, enclaves] = await Promise.all([
     apiGet<Service[]>("/services").catch(() => [] as Service[]),
     apiGet<Site[]>("/sites").catch(() => [] as Site[]),
     apiGet<ServiceTemplate[]>("/service-templates").catch(
       () => [] as ServiceTemplate[],
     ),
+    apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
   ])
 
   const siteById = new Map(sites.map((s) => [s.id, s]))
+  const enclaveById = new Map(enclaves.map((e) => [e.id, e]))
 
   const categoryOrder = ["critical", "sustainment", "other"] as const
 
@@ -62,7 +65,7 @@ export default async function ServicesPage({
             Tap a status pill to record a validation.
           </p>
         </div>
-        <ServiceForm sites={sites} templates={templates} />
+        <ServiceForm sites={sites} templates={templates} enclaves={enclaves} />
       </div>
 
       {services.length === 0 ? (
@@ -110,7 +113,19 @@ export default async function ServicesPage({
                                 >
                                   <Icon className="size-5 shrink-0 text-muted-foreground" />
                                   <div className="min-w-0">
-                                    <div className="font-medium">{s.name}</div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium">
+                                        {s.name}
+                                      </span>
+                                      {s.enclave_id !== null &&
+                                        enclaveById.has(s.enclave_id) && (
+                                          <EnclaveChip
+                                            enclave={
+                                              enclaveById.get(s.enclave_id)!
+                                            }
+                                          />
+                                        )}
+                                    </div>
                                     <div className="text-xs text-muted-foreground">
                                       {s.kind} · {reachLabel(s.reach)}
                                     </div>

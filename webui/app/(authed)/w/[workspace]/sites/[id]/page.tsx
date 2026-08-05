@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/auth"
 import { apiGet, ApiError } from "@/lib/api"
 import { SiteDetailClient } from "@/components/sites/site-detail-client"
 import type {
+  Enclave,
   Equipment,
   EquipmentHolding,
   SiteEquipmentAdvisory,
@@ -48,6 +49,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
     allSites,
     gateways,
     templates,
+    enclaves,
     properties,
     propertyTemplates,
     personnel,
@@ -68,6 +70,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
     apiGet<ServiceTemplate[]>(`/service-templates`).catch(
       () => [] as ServiceTemplate[],
     ),
+    apiGet<Enclave[]>(`/enclaves`).catch(() => [] as Enclave[]),
     apiGet<SiteProperty[]>(`/sites/${siteId}/properties`).catch(
       () => [] as SiteProperty[],
     ),
@@ -120,6 +123,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
       gateways={gateways}
       sites={allSites}
       templates={templates}
+      enclaves={enclaves}
       properties={properties}
       propertyTemplates={propertyTemplates}
       personnel={personnel}

@@ -5,6 +5,7 @@ import { useState } from "react"
 import { Edit3, Plus, Trash2 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { EnclaveChip } from "@/components/enclaves/enclaves-client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,6 +29,7 @@ import {
 import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
+  Enclave,
   ServiceCategory,
   ServiceKind,
   ServiceReach,
@@ -39,12 +41,14 @@ const KINDS: ServiceKind[] = ["voice", "data", "other"]
 
 interface Props {
   templates: ServiceTemplate[]
+  enclaves?: Enclave[]
 }
 
-export function ServiceTypesAdmin({ templates }: Props) {
+export function ServiceTypesAdmin({ templates, enclaves = [] }: Props) {
   const router = useRouter()
   const [editing, setEditing] = useState<ServiceTemplate | null>(null)
   const [creating, setCreating] = useState(false)
+  const enclaveById = new Map(enclaves.map((e) => [e.id, e]))
 
   async function remove(id: number, name: string) {
     if (!confirm(`Delete service type "${name}"? Existing instances are kept but lose the link.`)) return
@@ -65,6 +69,7 @@ export function ServiceTypesAdmin({ templates }: Props) {
           <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Enclave</th>
               <th className="px-3 py-2 text-left">Kind</th>
               <th className="px-3 py-2 text-left">Category</th>
               <th className="px-3 py-2 text-left">Reach</th>
@@ -83,6 +88,13 @@ export function ServiceTypesAdmin({ templates }: Props) {
                       <Icon className="size-4 shrink-0 text-muted-foreground" />
                       <span className="font-medium">{t.name}</span>
                     </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {t.enclave_id !== null && enclaveById.has(t.enclave_id) ? (
+                      <EnclaveChip enclave={enclaveById.get(t.enclave_id)!} />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{t.kind}</td>
                   <td className="px-3 py-2">{categoryLabel(t.category)}</td>
@@ -138,6 +150,7 @@ export function ServiceTypesAdmin({ templates }: Props) {
       {(editing || creating) && (
         <TemplateDialog
           template={editing}
+          enclaves={enclaves}
           onClose={() => {
             setEditing(null)
             setCreating(false)
@@ -150,9 +163,11 @@ export function ServiceTypesAdmin({ templates }: Props) {
 
 function TemplateDialog({
   template,
+  enclaves,
   onClose,
 }: {
   template: ServiceTemplate | null
+  enclaves: Enclave[]
   onClose: () => void
 }) {
   const router = useRouter()
@@ -161,6 +176,7 @@ function TemplateDialog({
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState({
     name: template?.name ?? "",
+    enclave_id: (template?.enclave_id ?? null) as number | null,
     kind: (template?.kind ?? "other") as ServiceKind,
     category: (template?.category ?? "other") as ServiceCategory,
     reach: (template?.reach ?? "local") as ServiceReach,
@@ -186,6 +202,7 @@ function TemplateDialog({
     try {
       const body = {
         name: draft.name,
+        enclave_id: draft.enclave_id,
         kind: draft.kind,
         category: draft.category,
         reach: draft.reach,
@@ -246,6 +263,30 @@ function TemplateDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
+              <Label htmlFor="tpl-enclave">Enclave</Label>
+              <select
+                id="tpl-enclave"
+                value={draft.enclave_id ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    enclave_id: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={pending}
+              >
+                <option value="">None</option>
+                {enclaves.map((en) => (
+                  <option key={en.id} value={en.id}>
+                    {en.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                Services created from this template inherit it. This is where
+                the NIPR/SIPR split used to live as a name prefix.
+              </p>
               <Label htmlFor="kind">Kind</Label>
               <select
                 id="kind"

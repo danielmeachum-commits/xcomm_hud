@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/auth"
 import { apiGet } from "@/lib/api"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { ServiceTypesAdmin } from "@/components/admin/service-types-admin"
-import type { ServiceTemplate } from "@/lib/types"
+import type { Enclave, ServiceTemplate } from "@/lib/types"
 
 export default async function ServiceTypesPage() {
   const me = await requireSession()
@@ -16,6 +16,9 @@ export default async function ServiceTypesPage() {
   } catch {
     // empty
   }
+  const enclaves = await apiGet<Enclave[]>("/enclaves").catch(
+    () => [] as Enclave[],
+  )
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
@@ -28,7 +31,7 @@ export default async function ServiceTypesPage() {
           type accepts (leave empty to allow all).
         </p>
       </div>
-      <ServiceTypesAdmin templates={templates} />
+      <ServiceTypesAdmin templates={templates} enclaves={enclaves} />
     </div>
   )
 }

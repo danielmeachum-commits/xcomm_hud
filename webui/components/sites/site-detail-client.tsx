@@ -64,6 +64,7 @@ import { SiteDocumentsTab } from "@/components/documents/site-documents-tab"
 import { DerivedStatusBadge } from "@/components/equipment/derived-status-badge"
 import { SiteEquipmentTab } from "@/components/sites/site-equipment-tab"
 import type {
+  Enclave,
   Document,
   Event,
   EventTypeDef,
@@ -93,6 +94,7 @@ interface Props {
   gateways: Gateway[]
   sites: Site[]
   templates: ServiceTemplate[]
+  enclaves?: Enclave[]
   properties: SiteProperty[]
   propertyTemplates: SitePropertyTemplate[]
   personnel: Personnel[]
@@ -136,6 +138,7 @@ export function SiteDetailClient({
   gateways,
   sites,
   templates,
+  enclaves = [],
   properties,
   propertyTemplates,
   personnel,
@@ -241,6 +244,7 @@ export function SiteDetailClient({
           services={services}
           gateways={gateways}
           templates={templates}
+          enclaves={enclaves}
           userRole={userRole}
           advisory={advisory}
         />
@@ -294,6 +298,7 @@ function ServicesTab({
   services,
   gateways,
   templates,
+  enclaves,
   userRole,
   advisory,
 }: {
@@ -302,6 +307,7 @@ function ServicesTab({
   services: Service[]
   gateways: Gateway[]
   templates: ServiceTemplate[]
+  enclaves: Enclave[]
   userRole?: Role
   advisory: SiteEquipmentAdvisory
 }) {
@@ -332,6 +338,7 @@ function ServicesTab({
           <ServiceForm
             sites={sites}
             templates={templates}
+            enclaves={enclaves}
             defaultSiteId={site.id}
           />
         </div>

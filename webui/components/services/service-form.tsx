@@ -29,6 +29,7 @@ import {
 import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
+  Enclave,
   GatewayPace,
   ServiceCategory,
   ServiceKind,
@@ -43,10 +44,16 @@ const KINDS: ServiceKind[] = ["voice", "data", "other"]
 interface Props {
   sites: Site[]
   templates: ServiceTemplate[]
+  enclaves?: Enclave[]
   defaultSiteId?: number
 }
 
-export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
+export function ServiceForm({
+  sites,
+  templates,
+  enclaves = [],
+  defaultSiteId,
+}: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
@@ -57,6 +64,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
     service_template_id: null as number | null,
     name: "",
     site_id: defaultSiteId ?? sites[0]?.id ?? 0,
+    enclave_id: null as number | null,
     kind: "other" as ServiceKind,
     category: "other" as ServiceCategory,
     reach: "local" as ServiceReach,
@@ -86,6 +94,9 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
       template_id: idStr,
       service_template_id: t.id,
       name: t.name,
+      // Templates are where the NIPR/SIPR split lives, so picking one should
+      // answer the enclave question too. Still editable below.
+      enclave_id: t.enclave_id,
       kind: t.kind,
       category: t.category,
       reach: t.reach,
@@ -109,6 +120,7 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
           name: draft.name,
           site_id: draft.site_id,
           service_template_id: draft.service_template_id,
+          enclave_id: draft.enclave_id,
           kind: draft.kind,
           category: draft.category,
           reach: draft.reach,
@@ -183,6 +195,34 @@ export function ServiceForm({ sites, templates, defaultSiteId }: Props) {
               disabled={pending}
             />
           </div>
+
+          {enclaves.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="svc-enclave">Enclave</Label>
+              <select
+                id="svc-enclave"
+                value={draft.enclave_id ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    enclave_id: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={pending}
+              >
+                <option value="">None</option>
+                {enclaves.map((en) => (
+                  <option key={en.id} value={en.id}>
+                    {en.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Which network this service is on. Not a classification level.
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

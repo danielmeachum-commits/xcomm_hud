@@ -5,6 +5,7 @@ import { useState } from "react"
 import { ClipboardList, Settings } from "lucide-react"
 
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
+import { EnclaveChip } from "@/components/enclaves/enclaves-client"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { ValidationHistory } from "@/components/services/validation-history"
 import { Button } from "@/components/ui/button"
@@ -27,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/lib/workspace"
 import type {
+  Enclave,
   Event,
   GatewayPace,
   Me,
@@ -45,6 +47,7 @@ interface Props {
   me: Me
   service: Service
   sites: Site[]
+  enclaves?: Enclave[]
   validations: Event[]
 }
 
@@ -56,6 +59,7 @@ function makeDraft(service: Service) {
     category: service.category,
     reach: service.reach,
     site_id: service.site_id,
+    enclave_id: service.enclave_id,
     description: service.description ?? "",
     notes: service.notes ?? "",
     connects_externally:
@@ -70,7 +74,13 @@ function makeDraft(service: Service) {
 
 type Draft = ReturnType<typeof makeDraft>
 
-export function ServiceDetailClient({ me, service, sites, validations }: Props) {
+export function ServiceDetailClient({
+  me,
+  service,
+  sites,
+  enclaves = [],
+  validations,
+}: Props) {
   const router = useRouter()
   const { w } = useWorkspace()
   const siteById = new Map(sites.map((s) => [s.id, s]))
@@ -98,6 +108,7 @@ export function ServiceDetailClient({ me, service, sites, validations }: Props) 
           category: cur.category,
           reach: cur.reach,
           site_id: cur.site_id,
+          enclave_id: cur.enclave_id,
           description: cur.description || null,
           notes: cur.notes || null,
           enabled_pace: savePace ? cur.enabled_pace : [],
@@ -128,6 +139,8 @@ export function ServiceDetailClient({ me, service, sites, validations }: Props) 
   }
 
   const siteName = sites.find((s) => s.id === service.site_id)?.name
+  const serviceEnclave =
+    enclaves.find((e) => e.id === service.enclave_id) ?? null
   const showsPaceConfig = draft.reach === "external" || draft.connects_externally
 
   return (
@@ -145,7 +158,12 @@ export function ServiceDetailClient({ me, service, sites, validations }: Props) 
         <div className="flex items-center gap-3">
           <Icon className="size-7 text-muted-foreground" />
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">{service.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold tracking-tight">
+                {service.name}
+              </h1>
+              {serviceEnclave && <EnclaveChip enclave={serviceEnclave} />}
+            </div>
             <p className="text-xs text-muted-foreground">
               {categoryLabel(service.category)} · {reachLabel(service.reach)} ·{" "}
               {siteById.get(service.site_id)?.name ?? `site ${service.site_id}`}
@@ -313,6 +331,35 @@ export function ServiceDetailClient({ me, service, sites, validations }: Props) 
               </select>
             </div>
           </div>
+          {enclaves.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="enclave_id">Enclave</Label>
+              <select
+                id="enclave_id"
+                value={draft.enclave_id ?? ""}
+                onChange={(e) =>
+                  updateSelect(
+                    "enclave_id",
+                    e.target.value ? Number(e.target.value) : null,
+                  )
+                }
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                disabled={pending}
+              >
+                <option value="">None</option>
+                {enclaves.map((en) => (
+                  <option key={en.id} value={en.id}>
+                    {en.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Which network this service is on. Names like &ldquo;SIPR
+                Web&rdquo; are unchanged — this is what the deploy wizard reads
+                to bind gear to the right service.
+              </p>
+            </div>
+          )}
           {showsPaceConfig && (
             <div className="space-y-1.5">
               <Label>PACE tiers this service rides</Label>

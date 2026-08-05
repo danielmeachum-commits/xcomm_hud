@@ -16,6 +16,7 @@ import {
 import { statusBadgeClass, statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
+  Enclave,
   Equipment,
   EquipmentCapability,
   EquipmentLink,
@@ -26,6 +27,7 @@ import type {
 
 interface Props {
   equipment: Equipment
+  enclaves?: Enclave[]
   services: Service[]
   gateways: Gateway[]
   links: EquipmentLink[]
@@ -34,6 +36,7 @@ interface Props {
 
 export function EquipmentDetailClient({
   equipment,
+  enclaves = [],
   services,
   gateways,
   links,
@@ -84,6 +87,7 @@ export function EquipmentDetailClient({
           />
           <Field label="Site" value={equipment.site_name ?? "—"} />
           <Field label="UTC" value={equipment.utc_name ?? "Not in a UTC"} />
+          <EnclaveField equipment={equipment} enclaves={enclaves} />
         </dl>
         {equipment.notes && (
           <p className="mt-3 text-sm text-muted-foreground">{equipment.notes}</p>
@@ -178,6 +182,61 @@ export function EquipmentDetailClient({
         )}
       </section>
     </>
+  )
+}
+
+/** Enclave is editable inline here because it's the only place to fix it after
+ *  deploy — the wizard sets it from the UTC line, and gear registered by hand
+ *  arrives with none. Saves on change; there is no form to submit. */
+function EnclaveField({
+  equipment,
+  enclaves,
+}: {
+  equipment: Equipment
+  enclaves: Enclave[]
+}) {
+  const router = useRouter()
+  const [pending, setPending] = useState(false)
+
+  async function set(value: number | null) {
+    setPending(true)
+    const res = await fetch(`/api/be/equipment/${equipment.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enclave_id: value }),
+    })
+    setPending(false)
+    if (res.ok) router.refresh()
+  }
+
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">
+        Enclave
+      </dt>
+      <dd>
+        {enclaves.length === 0 ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <select
+            aria-label="Enclave"
+            className="h-7 w-full rounded-md border border-input bg-background px-1.5 text-sm"
+            value={equipment.enclave_id ?? ""}
+            disabled={pending}
+            onChange={(e) =>
+              set(e.target.value ? Number(e.target.value) : null)
+            }
+          >
+            <option value="">None</option>
+            {enclaves.map((en) => (
+              <option key={en.id} value={en.id}>
+                {en.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </dd>
+    </div>
   )
 }
 

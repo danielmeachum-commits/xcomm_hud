@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { EquipmentDetailClient } from "@/components/equipment/equipment-detail-client"
 import type {
+  Enclave,
   Equipment,
   EquipmentLink,
   Event,
@@ -24,7 +25,7 @@ export default async function EquipmentDetailPage({
   const equipment = await apiGet<Equipment>(`/equipment/${id}`).catch(() => null)
   if (!equipment) notFound()
 
-  const [services, gateways, links, events] = await Promise.all([
+  const [services, gateways, links, events, enclaves] = await Promise.all([
     apiGet<Service[]>(`/services?site_id=${equipment.site_id}`).catch(
       () => [] as Service[],
     ),
@@ -33,6 +34,7 @@ export default async function EquipmentDetailPage({
     apiGet<Event[]>(
       `/events?subject_kind=equipment&subject_id=${equipment.id}&limit=25`,
     ).catch(() => [] as Event[]),
+    apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
   ])
 
   return (
@@ -45,6 +47,7 @@ export default async function EquipmentDetailPage({
       />
       <EquipmentDetailClient
         equipment={equipment}
+        enclaves={enclaves}
         services={services}
         gateways={gateways.filter((g) => g.site_id === equipment.site_id)}
         links={links.filter(
