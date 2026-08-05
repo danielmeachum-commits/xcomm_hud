@@ -301,6 +301,7 @@ def create_equipment(
         equipment_type_id=eq_type.id,
         site_id=site.id,
         utc_instance_id=body.utc_instance_id,
+        enclave_id=body.enclave_id,
         equipment_code=code,
         serial_number=body.serial_number,
         status=body.status,

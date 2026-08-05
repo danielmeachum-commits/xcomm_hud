@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { EquipmentPageClient } from "@/components/equipment/equipment-page-client"
 import type {
+  Enclave,
   Equipment,
   EquipmentType,
   Gateway,
@@ -25,6 +26,7 @@ export default async function EquipmentPage({
 
   const [
     equipment,
+    enclaves,
     sites,
     utcs,
     packages,
@@ -36,6 +38,7 @@ export default async function EquipmentPage({
     topology,
   ] = await Promise.all([
     apiGet<Equipment[]>("/equipment").catch(() => [] as Equipment[]),
+    apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
     apiGet<Site[]>("/sites").catch(() => [] as Site[]),
     apiGet<UtcInstance[]>("/utcs").catch(() => [] as UtcInstance[]),
     apiGet<PackageInstance[]>("/packages").catch(() => [] as PackageInstance[]),
@@ -63,6 +66,7 @@ export default async function EquipmentPage({
       <PageBreadcrumbs items={[{ label: "Equipment" }]} />
       <EquipmentPageClient
         equipment={equipment}
+        enclaves={enclaves}
         sites={sites}
         utcs={utcs}
         packages={packages}

@@ -20,6 +20,7 @@ from models import (
     CanvasAnnotation,
     CapabilityGatewayLink,
     CapabilityServiceLink,
+    Enclave,
     Equipment,
     EquipmentCanvasPosition,
     EquipmentCapability,
@@ -193,6 +194,36 @@ def duplicate_workspace(
     db.add(dest)
     db.flush()
 
+    # Enclaves first: equipment, services and UTC lines all point at them.
+    # Global enclaves pass through unmapped (shared by definition); a
+    # workspace-local one is duplicated, because copying its id straight across
+    # would leave the destination referencing a row it cannot see.
+    enclave_map: dict[int, int] = {}
+    local_enclaves = (
+        db.query(Enclave).filter(Enclave.workspace_id == source.id).all()
+    )
+    for en in local_enclaves:
+        new_en = Enclave(
+            workspace_id=dest.id,
+            name=en.name,
+            short_name=en.short_name,
+            color=en.color,
+            display_order=en.display_order,
+            retired_at=en.retired_at,
+            notes=en.notes,
+        )
+        db.add(new_en)
+        db.flush()
+        enclave_map[en.id] = new_en.id
+    # Second pass for parents, so a local enclave nested under another local
+    # one keeps its shape. A parent that is global stays pointed at the global.
+    for en in local_enclaves:
+        if en.parent_id is None:
+            continue
+        db.get(Enclave, enclave_map[en.id]).parent_id = enclave_map.get(
+            en.parent_id, en.parent_id
+        )
+
     site_id_map: dict[int, int] = {}
     for site in db.query(Site).filter(Site.workspace_id == source.id).all():
         new_site = Site(
@@ -221,6 +252,7 @@ def duplicate_workspace(
             new_svc = Service(
                 site_id=site_id_map[svc.site_id],
                 service_template_id=svc.service_template_id,
+                enclave_id=enclave_map.get(svc.enclave_id, svc.enclave_id),
                 name=svc.name,
                 kind=svc.kind,
                 category=svc.category,
@@ -466,6 +498,7 @@ def _duplicate_equipment(
                         line.equipment_type_id, line.equipment_type_id
                     ),
                     quantity=line.quantity,
+                    enclave_id=enclave_map.get(line.enclave_id, line.enclave_id),
                     notes=line.notes,
                     display_order=line.display_order,
                 )
@@ -545,6 +578,7 @@ def _duplicate_equipment(
             ),
             utc_instance_id=utc_map.get(e.utc_instance_id),
             site_id=site_id_map[e.site_id],
+            enclave_id=enclave_map.get(e.enclave_id, e.enclave_id),
             equipment_code=e.equipment_code,
             serial_number=e.serial_number,
             # status left as default ("unknown"); no validated_* fields.

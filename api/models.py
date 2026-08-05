@@ -279,6 +279,12 @@ class ServiceTemplate(Base):
     reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Where the NIPR/SIPR distinction actually lived before `enclave` existed:
+    # as a prefix on `name` plus an icon choice. Services created from a
+    # template inherit this. Nullable — plenty of templates serve no single one.
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
     # null = all 6 status values allowed; otherwise restricts the picker.
     allowed_statuses: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
 
@@ -301,6 +307,12 @@ class Service(Base):
     reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Which network this service is on. Copied from the template at creation,
+    # editable after. Retires `name` as the only signal — "NIPR Web" keeps its
+    # name, but nothing has to parse it to know which network it is.
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -1576,6 +1588,11 @@ class UtcDefLine(Base):
         BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Which enclave's stack this line belongs to. This is what lets the deploy
+    # wizard drop a whole enclave in one action instead of row by row.
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -1769,6 +1786,12 @@ class UtcInstanceLine(Base):
         BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Snapshotted alongside the line, like everything else here: the enclave a
+    # line served at deploy time, so a later catalog edit can't rewrite what a
+    # past deployment expected.
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
@@ -1822,6 +1845,12 @@ class Equipment(Base):
     )
     site_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # One piece of gear serves exactly one enclave. Nullable because plenty of
+    # gear serves none — power, cables, and the RF shot are common to all of
+    # them. SET NULL so retiring an enclave never deletes equipment.
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
     )
     equipment_code: Mapped[str] = mapped_column(String(32), nullable=False)
     serial_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

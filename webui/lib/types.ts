@@ -183,6 +183,10 @@ export interface Service {
   name: string
   site_id: number
   service_template_id: number | null
+  /** Which network this is on. Inherited from the template at creation.
+   *  Names like "SIPR Web" are unchanged — this just means nothing has to
+   *  parse them to know. */
+  enclave_id: number | null
   kind: ServiceKind
   category: ServiceCategory
   reach: ServiceReach
@@ -207,6 +211,7 @@ export interface Service {
 export interface ServiceTemplate {
   id: number
   name: string
+  enclave_id: number | null
   kind: ServiceKind
   category: ServiceCategory
   reach: ServiceReach
@@ -813,6 +818,8 @@ export interface UtcDefLine {
   utc_def_id: number
   equipment_type_id: number
   quantity: number
+  /** Which enclave's stack this line belongs to. */
+  enclave_id: number | null
   notes: string | null
   display_order: number
   equipment_type_title: string | null
@@ -891,6 +898,8 @@ export interface UtcInstanceLine {
   utc_instance_id: number
   equipment_type_id: number
   quantity: number
+  /** Snapshotted with the line — which enclave's stack it was part of. */
+  enclave_id: number | null
   notes: string | null
   type_title: string | null
   type_short_name: string | null
@@ -947,6 +956,9 @@ export interface Equipment {
   equipment_type_id: number
   utc_instance_id: number | null
   site_id: number
+  /** One piece of gear, one enclave. Null for gear common to all of them —
+   *  power, cables, the RF shot. */
+  enclave_id: number | null
   /** The human-facing "Equipment ID" — R7421. Not the row id. */
   equipment_code: string
   serial_number: string | null
@@ -1049,6 +1061,7 @@ export interface SiteEquipmentAdvisory {
 
 export interface UtcDeployItem {
   equipment_type_id: number
+  enclave_id?: number | null
   serial_number?: string | null
   equipment_code?: string | null
   status?: EquipmentStatus

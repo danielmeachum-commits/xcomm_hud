@@ -124,10 +124,13 @@ def create_service(
     site = db.get(Site, body.site_id)
     if site is None or site.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
-    if body.service_template_id is not None and db.get(
-        ServiceTemplate, body.service_template_id
-    ) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Service template not found")
+    template = None
+    if body.service_template_id is not None:
+        template = db.get(ServiceTemplate, body.service_template_id)
+        if template is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Service template not found"
+            )
 
     # Place new service at the end of the site's current list.
     max_order = (
@@ -138,7 +141,13 @@ def create_service(
     )
     next_order = (max_order.display_order + 1) if max_order else 0
 
-    service = Service(**body.model_dump(), display_order=next_order)
+    data = body.model_dump()
+    # Inherit the template's enclave unless the caller named one. Templates are
+    # where the NIPR/SIPR split has always lived, so a service built from one
+    # should arrive already tagged rather than needing a second edit.
+    if data.get("enclave_id") is None and template is not None:
+        data["enclave_id"] = template.enclave_id
+    service = Service(**data, display_order=next_order)
     db.add(service)
     db.flush()
     notify(background_tasks)

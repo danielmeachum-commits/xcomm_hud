@@ -8,6 +8,7 @@ import { useMemo, useState } from "react"
 import { DeployUtcWizard } from "@/components/equipment/deploy-utc-wizard"
 import { EquipmentStatusPill } from "@/components/equipment/equipment-status-pill"
 import { NetworkCanvas } from "@/components/equipment/network-canvas"
+import { EnclaveChip } from "@/components/enclaves/enclaves-client"
 import { UtcCompletenessPanel } from "@/components/equipment/utc-completeness-panel"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import {
@@ -20,6 +21,7 @@ import { statusBadgeClass } from "@/lib/status"
 import { useWorkspace } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 import type {
+  Enclave,
   Equipment,
   EquipmentType,
   Gateway,
@@ -36,6 +38,7 @@ type View = "list" | "topology" | "utcs"
 
 interface Props {
   equipment: Equipment[]
+  enclaves: Enclave[]
   sites: Site[]
   utcs: UtcInstance[]
   packages: PackageInstance[]
@@ -49,6 +52,7 @@ interface Props {
 
 export function EquipmentPageClient({
   equipment,
+  enclaves,
   sites,
   utcs,
   packages,
@@ -66,6 +70,11 @@ export function EquipmentPageClient({
   const view = (searchParams.get("view") as View) || "list"
   const [search, setSearch] = useState("")
   const [siteFilter, setSiteFilter] = useState<number | "all">("all")
+  // "none" is a real answer, not an absence: power, cables and the RF shot
+  // legitimately serve no single enclave, and finding them is a real task.
+  const [enclaveFilter, setEnclaveFilter] = useState<number | "all" | "none">(
+    "all",
+  )
 
   function setView(next: View) {
     const params = new URLSearchParams(searchParams.toString())
@@ -86,6 +95,13 @@ export function EquipmentPageClient({
     const term = search.trim().toLowerCase()
     return equipment.filter((e) => {
       if (siteFilter !== "all" && e.site_id !== siteFilter) return false
+      if (enclaveFilter === "none" && e.enclave_id !== null) return false
+      if (
+        enclaveFilter !== "all" &&
+        enclaveFilter !== "none" &&
+        e.enclave_id !== enclaveFilter
+      )
+        return false
       if (!term) return true
       // Match the same things the API's ?search= does, so typing here and
       // typing there behave the same way.
@@ -99,7 +115,7 @@ export function EquipmentPageClient({
         )
       )
     })
-  }, [equipment, search, siteFilter, aliasesByTypeId])
+  }, [equipment, search, siteFilter, enclaveFilter, aliasesByTypeId])
 
   const bySite = useMemo(() => {
     const map = new Map<number, Equipment[]>()
@@ -116,6 +132,10 @@ export function EquipmentPageClient({
     [sites],
   )
   const utcById = useMemo(() => new Map(utcs.map((u) => [u.id, u])), [utcs])
+  const enclaveById = useMemo(
+    () => new Map(enclaves.map((e) => [e.id, e])),
+    [enclaves],
+  )
 
   return (
     <>
@@ -174,6 +194,28 @@ export function EquipmentPageClient({
                 </option>
               ))}
             </select>
+            {enclaves.length > 0 && (
+              <select
+                aria-label="Filter by enclave"
+                value={enclaveFilter}
+                onChange={(e) =>
+                  setEnclaveFilter(
+                    e.target.value === "all" || e.target.value === "none"
+                      ? (e.target.value as "all" | "none")
+                      : Number(e.target.value),
+                  )
+                }
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="all">All enclaves</option>
+                {enclaves.map((en) => (
+                  <option key={en.id} value={en.id}>
+                    {en.name}
+                  </option>
+                ))}
+                <option value="none">No enclave</option>
+              </select>
+            )}
           </>
         )}
       </div>
@@ -273,6 +315,12 @@ export function EquipmentPageClient({
                                 <span className="truncate text-sm">
                                   {e.type_short_name ?? e.type_title}
                                 </span>
+                                {e.enclave_id !== null &&
+                                  enclaveById.has(e.enclave_id) && (
+                                    <EnclaveChip
+                                      enclave={enclaveById.get(e.enclave_id)!}
+                                    />
+                                  )}
                               </div>
                               <div className="truncate text-xs text-muted-foreground">
                                 {e.type_category

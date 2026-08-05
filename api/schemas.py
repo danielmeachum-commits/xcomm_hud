@@ -512,6 +512,9 @@ class SiteOut(_ORM):
 
 class ServiceTemplateIn(BaseModel):
     name: str
+    # Which network this template is for. Where the NIPR/SIPR distinction
+    # lived as a name prefix before `enclave` existed.
+    enclave_id: Optional[int] = None
     kind: ServiceKind = "other"
     category: ServiceCategory = "other"
     reach: ServiceReach = "local"
@@ -522,6 +525,7 @@ class ServiceTemplateIn(BaseModel):
 
 class ServiceTemplatePatch(BaseModel):
     name: Optional[str] = None
+    enclave_id: Optional[int] = None
     kind: Optional[ServiceKind] = None
     category: Optional[ServiceCategory] = None
     reach: Optional[ServiceReach] = None
@@ -533,6 +537,7 @@ class ServiceTemplatePatch(BaseModel):
 class ServiceTemplateOut(_ORM):
     id: int
     name: str
+    enclave_id: Optional[int] = None
     kind: ServiceKind
     category: ServiceCategory
     reach: ServiceReach
@@ -551,6 +556,8 @@ class ServiceIn(BaseModel):
     name: str
     site_id: int
     service_template_id: Optional[int] = None
+    # Copied from the template at creation when not given explicitly.
+    enclave_id: Optional[int] = None
     kind: ServiceKind = "other"
     category: ServiceCategory = "other"
     reach: ServiceReach = "local"
@@ -565,6 +572,7 @@ class ServicePatch(BaseModel):
     name: Optional[str] = None
     site_id: Optional[int] = None
     service_template_id: Optional[int] = None
+    enclave_id: Optional[int] = None
     kind: Optional[ServiceKind] = None
     category: Optional[ServiceCategory] = None
     reach: Optional[ServiceReach] = None
@@ -630,6 +638,7 @@ class ServiceOut(_ORM):
     name: str
     site_id: int
     service_template_id: Optional[int] = None
+    enclave_id: Optional[int] = None
     kind: ServiceKind
     category: ServiceCategory
     reach: ServiceReach
@@ -1795,6 +1804,9 @@ class EquipmentTypeOut(_ORM):
 class UtcDefLineIn(BaseModel):
     equipment_type_id: int
     quantity: int = 1
+    # Which enclave's stack this line belongs to — what lets the deploy wizard
+    # drop a whole enclave in one action.
+    enclave_id: Optional[int] = None
     notes: Optional[str] = None
     display_order: int = 0
 
@@ -1804,6 +1816,7 @@ class UtcDefLineOut(_ORM):
     utc_def_id: int
     equipment_type_id: int
     quantity: int
+    enclave_id: Optional[int] = None
     notes: Optional[str] = None
     display_order: int = 0
     # Denormalized for display so the UI doesn't need a second fetch.
@@ -1984,6 +1997,9 @@ class EquipmentCapabilityOut(_ORM):
 class EquipmentIn(BaseModel):
     equipment_type_id: int
     site_id: int
+    # Which network this gear serves. One piece, one enclave; null for gear
+    # common to all of them (power, cables, the RF shot).
+    enclave_id: Optional[int] = None
     serial_number: Optional[str] = None
     # Omit to let the server generate `<id_prefix><last 4 of serial>`.
     equipment_code: Optional[str] = None
@@ -1998,6 +2014,7 @@ class EquipmentIn(BaseModel):
 class EquipmentPatch(BaseModel):
     equipment_type_id: Optional[int] = None
     site_id: Optional[int] = None
+    enclave_id: Optional[int] = None
     serial_number: Optional[str] = None
     equipment_code: Optional[str] = None
     utc_instance_id: Optional[int] = None
@@ -2016,6 +2033,7 @@ class EquipmentOut(_ORM):
     equipment_type_id: int
     utc_instance_id: Optional[int] = None
     site_id: int
+    enclave_id: Optional[int] = None
     equipment_code: str
     serial_number: Optional[str] = None
     status: EquipmentStatusValue
@@ -2038,6 +2056,10 @@ class EquipmentHoldingIn(BaseModel):
     equipment_type_id: int
     authorized_qty: int = 0
     on_hand_qty: int = 0
+    # Not stored on the holding itself — bulk gear is counted per type, and a
+    # type's cables serve every enclave. Carried so the deploy snapshot can
+    # record which enclave's stack a bulk line was part of.
+    enclave_id: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -2066,6 +2088,9 @@ class EquipmentHoldingOut(_ORM):
 class UtcInstanceLineIn(BaseModel):
     equipment_type_id: int
     quantity: int = 1
+    # Snapshotted like the rest of the line: the enclave this served at deploy
+    # time, so a later catalog edit can't rewrite a past deployment.
+    enclave_id: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -2074,6 +2099,7 @@ class UtcInstanceLineOut(_ORM):
     utc_instance_id: int
     equipment_type_id: int
     quantity: int
+    enclave_id: Optional[int] = None
     notes: Optional[str] = None
     type_title: Optional[str] = None
     type_short_name: Optional[str] = None
@@ -2205,6 +2231,8 @@ class UtcDeployItemIn(BaseModel):
     equipment_type_id: int
     serial_number: Optional[str] = None
     equipment_code: Optional[str] = None
+    # The enclave this kit serves, carried from the UTC line it came from.
+    enclave_id: Optional[int] = None
     status: EquipmentStatusValue = "unknown"
     notes: Optional[str] = None
     capability_kinds: Optional[list[str]] = None
@@ -2231,6 +2259,11 @@ class UtcDeployIn(BaseModel):
     items: list[UtcDeployItemIn] = Field(default_factory=list)
     holdings: list[EquipmentHoldingIn] = Field(default_factory=list)
     wiring: list[CapabilityWiringIn] = Field(default_factory=list)
+    # Enclaves the operator confirmed this deployment supports. Recorded so an
+    # enclave deliberately left home reads as "not supported here" rather than
+    # as a shortfall. Empty means the question was never asked (a UTC with no
+    # enclave-tagged lines), which is different from "supports none".
+    supported_enclave_ids: Optional[list[int]] = None
 
 
 class UtcDeployOut(BaseModel):

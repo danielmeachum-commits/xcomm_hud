@@ -475,6 +475,7 @@ def replace_utc_lines(
             utc_instance_id=utc.id,
             equipment_type_id=line.equipment_type_id,
             quantity=line.quantity,
+            enclave_id=line.enclave_id,
             notes=line.notes,
         )
         for line in merged.values()
@@ -694,6 +695,7 @@ def deploy_utc(
             equipment_type_id=eq_type.id,
             utc_instance_id=utc.id,
             site_id=site.id,
+            enclave_id=item.enclave_id,
             equipment_code=code,
             serial_number=item.serial_number,
             status=item.status,
@@ -728,7 +730,9 @@ def deploy_utc(
         row = EquipmentHolding(
             workspace_id=workspace.id,
             utc_instance_id=utc.id,
-            **holding.model_dump(),
+            # `enclave_id` rides along on the payload for the snapshot below,
+            # but bulk gear isn't tagged: a box of cables serves every enclave.
+            **holding.model_dump(exclude={"enclave_id"}),
         )
         db.add(row)
         holdings.append(row)
@@ -739,18 +743,30 @@ def deploy_utc(
     # supporting, and those omissions are deliberate. Seeding from the def
     # would report them as shortfalls for the life of the deployment.
     expected: dict[int, int] = {}
-    for eq_type, _code, _item in resolved:
+    # First enclave seen for a type wins. A type can in principle appear under
+    # two enclaves in one UTC; the snapshot is per type, so it records one.
+    # That is a display detail — completeness still counts by type.
+    expected_enclave: dict[int, int | None] = {}
+
+    def _note_enclave(type_id: int, enclave_id: int | None) -> None:
+        if enclave_id is not None and expected_enclave.get(type_id) is None:
+            expected_enclave[type_id] = enclave_id
+
+    for eq_type, _code, item in resolved:
         expected[eq_type.id] = expected.get(eq_type.id, 0) + 1
+        _note_enclave(eq_type.id, item.enclave_id)
     for holding in body.holdings:
         expected[holding.equipment_type_id] = (
             expected.get(holding.equipment_type_id, 0) + holding.authorized_qty
         )
+        _note_enclave(holding.equipment_type_id, holding.enclave_id)
     for type_id, quantity in expected.items():
         db.add(
             UtcInstanceLine(
                 utc_instance_id=utc.id,
                 equipment_type_id=type_id,
                 quantity=quantity,
+                enclave_id=expected_enclave.get(type_id),
             )
         )
 
