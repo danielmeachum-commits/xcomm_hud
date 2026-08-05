@@ -1,0 +1,412 @@
+"use client"
+
+import { Globe, Plus } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useMemo, useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  enclaveChipStyle,
+  enclaveDepth,
+  enclaveTreeOrder,
+} from "@/lib/enclave-meta"
+import type { Enclave } from "@/lib/types"
+
+const SELECT_CLASS =
+  "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+
+/** Suggested swatches. Free-text hex is still allowed — these just save the
+ *  operator from picking a color that reads as a status. */
+const SWATCHES = [
+  "#3f7f3f",
+  "#b03030",
+  "#2f6fb0",
+  "#8b5a2b",
+  "#7a4fb0",
+  "#b07f2f",
+]
+
+interface Form {
+  name: string
+  short_name: string
+  parent_id: number | ""
+  color: string
+  display_order: number
+  notes: string
+}
+
+function emptyForm(): Form {
+  return {
+    name: "",
+    short_name: "",
+    parent_id: "",
+    color: "",
+    display_order: 0,
+    notes: "",
+  }
+}
+
+function formOf(e: Enclave): Form {
+  return {
+    name: e.name,
+    short_name: e.short_name ?? "",
+    parent_id: e.parent_id ?? "",
+    color: e.color ?? "",
+    display_order: e.display_order,
+    notes: e.notes ?? "",
+  }
+}
+
+export function EnclaveChip({ enclave }: { enclave: Enclave }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={enclaveChipStyle(enclave.color)}
+    >
+      {enclave.short_name || enclave.name}
+    </span>
+  )
+}
+
+function GlobalBadge() {
+  return (
+    <span
+      title="Global — shared across workspaces, admin-managed"
+      className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+    >
+      <Globe className="size-3" />
+      Global
+    </span>
+  )
+}
+
+export function EnclavesClient({
+  enclaves,
+  isAdmin,
+}: {
+  enclaves: Enclave[]
+  isAdmin: boolean
+}) {
+  const router = useRouter()
+  const [editing, setEditing] = useState<Enclave | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [form, setForm] = useState<Form>(emptyForm)
+  const [makeGlobal, setMakeGlobal] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const byId = useMemo(
+    () => new Map(enclaves.map((e) => [e.id, e])),
+    [enclaves],
+  )
+  const ordered = useMemo(() => enclaveTreeOrder(enclaves), [enclaves])
+
+  const open = creating || editing !== null
+  const canEdit = (e: Enclave) => isAdmin || !e.is_global
+
+  function startCreate() {
+    setForm(emptyForm())
+    setMakeGlobal(false)
+    setError(null)
+    setCreating(true)
+  }
+
+  function startEdit(e: Enclave) {
+    if (!canEdit(e)) return
+    setForm(formOf(e))
+    setError(null)
+    setEditing(e)
+  }
+
+  function close() {
+    setCreating(false)
+    setEditing(null)
+    setError(null)
+  }
+
+  /** Candidate parents: everything except the row being edited and its own
+   *  descendants. The API rejects a cycle anyway, but offering an option that
+   *  can only fail is a worse experience than not offering it. */
+  const parentOptions = useMemo(() => {
+    if (!editing) return ordered
+    const banned = new Set<number>([editing.id])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const e of enclaves) {
+        if (e.parent_id && banned.has(e.parent_id) && !banned.has(e.id)) {
+          banned.add(e.id)
+          grew = true
+        }
+      }
+    }
+    return ordered.filter((e) => !banned.has(e.id))
+  }, [editing, enclaves, ordered])
+
+  async function submit() {
+    setPending(true)
+    setError(null)
+    const body = {
+      name: form.name.trim(),
+      short_name: form.short_name.trim() || null,
+      parent_id: form.parent_id === "" ? null : Number(form.parent_id),
+      color: form.color.trim() || null,
+      display_order: form.display_order,
+      notes: form.notes.trim() || null,
+    }
+    const url = editing
+      ? `/api/be/enclaves/${editing.id}`
+      : `/api/be/enclaves${makeGlobal ? "?global=true" : ""}`
+    const res = await fetch(url, {
+      method: editing ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    setPending(false)
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}))
+      setError(
+        typeof detail.detail === "string"
+          ? detail.detail
+          : `Failed to save (${res.status})`,
+      )
+      return
+    }
+    close()
+    router.refresh()
+  }
+
+  async function retire(e: Enclave) {
+    setPending(true)
+    const res = await fetch(`/api/be/enclaves/${e.id}`, { method: "DELETE" })
+    setPending(false)
+    if (res.ok) router.refresh()
+  }
+
+  return (
+    <>
+      <div className="flex justify-end">
+        <Button size="sm" className="gap-1.5" onClick={startCreate}>
+          <Plus className="size-4" />
+          New enclave
+        </Button>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Enclave</TableHead>
+            <TableHead className="w-24">Short name</TableHead>
+            <TableHead className="w-28">Color</TableHead>
+            <TableHead className="w-24 text-right">Scope</TableHead>
+            <TableHead className="w-20" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {ordered.map((e) => (
+            <TableRow
+              key={e.id}
+              className={canEdit(e) ? "cursor-pointer" : undefined}
+              onClick={() => startEdit(e)}
+            >
+              <TableCell>
+                <span
+                  className="flex items-center gap-2"
+                  style={{ paddingLeft: enclaveDepth(e, byId) * 16 }}
+                >
+                  <EnclaveChip enclave={e} />
+                  <span className="font-medium">{e.name}</span>
+                  {!e.color && (
+                    <span className="text-[11px] text-muted-foreground">
+                      transport — no color
+                    </span>
+                  )}
+                </span>
+              </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                {e.short_name || "—"}
+              </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                {e.color || "—"}
+              </TableCell>
+              <TableCell className="text-right">
+                {e.is_global ? (
+                  <GlobalBadge />
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Workspace
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {canEdit(e) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={pending}
+                    onClick={(ev) => {
+                      ev.stopPropagation()
+                      retire(e)
+                    }}
+                  >
+                    Retire
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      <Dialog
+        open={open}
+        onOpenChange={(o) => !o && close()}
+        disablePointerDismissal
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? `Edit ${editing.name}` : "New enclave"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="enc-name">Name</Label>
+                <Input
+                  id="enc-name"
+                  value={form.name}
+                  disabled={pending}
+                  onChange={(ev) =>
+                    setForm({ ...form, name: ev.target.value })
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="enc-short">Short name</Label>
+                <Input
+                  id="enc-short"
+                  value={form.short_name}
+                  disabled={pending}
+                  onChange={(ev) =>
+                    setForm({ ...form, short_name: ev.target.value })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              {/* "Parent", not "tier" — tier already means PACE in this app. */}
+              <Label htmlFor="enc-parent">Parent enclave</Label>
+              <select
+                id="enc-parent"
+                className={SELECT_CLASS}
+                value={form.parent_id}
+                disabled={pending}
+                onChange={(ev) =>
+                  setForm({
+                    ...form,
+                    parent_id: ev.target.value ? Number(ev.target.value) : "",
+                  })
+                }
+              >
+                <option value="">None — top level</option>
+                {parentOptions.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="enc-color">Color</Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  id="enc-color"
+                  className="w-32 font-mono"
+                  placeholder="#3f7f3f"
+                  value={form.color}
+                  disabled={pending}
+                  onChange={(ev) =>
+                    setForm({ ...form, color: ev.target.value })
+                  }
+                />
+                {SWATCHES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-label={`Use ${c}`}
+                    className="size-6 rounded-full border border-border"
+                    style={{ backgroundColor: c }}
+                    disabled={pending}
+                    onClick={() => setForm({ ...form, color: c })}
+                  />
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Leave empty for a transport layer, which has no color.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="enc-notes">Notes</Label>
+              <Textarea
+                id="enc-notes"
+                rows={2}
+                value={form.notes}
+                disabled={pending}
+                onChange={(ev) => setForm({ ...form, notes: ev.target.value })}
+              />
+            </div>
+
+            {!editing && isAdmin && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={makeGlobal}
+                  disabled={pending}
+                  onChange={(ev) => setMakeGlobal(ev.target.checked)}
+                />
+                Add to the global list (shared across workspaces)
+              </label>
+            )}
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={pending} onClick={close}>
+                Cancel
+              </Button>
+              <Button
+                disabled={pending || !form.name.trim()}
+                onClick={submit}
+              >
+                {pending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}

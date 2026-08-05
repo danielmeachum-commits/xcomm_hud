@@ -22,7 +22,7 @@ from routers import (
     doc_pages,
     doc_sections,
     documents,
-    scoi_sources,
+    enclaves,
     equipment,
     equipment_catalog,
     equipment_topology,
@@ -33,6 +33,7 @@ from routers import (
     ingest,
     personnel,
     rules,
+    scoi_sources,
     service_gateway_status,
     service_templates,
     services,
@@ -161,6 +162,9 @@ app.include_router(units.router)
 app.include_router(work_centers.router)
 app.include_router(teams.router)
 app.include_router(personnel.router)
+# Enclaves are referenced by the equipment catalog and by services, so they
+# read first in the docs.
+app.include_router(enclaves.router)
 # Equipment tier. Catalog first, then instances, then topology — the order
 # only matters for how routes group in the OpenAPI docs.
 app.include_router(equipment_catalog.router)

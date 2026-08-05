@@ -1332,6 +1332,74 @@ class DocSection(Base):
     )
 
 
+# ===================== Enclaves =====================
+
+
+class Enclave(Base):
+    """A network an operator would name out loud — NIPR, SIPR, ACBN, BICES.
+
+    This existed as a convention long before it existed as a table: seeded
+    service names ("NIPR Web" vs "SIPR Web"), an icon choice, and hand-written
+    capability labels ("SIPR data"). Convention was enough until behavior needed
+    to hang off it — the deploy wizard cannot tell two `kind="data"` services
+    apart, and "we're leaving the SIPR stack home" had no way to be said in one
+    action. That is the signal a tag deserves a real column, per 0044.
+
+    Nested via `parent_id` the same way Folder and DocPage do it: FK only, no
+    self-relationship, flat list from the API, tree assembled in the UI.
+    Transport sits at the top with no parent and no color; NIPR and SIPR hang
+    off it; ACBN and BICES hang off those.
+
+    NOT a classification level. Enclaves correlate with classification and are
+    not the same thing — a `SECRET` marking and "is on SIPR" answer different
+    questions. There is deliberately no ordering, no severity, and no link to
+    the `--classification-surface` banner tints. Adding one turns this into a
+    different feature.
+    """
+
+    __tablename__ = "enclave"
+    __table_args__ = (
+        Index(
+            "uq_enclave_global_name",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+        UniqueConstraint("workspace_id", "name", name="uq_enclave_workspace_name"),
+        CheckConstraint("parent_id <> id", name="ck_enclave_parent_not_self"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # SET NULL, not CASCADE: retiring a parent should orphan its children to the
+    # top level, never delete the enclave rows that gear is tagged with.
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    short_name: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    # Hex string, matching EventTypeDef.color and Team.color. Null on purpose
+    # for the transport layer, which operators describe as having no color.
+    color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Soft delete: tagged equipment and services hold FKs to these rows.
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
 # ===================== Equipment: catalog =====================
 # Catalog rows follow the same global-vs-workspace pattern as Rule and
 # EventTypeDef: `workspace_id IS NULL` means a globally-seeded, admin-managed

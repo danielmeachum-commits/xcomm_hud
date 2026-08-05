@@ -1677,6 +1677,42 @@ class ExportedPersonnel(BaseModel):
     expected_return_at: Optional[datetime.datetime] = None
 
 
+# ===================== Enclaves =====================
+
+
+class EnclaveIn(BaseModel):
+    name: str
+    short_name: Optional[str] = None
+    parent_id: Optional[int] = None
+    # Hex ("#8b5a2b"). Null for the transport layer, which has no color.
+    color: Optional[str] = None
+    display_order: int = 0
+    notes: Optional[str] = None
+
+
+class EnclavePatch(BaseModel):
+    name: Optional[str] = None
+    short_name: Optional[str] = None
+    parent_id: Optional[int] = None
+    color: Optional[str] = None
+    display_order: Optional[int] = None
+    notes: Optional[str] = None
+    retired: Optional[bool] = None
+
+
+class EnclaveOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    name: str
+    short_name: Optional[str] = None
+    color: Optional[str] = None
+    display_order: int = 0
+    retired_at: Optional[datetime.datetime] = None
+    notes: Optional[str] = None
+    is_global: bool = False
+
+
 # ===================== Equipment: catalog =====================
 
 

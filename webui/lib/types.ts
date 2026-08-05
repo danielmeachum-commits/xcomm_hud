@@ -747,6 +747,29 @@ export type UtcRoleHint = "primary" | "extension" | "either"
 export type CapabilityBindRole = "endpoint" | "transport"
 export type CapabilitySource = "template" | "custom"
 
+// --- enclaves ---
+
+/** A network gear and services belong to — NIPR, SIPR, ACBN, BICES.
+ *
+ *  Flat over the wire: `parent_id` only, tree assembled client-side, same as
+ *  Folder and DocPage. `color` is a hex string and is null for the transport
+ *  layer, which operators describe as colorless.
+ *
+ *  Not a classification level — deliberately no ordering or severity. */
+export interface Enclave {
+  id: number
+  /** null = a global, admin-managed row. */
+  workspace_id: number | null
+  parent_id: number | null
+  name: string
+  short_name: string | null
+  color: string | null
+  display_order: number
+  retired_at: string | null
+  notes: string | null
+  is_global: boolean
+}
+
 // --- catalog ---
 
 export interface EquipmentTypeCapability {
