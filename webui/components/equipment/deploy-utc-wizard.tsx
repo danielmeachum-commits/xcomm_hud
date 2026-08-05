@@ -2,7 +2,7 @@
 
 import { Check, Plus, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -42,6 +42,16 @@ const STEPS = [
 
 const selectClass =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+
+/** Selected-vs-not for the wizard's inline choice buttons. `variant="secondary"`
+ *  against `"outline"` was too close to read at a glance — this borrows the
+ *  filled treatment the catalog filter chips already use, so "which one is on"
+ *  survives a glance instead of needing a comparison. */
+function choiceClass(on: boolean): string {
+  return on
+    ? "border-foreground bg-foreground text-background hover:bg-foreground/90"
+    : "border-border text-muted-foreground hover:bg-muted"
+}
 
 interface ItemDraft {
   equipment_type_id: number
@@ -119,6 +129,10 @@ export function DeployUtcWizard({
   // Set is a real answer ("supporting none of them"), so it can't double as
   // "not asked yet".
   const [supported, setSupported] = useState<Set<number> | null>(null)
+  // Whether the operator has typed their own name. Once they have, suggestions
+  // stop — silently overwriting something someone typed is worse than a name
+  // that lags the selection.
+  const [nameTouched, setNameTouched] = useState(false)
 
   const typeById = useMemo(() => new Map(types.map((t) => [t.id, t])), [types])
   const selectedUtcDef = utcDefId ? utcDefs.find((d) => d.id === utcDefId) : null
@@ -140,8 +154,37 @@ export function DeployUtcWizard({
     setBulk([])
     setWiring({})
     setSupported(null)
+    setNameTouched(false)
     setError(null)
   }
+
+  /** The placeholder the operator liked, made real: package name (or UTC code)
+   *  plus the role. Nothing invents a name out of nothing — with no package and
+   *  no definition there's no honest guess, so it stays empty. */
+  const suggestedName = useMemo(() => {
+    const base =
+      (packageMode === "new" && newPackageName.trim()) ||
+      (packageMode === "existing" && packageId
+        ? (packages.find((p) => p.id === packageId)?.name ?? "")
+        : "") ||
+      selectedUtcDef?.code ||
+      ""
+    if (!base) return ""
+    const suffix = role === "independent" ? "" : UTC_ROLE_LABELS[role]
+    return suffix ? `${base} ${suffix}` : base
+  }, [
+    packageMode,
+    newPackageName,
+    packageId,
+    packages,
+    selectedUtcDef,
+    role,
+  ])
+
+  useEffect(() => {
+    if (nameTouched) return
+    setName(suggestedName)
+  }, [suggestedName, nameTouched])
 
   function goTo(i: number) {
     if (i <= maxVisited) setStep(i)
@@ -157,7 +200,10 @@ export function DeployUtcWizard({
    *  with no enclave (power, cables, the RF shot) are common to every one and
    *  never appear here — they ship regardless of what's supported. */
   const defEnclaves = useMemo(() => {
-    if (!selectedUtcDef) return []
+    // Building by hand: there is no bill of materials to derive from, so offer
+    // the whole list and let the operator say what this UTC supports. Without
+    // this the step was dead for every hand-built UTC.
+    if (!selectedUtcDef) return enclaves
     const ids = new Set(
       selectedUtcDef.lines
         .map((l) => l.enclave_id)
@@ -224,6 +270,7 @@ export function DeployUtcWizard({
         .filter((id): id is number => id !== null),
     )
     setSupported(all)
+    setNameTouched(false)
     const built = buildContents(defId, all)
     setItems(built.items)
     setBulk(built.bulk)
@@ -285,6 +332,31 @@ export function DeployUtcWizard({
       }
     })
     setWiring(proposals)
+  }
+
+  /** Site services bucketed by enclave, with the ones matching this kit first
+   *  so the right answer is the first thing in the list. Nothing is hidden —
+   *  an operator wiring a shared box across enclaves still needs the others. */
+  function serviceGroupsFor(enclaveId: number | null) {
+    const byEnclave = new Map<number | null, Service[]>()
+    for (const svc of siteServices) {
+      const k = svc.enclave_id ?? null
+      const bucket = byEnclave.get(k)
+      if (bucket) bucket.push(svc)
+      else byEnclave.set(k, [svc])
+    }
+    const groups = [...byEnclave.entries()].map(([k, services]) => ({
+      key: String(k ?? "none"),
+      enclave: k === null ? null : (enclaves.find((e) => e.id === k) ?? null),
+      services,
+      matches: enclaveId !== null && k === enclaveId,
+    }))
+    // Matching first, then named enclaves, then the untagged bucket.
+    return groups.sort((a, b) => {
+      if (a.matches !== b.matches) return a.matches ? -1 : 1
+      if (!a.enclave !== !b.enclave) return a.enclave ? -1 : 1
+      return (a.enclave?.name ?? "").localeCompare(b.enclave?.name ?? "")
+    })
   }
 
   function buildPayload(): UtcDeployPayload {
@@ -455,9 +527,11 @@ export function DeployUtcWizard({
                     key={m}
                     type="button"
                     size="sm"
-                    variant={packageMode === m ? "secondary" : "outline"}
+                    variant="outline"
+                    className={cn("gap-1.5", choiceClass(packageMode === m))}
                     onClick={() => setPackageMode(m)}
                   >
+                    {packageMode === m && <Check className="size-3.5" />}
                     {m === "new"
                       ? "New package"
                       : m === "existing"
@@ -570,16 +644,14 @@ export function DeployUtcWizard({
                 <p className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
                   {utcDefId
                     ? "No line in this UTC is tagged with an enclave, so there is nothing to leave home. Tag the UTC definition's lines in the equipment catalog to use this step."
-                    : "Pick a UTC definition to choose which enclaves it supports."}
+                    : "No enclaves are defined yet — add them under Admin → Enclaves."}
                 </p>
               ) : (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Which enclaves is this deployment supporting? Unchecking one
-                    drops its whole stack — and records that it was never
-                    expected here, so completeness won&apos;t report it as
-                    missing. Gear common to every enclave (power, cables, the RF
-                    shot) ships either way.
+                    {selectedUtcDef
+                      ? "Which enclaves is this deployment supporting? Unchecking one drops its whole stack — and records that it was never expected here, so completeness won't report it as missing. Gear common to every enclave (power, cables, the RF shot) ships either way."
+                      : "Which enclaves is this hand-built UTC supporting? Checked ones become the choices when you assign each piece of gear on the next steps."}
                   </p>
                   <div className="space-y-1.5">
                     {defEnclaves.map((en) => {
@@ -612,11 +684,13 @@ export function DeployUtcWizard({
                             {en.short_name || en.name}
                           </span>
                           <span className="flex-1 text-sm">{en.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {lines.length} line
-                            {lines.length === 1 ? "" : "s"} · {units} unit
-                            {units === 1 ? "" : "s"}
-                          </span>
+                          {selectedUtcDef && (
+                            <span className="text-xs text-muted-foreground">
+                              {lines.length} line
+                              {lines.length === 1 ? "" : "s"} · {units} unit
+                              {units === 1 ? "" : "s"}
+                            </span>
+                          )}
                         </label>
                       )
                     })}
@@ -660,10 +734,25 @@ export function DeployUtcWizard({
                 </label>
                 <input
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="FCP-1 Primary"
+                  onChange={(e) => {
+                    setNameTouched(true)
+                    setName(e.target.value)
+                  }}
+                  placeholder={suggestedName || "FCP-1 Primary"}
                   className={selectClass}
                 />
+                {nameTouched && suggestedName && name !== suggestedName && (
+                  <button
+                    type="button"
+                    className="mt-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    onClick={() => {
+                      setNameTouched(false)
+                      setName(suggestedName)
+                    }}
+                  >
+                    Use suggested name: {suggestedName}
+                  </button>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium">Role</label>
@@ -673,9 +762,11 @@ export function DeployUtcWizard({
                       key={r}
                       type="button"
                       size="sm"
-                      variant={role === r ? "secondary" : "outline"}
+                      variant="outline"
+                      className={cn("gap-1.5", choiceClass(role === r))}
                       onClick={() => setRole(r)}
                     >
+                      {role === r && <Check className="size-3.5" />}
                       {UTC_ROLE_LABELS[r]}
                     </Button>
                   ))}
@@ -901,9 +992,45 @@ export function DeployUtcWizard({
               </p>
               {bulk.length === 0 && (
                 <p className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-                  Nothing bulk in this UTC.
+                  Nothing bulk on this UTC yet.
                 </p>
               )}
+              {/* A hand-built UTC has no bill of materials to prefill from, so
+                  without this there was no way to record bulk at all. */}
+              <select
+                aria-label="Add bulk line"
+                value=""
+                onChange={(e) => {
+                  if (!e.target.value) return
+                  const t = typeById.get(Number(e.target.value))
+                  if (!t) return
+                  setBulk((prev) => [
+                    ...prev,
+                    {
+                      equipment_type_id: t.id,
+                      authorized_qty: 1,
+                      on_hand_qty: 1,
+                      // Bulk isn't enclave-tagged on the instance; this only
+                      // rides along to the expectation snapshot.
+                      enclave_id: null,
+                    },
+                  ])
+                }}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              >
+                <option value="">Add bulk gear…</option>
+                {types
+                  .filter(
+                    (t) =>
+                      !t.serialized &&
+                      !bulk.some((b) => b.equipment_type_id === t.id),
+                  )
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.short_name ?? t.title}
+                    </option>
+                  ))}
+              </select>
               {bulk.map((b, index) => {
                 const t = typeById.get(b.equipment_type_id)
                 return (
@@ -990,14 +1117,33 @@ export function DeployUtcWizard({
                     key={index}
                     className="space-y-2 rounded-lg border border-border p-3"
                   >
-                    <div className="text-sm font-medium">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
                       <span className="font-mono">
                         {item.equipment_code ||
                           proposeCode(t, item.serial_number)}
-                      </span>{" "}
+                      </span>
                       <span className="text-muted-foreground">
                         {t.short_name ?? t.title}
                       </span>
+                      {/* The kit's own enclave, so "which service matches this"
+                          is answerable without leaving the row. */}
+                      {(() => {
+                        const en = item.enclave_id
+                          ? enclaves.find((e) => e.id === item.enclave_id)
+                          : null
+                        if (!en) return null
+                        return (
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                              enclaveChipClass(en.color),
+                            )}
+                            style={enclaveChipStyle(en.color)}
+                          >
+                            {en.short_name || en.name}
+                          </span>
+                        )
+                      })()}
                     </div>
                     {item.capability_kinds.map((kind) => {
                       const key = `${index}:${kind}`
@@ -1017,15 +1163,29 @@ export function DeployUtcWizard({
                             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
                           >
                             <option value="">Not wired</option>
-                            {siteServices.length > 0 && (
-                              <optgroup label="Services">
-                                {siteServices.map((s) => (
+                            {/* Services grouped by enclave, this kit's own
+                                enclave first. A flat list gave no way to tell
+                                which service matched the gear — with NIPR Web
+                                and SIPR Web both present and both kind="data",
+                                the names were the only clue. */}
+                            {serviceGroupsFor(item.enclave_id).map((g) => (
+                              <optgroup
+                                key={g.key}
+                                label={
+                                  g.enclave
+                                    ? `${g.enclave.name} services${
+                                        g.matches ? " — matches this kit" : ""
+                                      }`
+                                    : "Services with no enclave"
+                                }
+                              >
+                                {g.services.map((s) => (
                                   <option key={s.id} value={`service:${s.id}`}>
                                     {s.name}
                                   </option>
                                 ))}
                               </optgroup>
-                            )}
+                            ))}
                             {siteGateways.length > 0 && (
                               <optgroup label="Gateways">
                                 {siteGateways.map((g) => (
