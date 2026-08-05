@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { enclaveChipStyle } from "@/lib/enclave-meta"
+import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import { CAPABILITY_LABELS, UTC_ROLE_LABELS } from "@/lib/equipment-meta"
 import { cn } from "@/lib/utils"
 import type {
@@ -603,7 +603,10 @@ export function DeployUtcWizard({
                             onChange={() => toggleEnclave(en.id)}
                           />
                           <span
-                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                              enclaveChipClass(en.color),
+                            )}
                             style={enclaveChipStyle(en.color)}
                           >
                             {en.short_name || en.name}

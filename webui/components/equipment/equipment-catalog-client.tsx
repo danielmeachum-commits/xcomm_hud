@@ -28,6 +28,7 @@ import {
   equipmentIcon,
 } from "@/lib/equipment-meta"
 import type {
+  Enclave,
   EquipmentCategory,
   EquipmentType,
   PackageDef,
@@ -41,6 +42,7 @@ interface Props {
   types: EquipmentType[]
   utcDefs: UtcDef[]
   packageDefs: PackageDef[]
+  enclaves?: Enclave[]
   isAdmin: boolean
 }
 
@@ -81,6 +83,7 @@ export function EquipmentCatalogClient({
   types,
   utcDefs,
   packageDefs,
+  enclaves = [],
   isAdmin,
 }: Props) {
   const [tab, setTab] = useState<Tab>("types")
@@ -450,6 +453,7 @@ export function EquipmentCatalogClient({
         onClose={() => setSelectedType(null)}
       />
       <UtcDefSheet
+        enclaves={enclaves}
         def={selectedUtc}
         types={types}
         canEdit={!!selectedUtc && canEditRow(selectedUtc.is_global)}

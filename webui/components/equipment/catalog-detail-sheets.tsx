@@ -17,6 +17,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
+import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import {
   CAPABILITY_LABELS,
   EQUIPMENT_CATEGORY_LABELS,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/equipment-meta"
 import type {
   CapabilityKind,
+  Enclave,
   EquipmentCategory,
   EquipmentType,
   PackageDef,
@@ -31,6 +33,7 @@ import type {
   UtcDefLine,
   UtcRoleHint,
 } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 export const CATEGORY_VALUES = Object.keys(
   EQUIPMENT_CATEGORY_LABELS,
@@ -87,13 +90,22 @@ export function CodeBadge({
 function Field({
   label,
   children,
+  hint,
 }: {
   label: string
   children: React.ReactNode
+  /** Spelled-out meaning for abbreviations nobody should have to look up. */
+  hint?: string
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+      <span
+        title={hint}
+        className={
+          "text-[11px] uppercase tracking-wide text-muted-foreground" +
+          (hint ? " cursor-help decoration-dotted underline-offset-2" : "")
+        }
+      >
         {label}
       </span>
       <span className="text-sm">{children}</span>
@@ -545,23 +557,32 @@ export function EquipmentTypeSheet({
                       <Label htmlFor="eq-nsn">NSN</Label>
                       <Input
                         id="eq-nsn"
+                        placeholder="5820-01-523-9937"
                         value={form.nsn}
                         onChange={(e) =>
                           setForm({ ...form, nsn: e.target.value })
                         }
                         disabled={pending}
                       />
+                      <span className="text-[11px] text-muted-foreground">
+                        National Stock Number — identifies this exact item.
+                      </span>
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="eq-lin">LIN</Label>
                       <Input
                         id="eq-lin"
+                        placeholder="R31103"
                         value={form.lin}
                         onChange={(e) =>
                           setForm({ ...form, lin: e.target.value })
                         }
                         disabled={pending}
                       />
+                      <span className="text-[11px] text-muted-foreground">
+                        Line Item Number — the property-book grouping for
+                        interchangeable items. Optional.
+                      </span>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -650,8 +671,15 @@ export function EquipmentTypeSheet({
                         ? `Serialized · IDs start ${type.id_prefix}`
                         : "Bulk (no serial)"}
                     </Field>
-                    <Field label="NSN">{type.nsn || "—"}</Field>
-                    <Field label="LIN">{type.lin || "—"}</Field>
+                    <Field label="NSN" hint="National Stock Number">
+                      {type.nsn || "—"}
+                    </Field>
+                    <Field
+                      label="LIN"
+                      hint="Line Item Number — property-book grouping for interchangeable items"
+                    >
+                      {type.lin || "—"}
+                    </Field>
                     <Field label="Manufacturer">
                       {type.manufacturer || "—"}
                     </Field>
@@ -714,11 +742,13 @@ interface CodeForm {
 export function UtcDefSheet({
   def,
   types,
+  enclaves = [],
   canEdit,
   onClose,
 }: {
   def: UtcDef | null
   types: EquipmentType[]
+  enclaves?: Enclave[]
   canEdit: boolean
   onClose: () => void
 }) {
@@ -727,6 +757,11 @@ export function UtcDefSheet({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<CodeForm | null>(null)
+  // Per-line enclave, keyed by line id. This is the field the deploy wizard's
+  // "Enclaves supported" step reads — without it there is nothing to uncheck.
+  const [lineEnclaves, setLineEnclaves] = useState<Record<number, number | null>>(
+    {},
+  )
 
   useEffect(() => {
     setEditing(false)
@@ -736,7 +771,14 @@ export function UtcDefSheet({
         ? { code: def.code, name: def.name, description: def.description ?? "" }
         : null,
     )
+    setLineEnclaves(
+      def
+        ? Object.fromEntries(def.lines.map((l) => [l.id, l.enclave_id]))
+        : {},
+    )
   }, [def])
+
+  const enclaveById = new Map(enclaves.map((e) => [e.id, e]))
 
   const byId = new Map(types.map((t) => [t.id, t]))
 
@@ -749,9 +791,33 @@ export function UtcDefSheet({
       name: form.name.trim(),
       description: form.description.trim() || null,
     })
-    setPending(false)
     if (err) {
+      setPending(false)
       setError(err)
+      return
+    }
+    // Lines live on their own wholesale-replace endpoint. Only call it when a
+    // tag actually changed — an unnecessary replace churns line ids that
+    // nothing else should have to care about.
+    const changed = def.lines.some(
+      (l) => (lineEnclaves[l.id] ?? null) !== l.enclave_id,
+    )
+    const linesErr = changed
+      ? await put(
+          `/api/be/utc-defs/${def.id}/lines`,
+          def.lines.map((l) => ({
+            equipment_type_id: l.equipment_type_id,
+            quantity: l.quantity,
+            enclave_id: lineEnclaves[l.id] ?? null,
+            notes: l.notes,
+          })),
+        )
+      : null
+    setPending(false)
+    if (linesErr) {
+      // The code/name already saved; say so rather than implying a rollback.
+      setError(`Details saved, but enclave tags failed: ${linesErr}`)
+      router.refresh()
       return
     }
     setEditing(false)
@@ -777,7 +843,54 @@ export function UtcDefSheet({
 
             <div className="flex-1 overflow-y-auto px-4 pb-4">
               {editing && form ? (
-                <CodeFields form={form} setForm={setForm} pending={pending} />
+                <div className="flex flex-col gap-4">
+                  <CodeFields form={form} setForm={setForm} pending={pending} />
+                  {enclaves.length > 0 && def.lines.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Enclave per line</Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        Which enclave&apos;s stack each line belongs to. This is
+                        what lets a deployment leave a whole enclave home in one
+                        click. Leave as &ldquo;Common&rdquo; for gear every
+                        enclave needs — power, cables, the RF shot.
+                      </p>
+                      <div className="mt-1 flex flex-col gap-1.5">
+                        {def.lines.map((l) => (
+                          <div key={l.id} className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm">
+                              {l.equipment_type_short_name ??
+                                l.equipment_type_title}
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                ×{l.quantity}
+                              </span>
+                            </span>
+                            <select
+                              aria-label="Enclave for this line"
+                              className={SELECT_CLASS + " w-36"}
+                              value={lineEnclaves[l.id] ?? ""}
+                              disabled={pending}
+                              onChange={(e) =>
+                                setLineEnclaves({
+                                  ...lineEnclaves,
+                                  [l.id]: e.target.value
+                                    ? Number(e.target.value)
+                                    : null,
+                                })
+                              }
+                            >
+                              <option value="">Common</option>
+                              {enclaves.map((en) => (
+                                <option key={en.id} value={en.id}>
+                                  {en.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="flex flex-col gap-4">
                   {def.description && (
@@ -815,8 +928,29 @@ export function UtcDefSheet({
                                       </span>
                                     )}
                                   </span>
-                                  <span className="font-mono text-muted-foreground">
-                                    ×{l.quantity}
+                                  <span className="flex items-center gap-1.5">
+                                    {l.enclave_id !== null &&
+                                      enclaveById.has(l.enclave_id) && (
+                                        <span
+                                          className={cn(
+                                            "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                                            enclaveChipClass(
+                                              enclaveById.get(l.enclave_id)!
+                                                .color,
+                                            ),
+                                          )}
+                                          style={enclaveChipStyle(
+                                            enclaveById.get(l.enclave_id)!.color,
+                                          )}
+                                        >
+                                          {enclaveById.get(l.enclave_id)!
+                                            .short_name ||
+                                            enclaveById.get(l.enclave_id)!.name}
+                                        </span>
+                                      )}
+                                    <span className="font-mono text-muted-foreground">
+                                      ×{l.quantity}
+                                    </span>
                                   </span>
                                 </li>
                               ))}

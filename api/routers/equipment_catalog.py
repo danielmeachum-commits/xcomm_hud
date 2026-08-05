@@ -42,6 +42,7 @@ from schemas import (
     PackageDefOut,
     PackageDefPatch,
     UtcDefIn,
+    UtcDefLineIn,
     UtcDefOut,
     UtcDefPatch,
 )
@@ -365,7 +366,7 @@ def patch_utc_def(
 @router.put("/utc-defs/{utc_def_id}/lines", response_model=UtcDefOut)
 def replace_utc_def_lines(
     utc_def_id: int,
-    body: list[dict],
+    body: list[UtcDefLineIn],
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
@@ -377,13 +378,17 @@ def replace_utc_def_lines(
         synchronize_session=False
     )
     for order, line in enumerate(body):
-        _load_type(db, int(line["equipment_type_id"]), workspace)
+        _load_type(db, line.equipment_type_id, workspace)
         db.add(
             UtcDefLine(
                 utc_def_id=row.id,
-                equipment_type_id=int(line["equipment_type_id"]),
-                quantity=int(line.get("quantity", 1)),
-                notes=line.get("notes"),
+                equipment_type_id=line.equipment_type_id,
+                quantity=line.quantity,
+                # Carried through on purpose: dropping it here would silently
+                # untag every line the moment someone edited the bill of
+                # materials, and the deploy wizard's enclave step reads this.
+                enclave_id=line.enclave_id,
+                notes=line.notes,
                 display_order=order,
             )
         )

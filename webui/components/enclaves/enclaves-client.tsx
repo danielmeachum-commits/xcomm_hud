@@ -23,11 +23,13 @@ import {
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  enclaveChipClass,
   enclaveChipStyle,
   enclaveDepth,
   enclaveTreeOrder,
 } from "@/lib/enclave-meta"
 import type { Enclave } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -35,6 +37,9 @@ const SELECT_CLASS =
 /** Suggested swatches. Free-text hex is still allowed — these just save the
  *  operator from picking a color that reads as a status. */
 const SWATCHES = [
+  // Black is the transport layer's color. It renders from theme tokens rather
+  // than literally, so it stays legible on a dark canvas.
+  "#000000",
   "#3f7f3f",
   "#b03030",
   "#2f6fb0",
@@ -77,7 +82,10 @@ function formOf(e: Enclave): Form {
 export function EnclaveChip({ enclave }: { enclave: Enclave }) {
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        enclaveChipClass(enclave.color),
+      )}
       style={enclaveChipStyle(enclave.color)}
     >
       {enclave.short_name || enclave.name}
@@ -193,9 +201,17 @@ export function EnclavesClient({
     router.refresh()
   }
 
-  async function retire(e: Enclave) {
+  /** Disable/enable rather than delete. Equipment, services and UTC lines hold
+   *  foreign keys here, so a disabled enclave has to stay resolvable — gear
+   *  tagged with it must not lose the answer to "which network is this on".
+   *  Reversible for the same reason: the row was never destroyed. */
+  async function setEnabled(e: Enclave, enabled: boolean) {
     setPending(true)
-    const res = await fetch(`/api/be/enclaves/${e.id}`, { method: "DELETE" })
+    const res = await fetch(`/api/be/enclaves/${e.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ retired: !enabled }),
+    })
     setPending(false)
     if (res.ok) router.refresh()
   }
@@ -213,8 +229,6 @@ export function EnclavesClient({
         <TableHeader>
           <TableRow>
             <TableHead>Enclave</TableHead>
-            <TableHead className="w-24">Short name</TableHead>
-            <TableHead className="w-28">Color</TableHead>
             <TableHead className="w-24 text-right">Scope</TableHead>
             <TableHead className="w-20" />
           </TableRow>
@@ -223,7 +237,10 @@ export function EnclavesClient({
           {ordered.map((e) => (
             <TableRow
               key={e.id}
-              className={canEdit(e) ? "cursor-pointer" : undefined}
+              className={cn(
+                canEdit(e) && "cursor-pointer",
+                e.retired_at && "opacity-55",
+              )}
               onClick={() => startEdit(e)}
             >
               <TableCell>
@@ -233,18 +250,17 @@ export function EnclavesClient({
                 >
                   <EnclaveChip enclave={e} />
                   <span className="font-medium">{e.name}</span>
+                  {e.retired_at && (
+                    <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Disabled
+                    </span>
+                  )}
                   {!e.color && (
                     <span className="text-[11px] text-muted-foreground">
-                      transport — no color
+                      no color
                     </span>
                   )}
                 </span>
-              </TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">
-                {e.short_name || "—"}
-              </TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">
-                {e.color || "—"}
               </TableCell>
               <TableCell className="text-right">
                 {e.is_global ? (
@@ -264,10 +280,10 @@ export function EnclavesClient({
                     disabled={pending}
                     onClick={(ev) => {
                       ev.stopPropagation()
-                      retire(e)
+                      setEnabled(e, e.retired_at !== null)
                     }}
                   >
-                    Retire
+                    {e.retired_at ? "Enable" : "Disable"}
                   </Button>
                 )}
               </TableCell>
@@ -364,7 +380,9 @@ export function EnclavesClient({
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Leave empty for a transport layer, which has no color.
+                Black is the transport layer — it renders as the foreground
+                color so it reads in both light and dark. Leave empty for no
+                color at all.
               </p>
             </div>
 

@@ -1,10 +1,30 @@
 import type { Enclave } from "@/lib/types"
 
+/** Relative luminance, 0 (black) to 1 (white). Only used to decide whether a
+ *  color is too dark to render as itself against a dark background. */
+function luminance(hex: string): number {
+  const h = hex.replace("#", "")
+  if (h.length !== 6) return 0.5
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** True when a color can't be rendered literally in both themes — black is the
+ *  transport layer's color, and a black chip is invisible on a dark canvas.
+ *  These fall back to theme tokens so "black" reads as the foreground color:
+ *  black in light mode, near-white in dark. */
+export function isNeutralEnclaveColor(color: string | null): boolean {
+  return !color || luminance(color) < 0.12
+}
+
 /** Enclave colors are stored as hex, not tailwind classes — the DB never holds
- *  class names in this codebase. That means enclave chips have to be styled
- *  inline rather than through a lookup table, unlike status or category. */
+ *  class names in this codebase. That means enclave chips are styled inline
+ *  rather than through a lookup table, unlike status or category.
+ *
+ *  Returns {} for neutral colors; pair with `enclaveChipClass` so those render
+ *  from theme tokens instead. */
 export function enclaveChipStyle(color: string | null): React.CSSProperties {
-  if (!color) return {}
+  if (isNeutralEnclaveColor(color) || !color) return {}
   return {
     // Low-alpha fill with a solid border of the same hue reads as a tag
     // without competing with the status colors that share these surfaces.
@@ -12,6 +32,14 @@ export function enclaveChipStyle(color: string | null): React.CSSProperties {
     borderColor: `${color}80`,
     color: color,
   }
+}
+
+/** Classes to apply alongside `enclaveChipStyle`. Empty for colors rendered
+ *  literally; theme-token classes for neutral ones. */
+export function enclaveChipClass(color: string | null): string {
+  return isNeutralEnclaveColor(color)
+    ? "border-foreground/40 bg-foreground/10 text-foreground"
+    : ""
 }
 
 export function enclaveLabel(e: Enclave): string {

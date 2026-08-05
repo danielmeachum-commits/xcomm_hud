@@ -14,7 +14,7 @@ import type {
   UtcInstance,
   UtcInstanceLine,
 } from "@/lib/types"
-import { enclaveChipStyle } from "@/lib/enclave-meta"
+import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import { cn } from "@/lib/utils"
 
 const STATUS_META: Record<
@@ -259,7 +259,10 @@ export function UtcCompletenessPanel({
                     <td colSpan={4} className="pt-3 pb-1">
                       {enclave ? (
                         <span
-                          className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                          className={cn(
+                            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                            enclaveChipClass(enclave.color),
+                          )}
                           style={enclaveChipStyle(enclave.color)}
                         >
                           {enclave.short_name || enclave.name}
@@ -338,7 +341,10 @@ export function UtcCompletenessPanel({
             {unsupported.map((e) => (
               <span
                 key={e.id}
-                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                  enclaveChipClass(e.color),
+                )}
                 style={enclaveChipStyle(e.color)}
               >
                 {e.short_name || e.name}

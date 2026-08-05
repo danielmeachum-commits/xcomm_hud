@@ -12,7 +12,9 @@ export default async function EnclavesPage({
   await params
   const me = await requireSession()
 
-  const enclaves = await apiGet<Enclave[]>("/enclaves").catch(
+  // Admin view includes disabled rows — you can't re-enable what you can't
+  // see. Every other consumer takes the default, which hides them.
+  const enclaves = await apiGet<Enclave[]>("/enclaves?include_retired=true").catch(
     () => [] as Enclave[],
   )
 
