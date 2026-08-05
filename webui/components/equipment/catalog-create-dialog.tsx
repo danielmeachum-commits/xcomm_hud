@@ -11,6 +11,10 @@ import {
   type CapabilityDraft,
 } from "@/components/equipment/catalog-detail-sheets"
 import { TagsInput } from "@/components/equipment/tags-input"
+import {
+  UtcLineEditor,
+  type LineDraft,
+} from "@/components/equipment/utc-line-editor"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -63,14 +67,6 @@ async function post(url: string, body: unknown): Promise<string | null> {
   return typeof detail.detail === "string"
     ? detail.detail
     : `Failed to create (${res.status})`
-}
-
-interface LineDraft {
-  equipment_type_id: number | ""
-  quantity: number
-  /** A type may appear once per enclave, so this is part of the line's
-   *  identity, not decoration. */
-  enclave_id: number | null
 }
 
 interface UtcSlotDraft {
@@ -157,6 +153,7 @@ export function CatalogCreateDialog({
   // UTC def / package
   const [code, setCode] = useState("")
   const [lines, setLines] = useState<LineDraft[]>([])
+  const [activeEnclaves, setActiveEnclaves] = useState<number[]>([])
   const [slots, setSlots] = useState<UtcSlotDraft[]>([])
 
   function reset() {
@@ -171,6 +168,7 @@ export function CatalogCreateDialog({
     setTypeEnclaves([])
     setCode("")
     setLines([])
+    setActiveEnclaves([])
     setSlots([])
     setMakeGlobal(false)
     setError(null)
@@ -370,98 +368,20 @@ export function CatalogCreateDialog({
             <div className="flex flex-col gap-1">
               <Label>Bill of materials</Label>
               <p className="text-xs text-muted-foreground">
-                Equipment types and how many of each. Serialized types become
-                one row per unit when the UTC is deployed.
+                What this UTC brings, grouped by the enclave it serves. Gear
+                every enclave needs — power, cables, the RF shot — goes under
+                Common.
               </p>
-              <div className="mt-1 flex flex-col gap-1.5">
-                {lines.map((l, i) => (
-                  <QuantityRow
-                    key={i}
-                    quantity={l.quantity}
-                    disabled={pending}
-                    onQuantity={(n) =>
-                      setLines(
-                        lines.map((x, j) =>
-                          j === i ? { ...x, quantity: n } : x,
-                        ),
-                      )
-                    }
-                    onRemove={() => setLines(lines.filter((_, j) => j !== i))}
-                  >
-                    <select
-                      aria-label="Equipment type"
-                      className={cn(SELECT_CLASS, "flex-1")}
-                      value={l.equipment_type_id}
-                      disabled={pending}
-                      onChange={(e) =>
-                        setLines(
-                          lines.map((x, j) =>
-                            j === i
-                              ? {
-                                  ...x,
-                                  equipment_type_id: e.target.value
-                                    ? Number(e.target.value)
-                                    : "",
-                                }
-                              : x,
-                          ),
-                        )
-                      }
-                    >
-                      <option value="">Select a type…</option>
-                      {types.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.short_name ?? t.title}
-                        </option>
-                      ))}
-                    </select>
-                    {enclaves.length > 0 && (
-                      <select
-                        aria-label="Enclave for this line"
-                        className={cn(SELECT_CLASS, "w-32")}
-                        value={l.enclave_id ?? ""}
-                        disabled={pending}
-                        onChange={(e) =>
-                          setLines(
-                            lines.map((x, j) =>
-                              j === i
-                                ? {
-                                    ...x,
-                                    enclave_id: e.target.value
-                                      ? Number(e.target.value)
-                                      : null,
-                                  }
-                                : x,
-                            ),
-                          )
-                        }
-                      >
-                        <option value="">Common</option>
-                        {enclaves.map((en) => (
-                          <option key={en.id} value={en.id}>
-                            {en.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </QuantityRow>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-start"
+              <div className="mt-1">
+                <UtcLineEditor
+                  lines={lines}
+                  onChange={setLines}
+                  types={types}
+                  enclaves={enclaves}
+                  active={activeEnclaves}
+                  onActiveChange={setActiveEnclaves}
                   disabled={pending}
-                  onClick={() =>
-                    setLines([
-                      ...lines,
-                      { equipment_type_id: "", quantity: 1, enclave_id: null },
-                    ])
-                  }
-                >
-                  <Plus className="size-4" />
-                  Add line item
-                </Button>
+                />
               </div>
             </div>
           )}

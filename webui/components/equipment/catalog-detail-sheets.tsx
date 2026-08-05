@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { TagsInput } from "@/components/equipment/tags-input"
+import {
+  UtcLineEditor,
+  activeEnclavesFrom,
+  type LineDraft,
+} from "@/components/equipment/utc-line-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -879,11 +884,10 @@ export function UtcDefSheet({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<CodeForm | null>(null)
-  // Per-line enclave, keyed by line id. This is the field the deploy wizard's
-  // "Enclaves supported" step reads — without it there is nothing to uncheck.
-  const [lineEnclaves, setLineEnclaves] = useState<Record<number, number | null>>(
-    {},
-  )
+  // The full bill of materials as drafts. Editing lines here rather than only
+  // their enclave tags is what makes "add an item to SIPR" possible at all.
+  const [lineDrafts, setLineDrafts] = useState<LineDraft[]>([])
+  const [activeEnclaves, setActiveEnclaves] = useState<number[]>([])
 
   useEffect(() => {
     setEditing(false)
@@ -893,11 +897,15 @@ export function UtcDefSheet({
         ? { code: def.code, name: def.name, description: def.description ?? "" }
         : null,
     )
-    setLineEnclaves(
-      def
-        ? Object.fromEntries(def.lines.map((l) => [l.id, l.enclave_id]))
-        : {},
-    )
+    const drafts: LineDraft[] = def
+      ? def.lines.map((l) => ({
+          equipment_type_id: l.equipment_type_id,
+          quantity: l.quantity,
+          enclave_id: l.enclave_id,
+        }))
+      : []
+    setLineDrafts(drafts)
+    setActiveEnclaves(activeEnclavesFrom(drafts))
   }, [def])
 
   const enclaveById = new Map(enclaves.map((e) => [e.id, e]))
@@ -918,27 +926,32 @@ export function UtcDefSheet({
       setError(err)
       return
     }
-    // Lines live on their own wholesale-replace endpoint. Only call it when a
-    // tag actually changed — an unnecessary replace churns line ids that
+    // Lines live on their own wholesale-replace endpoint. Only call it when
+    // something actually changed — an unnecessary replace churns line ids that
     // nothing else should have to care about.
-    const changed = def.lines.some(
-      (l) => (lineEnclaves[l.id] ?? null) !== l.enclave_id,
-    )
-    const linesErr = changed
-      ? await put(
-          `/api/be/utc-defs/${def.id}/lines`,
-          def.lines.map((l) => ({
-            equipment_type_id: l.equipment_type_id,
-            quantity: l.quantity,
-            enclave_id: lineEnclaves[l.id] ?? null,
-            notes: l.notes,
-          })),
-        )
-      : null
+    const payload = lineDrafts
+      .filter((l) => l.equipment_type_id !== "")
+      .map((l) => ({
+        equipment_type_id: Number(l.equipment_type_id),
+        quantity: l.quantity,
+        enclave_id: l.enclave_id,
+      }))
+    const before = def.lines
+      .map((l) => `${l.equipment_type_id}:${l.enclave_id ?? ""}:${l.quantity}`)
+      .sort()
+      .join("|")
+    const after = payload
+      .map((l) => `${l.equipment_type_id}:${l.enclave_id ?? ""}:${l.quantity}`)
+      .sort()
+      .join("|")
+    const linesErr =
+      before !== after
+        ? await put(`/api/be/utc-defs/${def.id}/lines`, payload)
+        : null
     setPending(false)
     if (linesErr) {
       // The code/name already saved; say so rather than implying a rollback.
-      setError(`Details saved, but enclave tags failed: ${linesErr}`)
+      setError(`Details saved, but the bill of materials failed: ${linesErr}`)
       router.refresh()
       return
     }
@@ -967,72 +980,24 @@ export function UtcDefSheet({
               {editing && form ? (
                 <div className="flex flex-col gap-4">
                   <CodeFields form={form} setForm={setForm} pending={pending} />
-                  {enclaves.length > 0 && def.lines.length > 0 && (
-                    <div className="flex flex-col gap-1.5">
-                      <Label>Enclave per line</Label>
-                      <p className="text-[11px] text-muted-foreground">
-                        Which enclave&apos;s stack each line belongs to. This is
-                        what lets a deployment leave a whole enclave home in one
-                        click. Leave as &ldquo;Common&rdquo; for gear every
-                        enclave needs — power, cables, the RF shot.
-                      </p>
-                      <div className="mt-1 flex flex-col gap-1.5">
-                        {def.lines.map((l) => (
-                          <div
-                            key={l.id}
-                            className="flex flex-col gap-1 rounded-md border border-border p-2"
-                          >
-                            {/* Row identity above its own control rather than
-                                beside it — side-by-side truncated the name to
-                                nothing in this sheet's width, so the dropdown
-                                referred to something invisible. */}
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span className="text-sm font-medium">
-                                {l.equipment_type_short_name ??
-                                  l.equipment_type_title}
-                              </span>
-                              <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                                ×{l.quantity}
-                                {!l.serialized && " bulk"}
-                              </span>
-                            </div>
-                            {l.equipment_type_short_name &&
-                              l.equipment_type_title &&
-                              l.equipment_type_short_name !==
-                                l.equipment_type_title && (
-                                <span className="text-[11px] text-muted-foreground">
-                                  {l.equipment_type_title}
-                                </span>
-                              )}
-                            <select
-                              aria-label={`Enclave for ${
-                                l.equipment_type_short_name ??
-                                l.equipment_type_title
-                              }`}
-                              className={cn(SELECT_CLASS, "h-8")}
-                              value={lineEnclaves[l.id] ?? ""}
-                              disabled={pending}
-                              onChange={(e) =>
-                                setLineEnclaves({
-                                  ...lineEnclaves,
-                                  [l.id]: e.target.value
-                                    ? Number(e.target.value)
-                                    : null,
-                                })
-                              }
-                            >
-                              <option value="">Common</option>
-                              {enclaves.map((en) => (
-                                <option key={en.id} value={en.id}>
-                                  {en.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Bill of materials</Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      What this UTC brings, grouped by the enclave it serves.
+                      Unchecking an enclave removes its section — that&apos;s
+                      what lets a deployment leave a whole stack home in one
+                      click later.
+                    </p>
+                    <UtcLineEditor
+                      lines={lineDrafts}
+                      onChange={setLineDrafts}
+                      types={types}
+                      enclaves={enclaves}
+                      active={activeEnclaves}
+                      onActiveChange={setActiveEnclaves}
+                      disabled={pending}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
