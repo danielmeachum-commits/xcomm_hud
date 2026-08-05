@@ -154,6 +154,9 @@ interface Props {
   packageDefs: PackageDef[]
   services: Service[]
   gateways: Gateway[]
+  /** Equipment IDs already registered in this workspace, so proposed IDs can
+   *  avoid the ones that would be rejected. */
+  existingCodes?: string[]
 }
 
 export function DeployUtcWizard({
@@ -165,6 +168,7 @@ export function DeployUtcWizard({
   packageDefs,
   services,
   gateways,
+  existingCodes = [],
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -334,17 +338,26 @@ export function DeployUtcWizard({
     for (const row of bases) {
       for (const base of row) total.set(base, (total.get(base) ?? 0) + 1)
     }
-    const taken = new Map<string, number>()
+    // Seeded with what the workspace has already registered, not just what
+    // this queue proposes: deploying a second UTC from the same definition
+    // re-proposed the first one's IDs and the server rejected every item.
+    // The server still has the final say — this only stops the wizard from
+    // walking into a collision it can already see.
+    const taken = new Set(existingCodes.map((c) => c.toUpperCase()))
     return bases.map((row, di) =>
       row.map((base, ii) => {
         if (drafts[di].items[ii].equipment_code.trim()) return base
-        if ((total.get(base) ?? 0) < 2) return base
-        const n = (taken.get(base) ?? 0) + 1
-        taken.set(base, n)
+        if ((total.get(base) ?? 0) < 2 && !taken.has(base.toUpperCase())) {
+          taken.add(base.toUpperCase())
+          return base
+        }
+        let n = 1
+        while (taken.has(`${base}${n}`.toUpperCase())) n++
+        taken.add(`${base}${n}`.toUpperCase())
         return `${base}${n}`
       }),
     )
-  }, [drafts, typeById])
+  }, [drafts, typeById, existingCodes])
 
   /** What the field shows and what gets submitted. Derived rather than synced
    *  into state by an effect: until the operator types, the name simply IS the

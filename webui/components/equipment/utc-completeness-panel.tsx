@@ -1,6 +1,13 @@
 "use client"
 
-import { AlertTriangle, Check, HelpCircle, PackagePlus, Pencil } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  HelpCircle,
+  PackagePlus,
+  Pencil,
+  X,
+} from "lucide-react"
 import { useRouter } from "next/navigation"
 import { Fragment, useEffect, useMemo, useState } from "react"
 
@@ -119,13 +126,25 @@ export function UtcCompletenessPanel({
     return out
   }, [data, enclaves, enclaveById])
 
-  const unsupported = useMemo(
-    () =>
-      (data?.unsupported_enclave_ids ?? [])
-        .map((id) => enclaveById.get(id))
-        .filter((e): e is Enclave => e !== undefined),
-    [data, enclaveById],
-  )
+  /** Every enclave this UTC's definition covers, ticked where the deployment
+   *  brought its stack and crossed where it deliberately didn't.
+   *
+   *  This replaces a paragraph explaining that an unsupported enclave is a
+   *  decision rather than a shortfall — a ✓/✗ roster says the same thing at a
+   *  glance, and says it about the supported ones too, which the prose never
+   *  did. Enclaves the definition never mentioned stay out: this is what was
+   *  on the table for this UTC, not the whole catalog. */
+  const enclaveRoster = useMemo(() => {
+    if (!data) return []
+    // From the API's own sets, not from `lines`: a type carried on two
+    // enclaves collapses to one unlabelled row there, so a UTC with a TACLANE
+    // on both NIPR and SIPR would have shown an empty roster.
+    const supported = new Set(data.supported_enclave_ids ?? [])
+    const unsupported = new Set(data.unsupported_enclave_ids ?? [])
+    return enclaves
+      .filter((e) => supported.has(e.id) || unsupported.has(e.id))
+      .map((enclave) => ({ enclave, on: supported.has(enclave.id) }))
+  }, [data, enclaves])
 
   useEffect(() => {
     let cancelled = false
@@ -204,7 +223,9 @@ export function UtcCompletenessPanel({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <CompletenessBadge status={data.status} />
+        {/* The rollup badge is hidden for now — the table's deltas and the
+            enclave roster below carry the same news. `CompletenessBadge` stays
+            exported so putting it back is one line. */}
         {data.status === "unknown" && (
           <span className="text-xs text-muted-foreground">
             Deployed before expected contents were recorded — set them to start
@@ -329,56 +350,31 @@ export function UtcCompletenessPanel({
         </table>
       )}
 
-      {unsupported.length > 0 && (
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Not supported on this deployment
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {utc.utc_def_code ?? "The definition"} includes a stack for{" "}
-            {unsupported.length === 1 ? "this enclave" : "these enclaves"}, and
-            this deployment never expected {unsupported.length === 1 ? "it" : "them"}.
-            A decision, not a shortfall — nothing is missing.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {unsupported.map((e) => (
-              <span
-                key={e.id}
-                className={cn(
-                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                  enclaveChipClass(e.color),
-                )}
-                style={enclaveChipStyle(e.color)}
-              >
-                {e.short_name || e.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {data.def_variance.length > 0 && (
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Tailored from {utc.utc_def_code ?? "its definition"}
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            How this deployment differs from doctrine. Not a problem — leaving
-            an enclave&apos;s stack home is a decision, not a shortfall.
-          </p>
-          <ul className="mt-2 flex flex-col gap-0.5 text-xs">
-            {data.def_variance.map((line) => (
-              <li
-                key={line.equipment_type_id}
-                className="flex justify-between gap-2"
-              >
-                <span>{label(line)}</span>
-                <span className="font-mono text-muted-foreground">
-                  {line.actual} of {line.expected} planned
-                </span>
-              </li>
-            ))}
-          </ul>
+      {enclaveRoster.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Enclaves
+          </span>
+          {enclaveRoster.map(({ enclave, on }) => (
+            <span
+              key={enclave.id}
+              title={
+                on
+                  ? "Supported on this deployment"
+                  : `${utc.utc_def_code ?? "The definition"} includes a stack for this enclave; this deployment left it home`
+              }
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                on
+                  ? enclaveChipClass(enclave.color)
+                  : "border-dashed text-muted-foreground",
+              )}
+              style={on ? enclaveChipStyle(enclave.color) : undefined}
+            >
+              {on ? <Check className="size-3" /> : <X className="size-3" />}
+              {enclave.short_name || enclave.name}
+            </span>
+          ))}
         </div>
       )}
     </div>

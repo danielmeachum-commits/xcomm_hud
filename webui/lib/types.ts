@@ -957,6 +957,10 @@ export interface UtcCompleteness {
    *  edited mid-mission. These are decisions, NOT shortfalls — never render
    *  them as a problem. */
   unsupported_enclave_ids: number[]
+  /** Enclaves this deployment does expect gear from. Sent by the API because
+   *  `lines` collapses per type and drops the enclave when a type spans more
+   *  than one, so it can't be recovered here. */
+  supported_enclave_ids: number[]
 }
 
 export interface CapabilityBindings {

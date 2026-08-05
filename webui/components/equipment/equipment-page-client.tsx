@@ -128,15 +128,6 @@ export function EquipmentPageClient({
     })
   }, [equipment, search, siteFilter, utcFilter, enclaveFilter, aliasesByTypeId])
 
-  const bySite = useMemo(() => {
-    const map = new Map<number, Equipment[]>()
-    for (const e of filtered) {
-      const list = map.get(e.site_id) ?? []
-      list.push(e)
-      map.set(e.site_id, list)
-    }
-    return map
-  }, [filtered])
 
   const siteById = useMemo(
     () => new Map(sites.map((s) => [s.id, s])),
@@ -185,6 +176,82 @@ export function EquipmentPageClient({
     [enclaves],
   )
 
+  /** The list, nested site → UTC → enclave.
+   *
+   *  Flat-under-site meant a site's gear was one undifferentiated run of rows
+   *  with the UTC and enclave repeated as chips on every line — the two things
+   *  you actually navigate by were the hardest to see. Nesting turns them into
+   *  headings, so "what did FCP-1 bring, and which of it is SIPR" is reading
+   *  rather than scanning.
+   *
+   *  Gear with no UTC and gear with no enclave are real answers, not gaps, so
+   *  each level keeps a bucket for them — sorted last, since they're the
+   *  exception. */
+  const tree = useMemo(() => {
+    const bySite = new Map<
+      number,
+      Map<number | null, Map<number | null, Equipment[]>>
+    >()
+    for (const e of filtered) {
+      let byUtc = bySite.get(e.site_id)
+      if (!byUtc) {
+        byUtc = new Map()
+        bySite.set(e.site_id, byUtc)
+      }
+      const utcKey = e.utc_instance_id ?? null
+      let byEnclave = byUtc.get(utcKey)
+      if (!byEnclave) {
+        byEnclave = new Map()
+        byUtc.set(utcKey, byEnclave)
+      }
+      const enclaveKey = e.enclave_id ?? null
+      const items = byEnclave.get(enclaveKey)
+      if (items) items.push(e)
+      else byEnclave.set(enclaveKey, [e])
+    }
+    // Catalog order for enclaves, untagged last.
+    const enclaveRank = new Map(enclaves.map((e, i) => [e.id, i]))
+    const rankOf = (id: number | null) =>
+      id === null ? Number.MAX_SAFE_INTEGER : (enclaveRank.get(id) ?? 1e6)
+
+    return [...bySite.entries()]
+      .map(([siteId, byUtc]) => {
+        const utcGroups = [...byUtc.entries()]
+          .map(([utcId, byEnclave]) => {
+            const enclaveGroups = [...byEnclave.entries()]
+              .map(([enclaveId, items]) => ({
+                key: String(enclaveId ?? "none"),
+                enclave: enclaveId === null ? null : enclaveById.get(enclaveId),
+                items,
+              }))
+              .sort((a, b) => rankOf(a.enclave?.id ?? null) - rankOf(b.enclave?.id ?? null))
+            return {
+              key: String(utcId ?? "none"),
+              utc: utcId === null ? null : utcById.get(utcId),
+              enclaveGroups,
+              count: enclaveGroups.reduce((n, g) => n + g.items.length, 0),
+            }
+          })
+          .sort((a, b) => {
+            if (!a.utc !== !b.utc) return a.utc ? -1 : 1
+            return (
+              (a.utc?.package_name ?? "").localeCompare(
+                b.utc?.package_name ?? "",
+              ) || (a.utc?.name ?? "").localeCompare(b.utc?.name ?? "")
+            )
+          })
+        return {
+          siteId,
+          site: siteById.get(siteId),
+          utcGroups,
+          count: utcGroups.reduce((n, g) => n + g.count, 0),
+        }
+      })
+      .sort((a, b) =>
+        (a.site?.name ?? "").localeCompare(b.site?.name ?? ""),
+      )
+  }, [filtered, enclaves, enclaveById, siteById, utcById])
+
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -203,6 +270,7 @@ export function EquipmentPageClient({
           packageDefs={packageDefs}
           services={services}
           gateways={gateways}
+          existingCodes={equipment.map((e) => e.equipment_code)}
         />
       </div>
 
@@ -379,135 +447,151 @@ export function EquipmentPageClient({
           Nothing matches “{search}”.
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
-          {Array.from(bySite.keys())
-            .sort((a, b) =>
-              (siteById.get(a)?.name ?? "").localeCompare(
-                siteById.get(b)?.name ?? "",
-              ),
-            )
-            .map((siteId) => {
-              const items = bySite.get(siteId) ?? []
-              return (
-                <section key={siteId}>
-                  <h2 className="mb-2 text-sm font-semibold tracking-tight">
-                    <Link
-                      href={w(`/sites/${siteId}`)}
-                      className="hover:underline"
-                    >
-                      {siteById.get(siteId)?.name ?? `Site ${siteId}`}
-                    </Link>
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      {items.length} {items.length === 1 ? "item" : "items"}
-                    </span>
-                  </h2>
-                  <ul className="flex flex-col gap-2">
-                    {items.map((e) => {
-                      const Icon = equipmentIcon(e.type_category)
-                      const rollup = equipmentRollup(e)
-                      const utc = e.utc_instance_id
-                        ? utcById.get(e.utc_instance_id)
-                        : null
-                      return (
-                        <li
-                          key={e.id}
-                          className={cn(
-                            "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
-                            statusBadgeClass(rollup),
-                          )}
-                        >
+        <div className="flex flex-col gap-8">
+          {tree.map((siteGroup) => (
+            <section key={siteGroup.siteId}>
+              <h2 className="mb-2 text-sm font-semibold tracking-tight">
+                <Link
+                  href={w(`/sites/${siteGroup.siteId}`)}
+                  className="hover:underline"
+                >
+                  {siteGroup.site?.name ?? `Site ${siteGroup.siteId}`}
+                </Link>
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {siteGroup.count} {siteGroup.count === 1 ? "item" : "items"}
+                </span>
+              </h2>
+
+              <div className="flex flex-col gap-4">
+                {siteGroup.utcGroups.map((utcGroup) => (
+                  <div key={utcGroup.key} className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2 border-l-2 border-border pl-2">
+                      {utcGroup.utc ? (
+                        <>
                           <Link
-                            href={w(`/equipment/${e.id}`)}
-                            className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                            href={w(`/equipment/utc/${utcGroup.utc.id}`)}
+                            className="text-sm font-medium hover:underline"
                           >
-                            <Icon className="size-5 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-medium">
-                                  {e.equipment_code}
-                                </span>
-                                <span className="truncate text-sm">
-                                  {e.type_short_name ?? e.type_title}
-                                </span>
-                                {e.enclave_id !== null &&
-                                  enclaveById.has(e.enclave_id) && (
-                                    <EnclaveChip
-                                      enclave={enclaveById.get(e.enclave_id)!}
+                            {utcGroup.utc.name}
+                          </Link>
+                          {utcGroup.utc.utc_def_code && (
+                            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                              {utcGroup.utc.utc_def_code}
+                            </span>
+                          )}
+                          {utcGroup.utc.package_name && (
+                            <span className="text-xs text-muted-foreground">
+                              {utcGroup.utc.package_name}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          Not on a UTC
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        · {utcGroup.count}
+                      </span>
+                    </div>
+
+                    {utcGroup.enclaveGroups.map((enclaveGroup) => (
+                      <div
+                        key={enclaveGroup.key}
+                        className="flex flex-col gap-2 pl-4"
+                      >
+                        <div className="flex items-center gap-2">
+                          {enclaveGroup.enclave ? (
+                            <EnclaveChip enclave={enclaveGroup.enclave} />
+                          ) : (
+                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                              No enclave
+                            </span>
+                          )}
+                          <span className="text-[11px] text-muted-foreground">
+                            · {enclaveGroup.items.length}
+                          </span>
+                        </div>
+                        <ul className="flex flex-col gap-2">
+                          {enclaveGroup.items.map((e) => {
+                            const Icon = equipmentIcon(e.type_category)
+                            const rollup = equipmentRollup(e)
+                            return (
+                              <li
+                                key={e.id}
+                                className={cn(
+                                  "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
+                                  statusBadgeClass(rollup),
+                                )}
+                              >
+                                <Link
+                                  href={w(`/equipment/${e.id}`)}
+                                  className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                                >
+                                  <Icon className="size-5 shrink-0 text-muted-foreground" />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-medium">
+                                        {e.equipment_code}
+                                      </span>
+                                      <span className="truncate text-sm">
+                                        {e.type_short_name ?? e.type_title}
+                                      </span>
+                                    </div>
+                                    {/* The UTC and enclave chips this row used
+                                        to carry are the two headings above it
+                                        now, so what is left is what the
+                                        headings do not already say. */}
+                                    <div className="truncate text-xs text-muted-foreground">
+                                      {e.type_category
+                                        ? EQUIPMENT_CATEGORY_LABELS[
+                                            e.type_category
+                                          ]
+                                        : "—"}
+                                      {e.serial_number
+                                        ? ` · SN ${e.serial_number}`
+                                        : ""}
+                                      {e.nsn ? ` · NSN ${e.nsn}` : ""}
+                                    </div>
+                                  </div>
+                                </Link>
+
+                                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                                  {e.capabilities.map((c) => (
+                                    <EquipmentStatusPill
+                                      key={c.id}
+                                      target="capability"
+                                      id={c.id}
+                                      label={`${e.equipment_code} — ${c.label}`}
+                                      status={c.status}
+                                      lastValidatedAt={c.validated_at}
+                                      lastValidatedBy={c.validated_by_username}
+                                      displayText={CAPABILITY_LABELS[c.kind]}
+                                      className="gap-1"
+                                    />
+                                  ))}
+                                  {e.capabilities.length === 0 && (
+                                    <EquipmentStatusPill
+                                      target="equipment"
+                                      id={e.id}
+                                      label={e.equipment_code}
+                                      status={e.status}
+                                      lastValidatedAt={e.validated_at}
+                                      lastValidatedBy={e.validated_by_username}
                                     />
                                   )}
-                              </div>
-                              <div className="flex flex-wrap items-center gap-1.5 truncate text-xs text-muted-foreground">
-                                <span className="truncate">
-                                  {e.type_category
-                                    ? EQUIPMENT_CATEGORY_LABELS[e.type_category]
-                                    : "—"}
-                                  {e.serial_number
-                                    ? ` · SN ${e.serial_number}`
-                                    : ""}
-                                  {e.nsn ? ` · NSN ${e.nsn}` : ""}
-                                </span>
-                                {/* The UTC used to be the tail of a run-on
-                                    metadata line, which is where you look last.
-                                    After a deploy it's the first thing asked
-                                    about, so it gets its own chip — with the
-                                    package, since that's the thing that went
-                                    out. Not a link: this whole row already is
-                                    one, and anchors can't nest. */}
-                                <span
-                                  className={cn(
-                                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
-                                    utc
-                                      ? "border-border"
-                                      : "border-dashed text-muted-foreground/70",
-                                  )}
-                                >
-                                  <Boxes className="size-3" />
-                                  {/* Names are usually suggested from the
-                                      package ("FCP-1 Primary"), so naming both
-                                      would stutter. */}
-                                  {utc
-                                    ? utc.package_name &&
-                                      !utc.name.startsWith(utc.package_name)
-                                      ? `${utc.package_name} · ${utc.name}`
-                                      : utc.name
-                                    : "No UTC"}
-                                </span>
-                              </div>
-                            </div>
-                          </Link>
-
-                          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                            {e.capabilities.map((c) => (
-                              <EquipmentStatusPill
-                                key={c.id}
-                                target="capability"
-                                id={c.id}
-                                label={`${e.equipment_code} — ${c.label}`}
-                                status={c.status}
-                                lastValidatedAt={c.validated_at}
-                                lastValidatedBy={c.validated_by_username}
-                                displayText={CAPABILITY_LABELS[c.kind]}
-                                className="gap-1"
-                              />
-                            ))}
-                            {e.capabilities.length === 0 && (
-                              <EquipmentStatusPill
-                                target="equipment"
-                                id={e.id}
-                                label={e.equipment_code}
-                                status={e.status}
-                                lastValidatedAt={e.validated_at}
-                                lastValidatedBy={e.validated_by_username}
-                              />
-                            )}
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </section>
-              )
-            })}
+                                </div>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
       )}
     </>

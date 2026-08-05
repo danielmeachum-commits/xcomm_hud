@@ -2185,6 +2185,12 @@ class UtcCompletenessOut(BaseModel):
     # it stays correct when the expected list is edited mid-mission. These are
     # not shortfalls and must not be rendered as ones.
     unsupported_enclave_ids: list[int] = Field(default_factory=list)
+    # The other half of the same answer: enclaves this deployment's snapshot
+    # does expect gear from. Sent rather than left to the client, because
+    # `lines` collapses per type and drops the enclave whenever a type spans
+    # more than one — a TACLANE on both NIPR and SIPR lands as one unlabelled
+    # row, so the enclaves it serves are simply not recoverable there.
+    supported_enclave_ids: list[int] = Field(default_factory=list)
 
 
 # ===================== Equipment: links and topology =====================

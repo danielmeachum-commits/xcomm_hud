@@ -231,10 +231,13 @@ def _compare(
     return lines
 
 
-def _unsupported_enclaves(
+def _enclave_support(
     db: Session, utc: UtcInstance, expected_rows: list[UtcInstanceLine]
-) -> list[int]:
-    """Enclaves the def calls for that this deployment expects nothing from.
+) -> tuple[list[int], list[int]]:
+    """(supported, unsupported) enclaves for this deployment.
+
+    Supported is what the snapshot expects gear from; unsupported is what the
+    def calls for and the snapshot doesn't.
 
     Derived rather than stored. A stored "supported" set would go stale the
     moment someone edits the expected list mid-mission — which is a first-class
@@ -243,8 +246,9 @@ def _unsupported_enclaves(
     home. That is a decision, not a shortfall, and the UI must not show it as
     one.
     """
+    expected_enclaves = {r.enclave_id for r in expected_rows if r.enclave_id}
     if utc.utc_def_id is None:
-        return []
+        return sorted(expected_enclaves), []
     doctrine_enclaves = {
         e
         for (e,) in db.query(UtcDefLine.enclave_id).filter(
@@ -252,10 +256,7 @@ def _unsupported_enclaves(
             UtcDefLine.enclave_id.isnot(None),
         )
     }
-    if not doctrine_enclaves:
-        return []
-    expected_enclaves = {r.enclave_id for r in expected_rows if r.enclave_id}
-    return sorted(doctrine_enclaves - expected_enclaves)
+    return sorted(expected_enclaves), sorted(doctrine_enclaves - expected_enclaves)
 
 
 def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
@@ -319,12 +320,16 @@ def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
             if l.delta != 0
         ]
 
+    supported_enclaves, unsupported_enclaves = _enclave_support(
+        db, utc, expected_rows
+    )
     return UtcCompletenessOut(
         utc_instance_id=utc.id,
         status=status_value,
         lines=lines,
         def_variance=def_variance,
-        unsupported_enclave_ids=_unsupported_enclaves(db, utc, expected_rows),
+        unsupported_enclave_ids=unsupported_enclaves,
+        supported_enclave_ids=supported_enclaves,
     )
 
 
