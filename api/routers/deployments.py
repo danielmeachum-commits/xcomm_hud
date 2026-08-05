@@ -275,8 +275,24 @@ def _completeness(db: Session, utc: UtcInstance) -> UtcCompletenessOut:
             lines=_compare(db, {}, actual),
         )
 
-    expected = {r.equipment_type_id: r.quantity for r in expected_rows}
-    enclave_by_type = {r.equipment_type_id: r.enclave_id for r in expected_rows}
+    # SUM, not last-wins: a type can now legitimately have one row per enclave,
+    # and the comparison stays per type because that's what actual counts can
+    # be attributed to — bulk holdings carry no enclave at all.
+    expected: dict[int, int] = {}
+    for r in expected_rows:
+        expected[r.equipment_type_id] = (
+            expected.get(r.equipment_type_id, 0) + r.quantity
+        )
+    # Label a type with its enclave only when every row agrees. A type spanning
+    # two enclaves gets no label rather than one of them — a NIPR badge on a
+    # count that includes SIPR switches would be worse than none.
+    enclave_by_type: dict[int, int | None] = {}
+    for r in expected_rows:
+        if r.equipment_type_id in enclave_by_type:
+            if enclave_by_type[r.equipment_type_id] != r.enclave_id:
+                enclave_by_type[r.equipment_type_id] = None
+        else:
+            enclave_by_type[r.equipment_type_id] = r.enclave_id
     lines = _compare(db, expected, actual, enclave_by_type)
     if any(l.delta < 0 for l in lines):
         status_value = "short"
@@ -493,18 +509,21 @@ def replace_utc_lines(
     at a permanent shortfall they have no way to acknowledge.
     """
     utc = _load_utc(db, utc_id, workspace)
-    merged: dict[int, UtcInstanceLineIn] = {}
+    # Keyed by (type, enclave), matching the widened unique constraint: the
+    # same type under two enclaves is two legitimate lines, not a duplicate.
+    merged: dict[tuple[int, int | None], UtcInstanceLineIn] = {}
     for line in body:
         _load_type(db, line.equipment_type_id, workspace)
         if line.quantity < 0:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, "Quantity cannot be negative."
             )
-        # The unique constraint would reject duplicates anyway; folding them is
-        # friendlier than failing a whole save over a repeated row.
-        existing = merged.get(line.equipment_type_id)
+        # The unique constraint would reject true duplicates anyway; folding
+        # them is friendlier than failing a whole save over a repeated row.
+        key = (line.equipment_type_id, line.enclave_id)
+        existing = merged.get(key)
         if existing is None:
-            merged[line.equipment_type_id] = line
+            merged[key] = line
         else:
             existing.quantity += line.quantity
 
@@ -766,9 +785,21 @@ def deploy_utc(
             workspace_id=workspace.id,
         )
 
-    holdings: list[EquipmentHolding] = []
+    # Bulk gear is counted per type, and `equipment_holding` is unique on
+    # (utc, type) — so two lines of the same type under different enclaves have
+    # to fold into one holding. The per-enclave split still reaches the
+    # expectation snapshot below, which is where it's meaningful.
+    folded: dict[int, EquipmentHoldingIn] = {}
     for holding in body.holdings:
         _load_type(db, holding.equipment_type_id, workspace)
+        existing = folded.get(holding.equipment_type_id)
+        if existing is None:
+            folded[holding.equipment_type_id] = holding.model_copy()
+        else:
+            existing.authorized_qty += holding.authorized_qty
+            existing.on_hand_qty += holding.on_hand_qty
+    holdings: list[EquipmentHolding] = []
+    for holding in folded.values():
         row = EquipmentHolding(
             workspace_id=workspace.id,
             utc_instance_id=utc.id,
@@ -784,31 +815,23 @@ def deploy_utc(
     # a UTC routinely ships without the stack for an enclave the team isn't
     # supporting, and those omissions are deliberate. Seeding from the def
     # would report them as shortfalls for the life of the deployment.
-    expected: dict[int, int] = {}
-    # First enclave seen for a type wins. A type can in principle appear under
-    # two enclaves in one UTC; the snapshot is per type, so it records one.
-    # That is a display detail — completeness still counts by type.
-    expected_enclave: dict[int, int | None] = {}
-
-    def _note_enclave(type_id: int, enclave_id: int | None) -> None:
-        if enclave_id is not None and expected_enclave.get(type_id) is None:
-            expected_enclave[type_id] = enclave_id
-
+    # Keyed by (type, enclave) so a UTC bringing NIPR and SIPR switches records
+    # them as two lines. Collapsing to one would make "leave the SIPR stack
+    # home" unrepresentable in the snapshot the completeness check reads.
+    expected: dict[tuple[int, int | None], int] = {}
     for eq_type, _code, item in resolved:
-        expected[eq_type.id] = expected.get(eq_type.id, 0) + 1
-        _note_enclave(eq_type.id, item.enclave_id)
+        key = (eq_type.id, item.enclave_id)
+        expected[key] = expected.get(key, 0) + 1
     for holding in body.holdings:
-        expected[holding.equipment_type_id] = (
-            expected.get(holding.equipment_type_id, 0) + holding.authorized_qty
-        )
-        _note_enclave(holding.equipment_type_id, holding.enclave_id)
-    for type_id, quantity in expected.items():
+        key = (holding.equipment_type_id, holding.enclave_id)
+        expected[key] = expected.get(key, 0) + holding.authorized_qty
+    for (type_id, enclave_id), quantity in expected.items():
         db.add(
             UtcInstanceLine(
                 utc_instance_id=utc.id,
                 equipment_type_id=type_id,
                 quantity=quantity,
-                enclave_id=expected_enclave.get(type_id),
+                enclave_id=enclave_id,
             )
         )
 

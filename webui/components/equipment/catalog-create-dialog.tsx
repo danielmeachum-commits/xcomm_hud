@@ -33,6 +33,7 @@ import type {
   UtcDef,
   UtcRoleHint,
 } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -67,6 +68,9 @@ async function post(url: string, body: unknown): Promise<string | null> {
 interface LineDraft {
   equipment_type_id: number | ""
   quantity: number
+  /** A type may appear once per enclave, so this is part of the line's
+   *  identity, not decoration. */
+  enclave_id: number | null
 }
 
 interface UtcSlotDraft {
@@ -206,6 +210,7 @@ export function CatalogCreateDialog({
           .map((l) => ({
             equipment_type_id: Number(l.equipment_type_id),
             quantity: l.quantity,
+            enclave_id: l.enclave_id,
           })),
       })
     } else {
@@ -385,7 +390,7 @@ export function CatalogCreateDialog({
                   >
                     <select
                       aria-label="Equipment type"
-                      className={SELECT_CLASS + " flex-1"}
+                      className={cn(SELECT_CLASS, "flex-1")}
                       value={l.equipment_type_id}
                       disabled={pending}
                       onChange={(e) =>
@@ -410,6 +415,35 @@ export function CatalogCreateDialog({
                         </option>
                       ))}
                     </select>
+                    {enclaves.length > 0 && (
+                      <select
+                        aria-label="Enclave for this line"
+                        className={cn(SELECT_CLASS, "w-32")}
+                        value={l.enclave_id ?? ""}
+                        disabled={pending}
+                        onChange={(e) =>
+                          setLines(
+                            lines.map((x, j) =>
+                              j === i
+                                ? {
+                                    ...x,
+                                    enclave_id: e.target.value
+                                      ? Number(e.target.value)
+                                      : null,
+                                  }
+                                : x,
+                            ),
+                          )
+                        }
+                      >
+                        <option value="">Common</option>
+                        {enclaves.map((en) => (
+                          <option key={en.id} value={en.id}>
+                            {en.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </QuantityRow>
                 ))}
                 <Button
@@ -421,7 +455,7 @@ export function CatalogCreateDialog({
                   onClick={() =>
                     setLines([
                       ...lines,
-                      { equipment_type_id: "", quantity: 1 },
+                      { equipment_type_id: "", quantity: 1, enclave_id: null },
                     ])
                   }
                 >
@@ -456,7 +490,7 @@ export function CatalogCreateDialog({
                   >
                     <select
                       aria-label="UTC definition"
-                      className={SELECT_CLASS + " flex-1"}
+                      className={cn(SELECT_CLASS, "flex-1")}
                       value={s.utc_def_id}
                       disabled={pending}
                       onChange={(e) =>
@@ -483,7 +517,7 @@ export function CatalogCreateDialog({
                     </select>
                     <select
                       aria-label="Role"
-                      className={SELECT_CLASS + " w-32"}
+                      className={cn(SELECT_CLASS, "w-32")}
                       value={s.role_hint}
                       disabled={pending}
                       onChange={(e) =>

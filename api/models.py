@@ -1609,8 +1609,23 @@ class UtcDefLine(Base):
 
     __tablename__ = "utc_def_line"
     __table_args__ = (
+        # Once per type PER ENCLAVE: a UTC can bring two NIPR switches and two
+        # SIPR switches, and those have to be separate lines or the wizard
+        # can't drop one enclave's stack without dropping the other's.
         UniqueConstraint(
-            "utc_def_id", "equipment_type_id", name="uq_utc_def_line_type"
+            "utc_def_id",
+            "equipment_type_id",
+            "enclave_id",
+            name="uq_utc_def_line_type_enclave",
+        ),
+        # NULLs are distinct in a UNIQUE constraint, so the untagged slice
+        # needs its own guard — that case really is a duplicate.
+        Index(
+            "uq_utc_def_line_type_no_enclave",
+            "utc_def_id",
+            "equipment_type_id",
+            unique=True,
+            postgresql_where=text("enclave_id IS NULL"),
         ),
     )
 
@@ -1805,7 +1820,15 @@ class UtcInstanceLine(Base):
         UniqueConstraint(
             "utc_instance_id",
             "equipment_type_id",
-            name="uq_utc_instance_line_type",
+            "enclave_id",
+            name="uq_utc_instance_line_type_enclave",
+        ),
+        Index(
+            "uq_utc_instance_line_type_no_enclave",
+            "utc_instance_id",
+            "equipment_type_id",
+            unique=True,
+            postgresql_where=text("enclave_id IS NULL"),
         ),
     )
 

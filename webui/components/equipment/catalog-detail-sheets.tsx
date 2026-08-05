@@ -321,7 +321,7 @@ export function CapabilityEditor({
           <div className="flex gap-1.5">
             <select
               aria-label="Capability kind"
-              className={SELECT_CLASS + " flex-1"}
+              className={cn(SELECT_CLASS, "flex-1")}
               value={cap.kind}
               disabled={disabled}
               onChange={(e) => {
@@ -645,7 +645,9 @@ export function EquipmentTypeSheet({
                         disabled={pending}
                       />
                       <span className="text-[11px] text-muted-foreground">
-                        National Stock Number — identifies this exact item.
+                        National Stock Number — identifies this model of gear,
+                        not an individual unit. Every one of these shares it;
+                        serials tell them apart.
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
@@ -762,7 +764,10 @@ export function EquipmentTypeSheet({
                         ? `Serialized · IDs start ${type.id_prefix}`
                         : "Bulk (no serial)"}
                     </Field>
-                    <Field label="NSN" hint="National Stock Number">
+                    <Field
+                      label="NSN"
+                      hint="National Stock Number — identifies the model, not an individual unit"
+                    >
                       {type.nsn || "—"}
                     </Field>
                     <Field
@@ -973,17 +978,38 @@ export function UtcDefSheet({
                       </p>
                       <div className="mt-1 flex flex-col gap-1.5">
                         {def.lines.map((l) => (
-                          <div key={l.id} className="flex items-center gap-2">
-                            <span className="min-w-0 flex-1 truncate text-sm">
-                              {l.equipment_type_short_name ??
-                                l.equipment_type_title}
-                              <span className="ml-1 text-xs text-muted-foreground">
-                                ×{l.quantity}
+                          <div
+                            key={l.id}
+                            className="flex flex-col gap-1 rounded-md border border-border p-2"
+                          >
+                            {/* Row identity above its own control rather than
+                                beside it — side-by-side truncated the name to
+                                nothing in this sheet's width, so the dropdown
+                                referred to something invisible. */}
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-sm font-medium">
+                                {l.equipment_type_short_name ??
+                                  l.equipment_type_title}
                               </span>
-                            </span>
+                              <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                                ×{l.quantity}
+                                {!l.serialized && " bulk"}
+                              </span>
+                            </div>
+                            {l.equipment_type_short_name &&
+                              l.equipment_type_title &&
+                              l.equipment_type_short_name !==
+                                l.equipment_type_title && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  {l.equipment_type_title}
+                                </span>
+                              )}
                             <select
-                              aria-label="Enclave for this line"
-                              className={SELECT_CLASS + " w-36"}
+                              aria-label={`Enclave for ${
+                                l.equipment_type_short_name ??
+                                l.equipment_type_title
+                              }`}
+                              className={cn(SELECT_CLASS, "h-8")}
                               value={lineEnclaves[l.id] ?? ""}
                               disabled={pending}
                               onChange={(e) =>

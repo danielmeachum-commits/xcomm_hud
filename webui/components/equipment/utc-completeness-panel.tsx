@@ -269,7 +269,10 @@ export function UtcCompletenessPanel({
                         </span>
                       ) : (
                         <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          Common to every enclave
+                          {/* Covers both gear common to every enclave and a
+                              type that spans more than one, which the API
+                              deliberately leaves unlabelled. */}
+                          Not enclave-specific
                         </span>
                       )}
                     </td>

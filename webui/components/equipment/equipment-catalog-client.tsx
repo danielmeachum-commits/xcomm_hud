@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ViewTabs } from "@/components/ui/view-tabs"
+import { isNeutralEnclaveColor } from "@/lib/enclave-meta"
 import {
   CAPABILITY_LABELS,
   EQUIPMENT_CATEGORY_LABELS,
@@ -57,6 +58,79 @@ function GlobalBadge() {
       <Globe className="size-3" />
       Global
     </span>
+  )
+}
+
+/** Serialized gear in a UTC, as compact chips. Replaces a bare line count,
+ *  which told you how many rows the definition had rather than what it brings.
+ *
+ *  Serialized only: bulk (cables, batteries) is quantity noise at this
+ *  altitude and would bury the tracked kit. The enclave dot is the only color
+ *  — status doesn't exist on a definition, so nothing competes with it. */
+function UtcContents({
+  def,
+  typesById,
+  enclaveById,
+}: {
+  def: UtcDef
+  typesById: Map<number, EquipmentType>
+  enclaveById: Map<number, Enclave>
+}) {
+  const serialized = def.lines.filter(
+    (l) => typesById.get(l.equipment_type_id)?.serialized ?? true,
+  )
+  const bulkCount = def.lines.length - serialized.length
+
+  if (serialized.length === 0) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {bulkCount > 0 ? `${bulkCount} bulk only` : "—"}
+      </span>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {serialized.map((l) => {
+        const t = typesById.get(l.equipment_type_id)
+        const en = l.enclave_id ? enclaveById.get(l.enclave_id) : undefined
+        return (
+          <span
+            key={l.id}
+            title={
+              (t?.title ?? "Unknown type") +
+              (en ? ` — ${en.name}` : "") +
+              ` — ${l.quantity}`
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 py-0.5 pl-1.5 pr-2 text-[11px]"
+          >
+            {en && (
+              <span
+                aria-hidden
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  isNeutralEnclaveColor(en.color) ? "bg-foreground/60" : "",
+                )}
+                style={
+                  isNeutralEnclaveColor(en.color)
+                    ? undefined
+                    : { backgroundColor: en.color ?? undefined }
+                }
+              />
+            )}
+            <span className="font-medium">{t?.short_name ?? t?.title}</span>
+            <span className="font-mono text-muted-foreground">
+              ×{l.quantity}
+            </span>
+          </span>
+        )
+      })}
+      {bulkCount > 0 && (
+        <span className="text-[11px] text-muted-foreground">
+          +{bulkCount} bulk
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -99,6 +173,10 @@ export function EquipmentCatalogClient({
   const typesById = useMemo(
     () => new Map(types.map((t) => [t.id, t])),
     [types],
+  )
+  const enclaveById = useMemo(
+    () => new Map(enclaves.map((e) => [e.id, e])),
+    [enclaves],
   )
 
   const haystacks = useMemo(
@@ -365,8 +443,8 @@ export function EquipmentCatalogClient({
             <TableRow>
               <TableHead className="w-28">Code</TableHead>
               <TableHead>Name</TableHead>
-              <TableHead className="w-24 text-right">Line items</TableHead>
-              <TableHead>Capabilities</TableHead>
+              <TableHead>Contents</TableHead>
+              <TableHead className="w-56">Capabilities</TableHead>
               <TableHead className="w-24 text-right">Scope</TableHead>
             </TableRow>
           </TableHeader>
@@ -381,8 +459,12 @@ export function EquipmentCatalogClient({
                   <CodeBadge code={d.code} />
                 </TableCell>
                 <TableCell className="font-medium">{d.name}</TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground">
-                  {d.lines.length}
+                <TableCell>
+                  <UtcContents
+                    def={d}
+                    typesById={typesById}
+                    enclaveById={enclaveById}
+                  />
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {aggregateCapabilities(d.lines, typesById)
