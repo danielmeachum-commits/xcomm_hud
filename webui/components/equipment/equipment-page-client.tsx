@@ -222,7 +222,7 @@ export function EquipmentPageClient({
       </div>
 
       {view === "topology" ? (
-        <NetworkCanvas topology={topology} />
+        <NetworkCanvas topology={topology} enclaves={enclaves} />
       ) : view === "utcs" ? (
         utcs.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-12 text-center">

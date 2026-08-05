@@ -33,6 +33,7 @@ import {
 import { statusEdgeAnimates, statusEdgeStroke, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
+  Enclave,
   Equipment,
   EquipmentLink,
   NetworkTopology,
@@ -111,6 +112,7 @@ interface EquipmentNodeData extends Record<string, unknown> {
   equipment: Equipment
   utcName: string | null
   siteName: string | null
+  enclave: Enclave | null
 }
 
 function EquipmentNode({ data }: NodeProps) {
@@ -118,8 +120,19 @@ function EquipmentNode({ data }: NodeProps) {
   const eq = d.equipment
   const Icon = equipmentIcon(eq.type_category)
   const rollup = equipmentRollup(eq)
+  // Enclave rides the LEFT BORDER only. Status owns the node's indicator and
+  // its edges, and an operator scanning for what's down must not have that
+  // signal competing with a hue that means something else entirely.
+  const accent = d.enclave?.color
   return (
-    <div className="min-w-[180px] rounded-lg border border-border bg-card p-2.5 shadow-sm">
+    <div
+      className="min-w-[180px] rounded-lg border border-border bg-card p-2.5 shadow-sm"
+      style={
+        accent
+          ? { borderLeftColor: accent, borderLeftWidth: 3 }
+          : undefined
+      }
+    >
       <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
       <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
       <div className="flex items-center gap-2">
@@ -133,6 +146,7 @@ function EquipmentNode({ data }: NodeProps) {
       <div className="mt-0.5 text-[10px] text-muted-foreground">
         {d.siteName}
         {d.utcName ? ` · ${d.utcName}` : ""}
+        {d.enclave ? ` · ${d.enclave.short_name || d.enclave.name}` : ""}
       </div>
       {eq.capabilities.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
@@ -184,8 +198,37 @@ function edgeFor(
   }
 }
 
-function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
+function NetworkCanvasInner({
+  topology,
+  enclaves,
+}: {
+  topology: NetworkTopology
+  enclaves: Enclave[]
+}) {
   const [level, setLevel] = useState<Level>("sites")
+  // Filtering is the half of enclave-awareness that costs no visual channel,
+  // so it carries the weight here rather than the color accent.
+  const [enclaveFilter, setEnclaveFilter] = useState<number | "all">("all")
+
+  const enclaveById = useMemo(
+    () => new Map(enclaves.map((e) => [e.id, e])),
+    [enclaves],
+  )
+
+  /** Gear the current filter admits. Untagged gear stays visible under every
+   *  filter: the RF shot and the power that carry an enclave's traffic are
+   *  part of that picture even though they belong to no single one. */
+  const visibleEquipment = useMemo(() => {
+    if (enclaveFilter === "all") return topology.equipment
+    return topology.equipment.filter(
+      (e) => e.enclave_id === enclaveFilter || e.enclave_id === null,
+    )
+  }, [topology.equipment, enclaveFilter])
+
+  const visibleIds = useMemo(
+    () => new Set(visibleEquipment.map((e) => e.id)),
+    [visibleEquipment],
+  )
 
   const equipmentById = useMemo(
     () => new Map(topology.equipment.map((e) => [e.id, e])),
@@ -209,14 +252,14 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
         data: {
           name: s.name,
           utcs: topology.utc_instances.filter((u) => u.site_id === s.site_id),
-          equipment: topology.equipment.filter((e) => e.site_id === s.site_id),
+          equipment: visibleEquipment.filter((e) => e.site_id === s.site_id),
         } satisfies SiteNodeData,
       }))
     }
     // Expanded: lay gear out in a column per site, then let saved positions
     // win so a tidied layout survives a refresh.
     const bySite = new Map<number, Equipment[]>()
-    for (const e of topology.equipment) {
+    for (const e of visibleEquipment) {
       const list = bySite.get(e.site_id) ?? []
       list.push(e)
       bySite.set(e.site_id, list)
@@ -239,12 +282,13 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
               ? (utcById.get(e.utc_instance_id)?.name ?? null)
               : null,
             siteName: e.site_name,
+            enclave: e.enclave_id ? (enclaveById.get(e.enclave_id) ?? null) : null,
           } satisfies EquipmentNodeData,
         })
       })
     })
     return nodes
-  }, [level, topology, positionById, utcById])
+  }, [level, topology, visibleEquipment, positionById, utcById, enclaveById])
 
   const [nodes, setNodes] = useState<Node[]>(initialNodes)
   useEffect(() => setNodes(initialNodes), [initialNodes])
@@ -287,8 +331,13 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
   )
 
   const edges = useMemo<Edge[]>(() => {
+    // A link is only drawable when both ends are on the canvas — otherwise the
+    // filter would leave edges hanging off nodes that aren't there.
+    const links = topology.links.filter(
+      (l) => visibleIds.has(l.a_equipment_id) && visibleIds.has(l.b_equipment_id),
+    )
     if (level === "equipment") {
-      return topology.links.map((l) =>
+      return links.map((l) =>
         edgeFor(l, `eq-${l.a_equipment_id}`, `eq-${l.b_equipment_id}`),
       )
     }
@@ -296,7 +345,7 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
     // kind, labelled with the count. Same-site links are internal detail and
     // would just clutter the leadership view.
     const grouped = new Map<string, { link: EquipmentLink; count: number }>()
-    for (const l of topology.links) {
+    for (const l of links) {
       if (l.a_site_id == null || l.b_site_id == null) continue
       if (l.a_site_id === l.b_site_id) continue
       const key = `${l.a_site_id}-${l.b_site_id}-${l.kind}`
@@ -314,7 +363,7 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
           : LINK_KIND_LABELS[link.kind],
       ),
     )
-  }, [level, topology.links])
+  }, [level, topology.links, visibleIds])
 
   const crossSite = topology.links.filter(
     (l) => l.a_site_id != null && l.b_site_id != null && l.a_site_id !== l.b_site_id,
@@ -334,10 +383,30 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
       <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
       <Controls />
       <Panel position="top-left" className="rounded-md border bg-background/90 px-2 py-1 text-xs">
-        {topology.equipment.length} items · {topology.links.length} links ·{" "}
-        {crossSite} cross-site
+        {visibleEquipment.length}
+        {enclaveFilter !== "all" && ` of ${topology.equipment.length}`} items ·{" "}
+        {topology.links.length} links · {crossSite} cross-site
       </Panel>
-      <Panel position="top-right">
+      <Panel position="top-right" className="flex items-center gap-1.5">
+        {enclaves.length > 0 && (
+          <select
+            aria-label="Filter by enclave"
+            value={enclaveFilter}
+            onChange={(e) =>
+              setEnclaveFilter(
+                e.target.value === "all" ? "all" : Number(e.target.value),
+              )
+            }
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="all">All enclaves</option>
+            {enclaves.map((en) => (
+              <option key={en.id} value={en.id}>
+                {en.name}
+              </option>
+            ))}
+          </select>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -361,7 +430,13 @@ function NetworkCanvasInner({ topology }: { topology: NetworkTopology }) {
   )
 }
 
-export function NetworkCanvas({ topology }: { topology: NetworkTopology }) {
+export function NetworkCanvas({
+  topology,
+  enclaves = [],
+}: {
+  topology: NetworkTopology
+  enclaves?: Enclave[]
+}) {
   if (topology.equipment.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border p-12 text-sm text-muted-foreground">
@@ -372,7 +447,7 @@ export function NetworkCanvas({ topology }: { topology: NetworkTopology }) {
   return (
     <div className="h-[calc(100vh-220px)] w-full overflow-hidden rounded-lg border border-border">
       <ReactFlowProvider>
-        <NetworkCanvasInner topology={topology} />
+        <NetworkCanvasInner topology={topology} enclaves={enclaves} />
       </ReactFlowProvider>
     </div>
   )
