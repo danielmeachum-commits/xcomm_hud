@@ -232,6 +232,67 @@ export interface CapabilityDraft {
   materialize_by_default: boolean
 }
 
+/** Which enclaves a model of gear can serve. Checkboxes rather than a single
+ *  select because a type can be capable of several — a switch works on NIPR or
+ *  SIPR. Which one a *particular* box is on is set per instance, since crypto
+ *  separation means one box serves one network at a time.
+ *
+ *  Checking nothing means unrestricted, which the copy has to say out loud —
+ *  an empty set reads as "capable of nothing" otherwise. */
+export function EnclaveCapabilityPicker({
+  enclaves,
+  value,
+  onChange,
+  disabled,
+}: {
+  enclaves: Enclave[]
+  value: number[]
+  onChange: (next: number[]) => void
+  disabled: boolean
+}) {
+  if (enclaves.length === 0) return null
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        {enclaves.map((en) => {
+          const on = value.includes(en.id)
+          return (
+            <label
+              key={en.id}
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                on ? "" : "border-dashed text-muted-foreground",
+                on ? enclaveChipClass(en.color) : "",
+              )}
+              style={on ? enclaveChipStyle(en.color) : undefined}
+            >
+              <input
+                type="checkbox"
+                className="size-3"
+                checked={on}
+                disabled={disabled}
+                onChange={() =>
+                  onChange(
+                    on
+                      ? value.filter((id) => id !== en.id)
+                      : [...value, en.id],
+                  )
+                }
+              />
+              {en.short_name || en.name}
+            </label>
+          )
+        })}
+      </div>
+      <span className="text-[11px] text-muted-foreground">
+        {value.length === 0
+          ? "None checked — this gear can be assigned to any enclave."
+          : "A specific piece of this gear is assigned one of these when it's registered."}
+      </span>
+    </div>
+  )
+}
+
 /** Rows the operator edits in place. Order is meaningful: it becomes
  *  `display_order` server-side. */
 export function CapabilityEditor({
@@ -367,6 +428,7 @@ interface TypeForm {
   serialized: boolean
   description: string
   capabilities: CapabilityDraft[]
+  enclave_ids: number[]
 }
 
 function typeForm(t: EquipmentType): TypeForm {
@@ -388,17 +450,20 @@ function typeForm(t: EquipmentType): TypeForm {
       label: c.label,
       materialize_by_default: c.materialize_by_default,
     })),
+    enclave_ids: [...t.enclave_ids],
   }
 }
 
 export function EquipmentTypeSheet({
   type,
   canEdit,
+  enclaves = [],
   tagSuggestions = [],
   onClose,
 }: {
   type: EquipmentType | null
   canEdit: boolean
+  enclaves?: Enclave[]
   tagSuggestions?: string[]
   onClose: () => void
 }) {
@@ -443,6 +508,21 @@ export function EquipmentTypeSheet({
     // Capabilities live on their own endpoint (wholesale replace), so this is
     // a second call. Only make it when the list actually changed — an
     // unnecessary replace churns rows other UTCs read.
+    const enclavesChanged =
+      [...form.enclave_ids].sort().join(",") !==
+      [...type.enclave_ids].sort().join(",")
+    const encErr = enclavesChanged
+      ? await put(
+          `/api/be/equipment-types/${type.id}/enclaves`,
+          form.enclave_ids,
+        )
+      : null
+    if (encErr) {
+      setPending(false)
+      setError(`Details saved, but enclaves failed: ${encErr}`)
+      router.refresh()
+      return
+    }
     const capsErr = capabilitiesChanged(type, form.capabilities)
       ? await put(
           `/api/be/equipment-types/${type.id}/capabilities`,
@@ -647,6 +727,17 @@ export function EquipmentTypeSheet({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
+                    <Label>Enclaves this gear can serve</Label>
+                    <EnclaveCapabilityPicker
+                      enclaves={enclaves}
+                      value={form.enclave_ids}
+                      onChange={(enclave_ids) =>
+                        setForm({ ...form, enclave_ids })
+                      }
+                      disabled={pending}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
                     <Label>Capabilities</Label>
                     <CapabilityEditor
                       value={form.capabilities}
@@ -702,6 +793,32 @@ export function EquipmentTypeSheet({
                       </span>
                     ) : (
                       "—"
+                    )}
+                  </Field>
+                  <Field label="Enclaves">
+                    {type.enclave_ids.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        Any — none declared
+                      </span>
+                    ) : (
+                      <span className="flex flex-wrap gap-1">
+                        {type.enclave_ids.map((id) => {
+                          const en = enclaves.find((e) => e.id === id)
+                          if (!en) return null
+                          return (
+                            <span
+                              key={id}
+                              className={cn(
+                                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                                enclaveChipClass(en.color),
+                              )}
+                              style={enclaveChipStyle(en.color)}
+                            >
+                              {en.short_name || en.name}
+                            </span>
+                          )
+                        })}
+                      </span>
                     )}
                   </Field>
                   <Field label="Capabilities">

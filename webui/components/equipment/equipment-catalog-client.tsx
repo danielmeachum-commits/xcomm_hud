@@ -160,6 +160,7 @@ export function EquipmentCatalogClient({
           kind={tab}
           types={types}
           utcDefs={utcDefs}
+          enclaves={enclaves}
           isAdmin={isAdmin}
         />
       </div>
@@ -447,6 +448,7 @@ export function EquipmentCatalogClient({
       )}
 
       <EquipmentTypeSheet
+        enclaves={enclaves}
         type={selectedType}
         canEdit={!!selectedType && canEditRow(selectedType.is_global)}
         tagSuggestions={allTags}

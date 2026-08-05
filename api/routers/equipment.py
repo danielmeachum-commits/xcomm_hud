@@ -31,6 +31,7 @@ from equipment_status import (
 from models import (
     CapabilityGatewayLink,
     CapabilityServiceLink,
+    Enclave,
     Equipment,
     EquipmentCapability,
     EquipmentType,
@@ -296,6 +297,7 @@ def create_equipment(
             },
         )
 
+    check_enclave_allowed(db, eq_type, body.enclave_id)
     eq = Equipment(
         workspace_id=workspace.id,
         equipment_type_id=eq_type.id,
@@ -331,6 +333,45 @@ def create_equipment(
     db.refresh(eq)
     notify(background_tasks)
     return equipment_out(db, eq)
+
+
+def check_enclave_allowed(
+    db: Session,
+    eq_type: EquipmentType,
+    enclave_id: int | None,
+) -> None:
+    """Reject assigning gear to an enclave its type isn't declared capable of.
+
+    An empty declaration means unrestricted, not "capable of nothing" — the
+    same convention capabilities use. That keeps this from blocking operators
+    whose catalog simply hasn't been filled in yet, while still catching the
+    real mistake: putting a NIPR-only box on SIPR.
+
+    Applied on write only. Narrowing a type's declarations later does NOT
+    invalidate gear already recorded, for the same reason editing capabilities
+    doesn't rewrite materialized rows.
+    """
+    if enclave_id is None:
+        return
+    allowed = {link.enclave_id for link in eq_type.enclave_links}
+    if not allowed or enclave_id in allowed:
+        return
+    names = (
+        db.query(Enclave.name)
+        .filter(Enclave.id.in_(allowed))
+        .order_by(Enclave.name)
+        .all()
+    )
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        {
+            "message": (
+                f"{eq_type.short_name or eq_type.title} isn't declared capable "
+                "of that enclave."
+            ),
+            "allowed": [n for (n,) in names],
+        },
+    )
 
 
 def materialize_capabilities(
@@ -400,6 +441,14 @@ def patch_equipment(
         _site_in_workspace(db, data["site_id"], workspace)
     if "equipment_type_id" in data and data["equipment_type_id"] is not None:
         _load_type(db, data["equipment_type_id"], workspace)
+    if "enclave_id" in data:
+        # Check against the type this row will HAVE after the patch, not the
+        # one it had before — both fields can move in the same request.
+        target_type = db.get(
+            EquipmentType, data.get("equipment_type_id") or eq.equipment_type_id
+        )
+        if target_type is not None:
+            check_enclave_allowed(db, target_type, data["enclave_id"])
     if "equipment_code" in data and data["equipment_code"]:
         eq_type = db.get(EquipmentType, data.get("equipment_type_id") or eq.equipment_type_id)
         code, conflict = resolve_code(

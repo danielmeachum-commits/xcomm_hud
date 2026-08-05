@@ -7,6 +7,7 @@ import { useState } from "react"
 import {
   CATEGORY_VALUES,
   CapabilityEditor,
+  EnclaveCapabilityPicker,
   type CapabilityDraft,
 } from "@/components/equipment/catalog-detail-sheets"
 import { TagsInput } from "@/components/equipment/tags-input"
@@ -26,6 +27,7 @@ import {
   EQUIPMENT_CATEGORY_LABELS,
 } from "@/lib/equipment-meta"
 import type {
+  Enclave,
   EquipmentCategory,
   EquipmentType,
   UtcDef,
@@ -121,11 +123,13 @@ export function CatalogCreateDialog({
   kind,
   types,
   utcDefs,
+  enclaves = [],
   isAdmin,
 }: {
   kind: CatalogKind
   types: EquipmentType[]
   utcDefs: UtcDef[]
+  enclaves?: Enclave[]
   isAdmin: boolean
 }) {
   const router = useRouter()
@@ -145,6 +149,7 @@ export function CatalogCreateDialog({
   const [serialized, setSerialized] = useState(true)
   const [idPrefix, setIdPrefix] = useState("R")
   const [capabilities, setCapabilities] = useState<CapabilityDraft[]>([])
+  const [typeEnclaves, setTypeEnclaves] = useState<number[]>([])
   // UTC def / package
   const [code, setCode] = useState("")
   const [lines, setLines] = useState<LineDraft[]>([])
@@ -159,6 +164,7 @@ export function CatalogCreateDialog({
     setSerialized(true)
     setIdPrefix("R")
     setCapabilities([])
+    setTypeEnclaves([])
     setCode("")
     setLines([])
     setSlots([])
@@ -183,6 +189,7 @@ export function CatalogCreateDialog({
         serialized,
         id_prefix: idPrefix.trim() || "R",
         description: description.trim() || null,
+        enclave_ids: typeEnclaves,
         capabilities: capabilities.map((c) => ({
           kind: c.kind,
           label: c.label.trim() || CAPABILITY_LABELS[c.kind],
@@ -331,6 +338,16 @@ export function CatalogCreateDialog({
                   />
                   Tracked by serial
                 </label>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <Label>Enclaves this gear can serve</Label>
+                <EnclaveCapabilityPicker
+                  enclaves={enclaves}
+                  value={typeEnclaves}
+                  onChange={setTypeEnclaves}
+                  disabled={pending}
+                />
               </div>
 
               <div className="flex flex-col gap-1">

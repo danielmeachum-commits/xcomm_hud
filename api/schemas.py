@@ -264,6 +264,7 @@ class ExportedSite(BaseModel):
 class ExportedService(BaseModel):
     site_name: str
     service_template_name: Optional[str] = None
+    enclave_name: Optional[str] = None
     name: str
     kind: ServiceKind = "other"
     category: ServiceCategory = "other"
@@ -303,6 +304,22 @@ class ExportedWorkspaceMeta(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class ExportedEnclave(BaseModel):
+    """A workspace-LOCAL enclave only.
+
+    Global enclaves aren't exported — they're shared by definition and resolve
+    on import by name against the target instance. Parent travels by name for
+    the same reason.
+    """
+
+    name: str
+    short_name: Optional[str] = None
+    color: Optional[str] = None
+    display_order: int = 0
+    parent_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class ExportedEquipmentTypeCapability(BaseModel):
     kind: CapabilityKind
     label: str
@@ -331,11 +348,14 @@ class ExportedEquipmentType(BaseModel):
     icon: Optional[str] = None
     description: Optional[str] = None
     capabilities: list[ExportedEquipmentTypeCapability] = Field(default_factory=list)
+    # By name, like every other cross-reference in the envelope.
+    enclave_names: list[str] = Field(default_factory=list)
 
 
 class ExportedUtcDefLine(BaseModel):
     equipment_type_title: str
     quantity: int = 1
+    enclave_name: Optional[str] = None
     notes: Optional[str] = None
     display_order: int = 0
 
@@ -392,6 +412,7 @@ class ExportedEquipment(BaseModel):
     equipment_code: str
     serial_number: Optional[str] = None
     equipment_type_title: str
+    enclave_name: Optional[str] = None
     site_name: str
     utc_name: Optional[str] = None
     notes: Optional[str] = None
@@ -420,7 +441,8 @@ class WorkspaceExport(BaseModel):
     # equipment tier. Old (v1/v2) payloads remain valid — every newer list
     # defaults to empty, so importing an older export just yields a
     # workspace with no equipment.
-    format_version: Literal[1, 2, 3] = 3
+    # v4 added enclaves. Importing a v3 payload just yields untagged rows.
+    format_version: Literal[1, 2, 3, 4] = 4
     exported_at: datetime.datetime
     workspace: ExportedWorkspaceMeta
     sites: list[ExportedSite] = Field(default_factory=list)
@@ -432,6 +454,9 @@ class WorkspaceExport(BaseModel):
     work_centers: list["ExportedWorkCenter"] = Field(default_factory=list)
     teams: list["ExportedTeam"] = Field(default_factory=list)
     personnel: list["ExportedPersonnel"] = Field(default_factory=list)
+    # --- v4: enclaves. Before the equipment tier, because types reference
+    # them by name and the importer resolves in list order. ---
+    enclaves: list[ExportedEnclave] = Field(default_factory=list)
     # --- v3: equipment tier ---
     equipment_types: list[ExportedEquipmentType] = Field(default_factory=list)
     utc_defs: list[ExportedUtcDef] = Field(default_factory=list)
@@ -1759,6 +1784,9 @@ class EquipmentTypeIn(BaseModel):
     icon: Optional[str] = None
     description: Optional[str] = None
     capabilities: list[EquipmentTypeCapabilityIn] = Field(default_factory=list)
+    # Enclaves this model of gear can serve. Empty = unrestricted, not
+    # "capable of nothing".
+    enclave_ids: list[int] = Field(default_factory=list)
 
 
 class EquipmentTypePatch(BaseModel):
@@ -1799,6 +1827,8 @@ class EquipmentTypeOut(_ORM):
     # True when workspace_id is NULL — the UI gates editing on this, since
     # only admins may touch the global catalog.
     is_global: bool = False
+    # Enclaves this model of gear can serve. Empty = unrestricted.
+    enclave_ids: list[int] = Field(default_factory=list)
 
 
 class UtcDefLineIn(BaseModel):

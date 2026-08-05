@@ -21,10 +21,12 @@ from sqlalchemy.orm import Session, selectinload
 from db import get_db
 from deps import get_current_workspace, requires
 from models import (
+    Enclave,
     Equipment,
     EquipmentHolding,
     EquipmentType,
     EquipmentTypeCapability,
+    EquipmentTypeEnclave,
     PackageDef,
     PackageDefUtc,
     User,
@@ -96,7 +98,34 @@ def _norm_tags(tags: list[str]) -> list[str]:
 def _type_out(row: EquipmentType) -> EquipmentTypeOut:
     out = EquipmentTypeOut.model_validate(row)
     out.is_global = row.workspace_id is None
+    out.enclave_ids = sorted(link.enclave_id for link in row.enclave_links)
     return out
+
+
+def _set_type_enclaves(
+    db: Session, row: EquipmentType, enclave_ids: list[int], workspace: Workspace
+) -> None:
+    """Replace the capable-enclave set. Wholesale, like capabilities.
+
+    Validates visibility so a workspace can't declare capability for another
+    workspace's enclave. Duplicates are collapsed rather than rejected — the
+    caller sent a set, not a sequence.
+    """
+    db.query(EquipmentTypeEnclave).filter(
+        EquipmentTypeEnclave.equipment_type_id == row.id
+    ).delete(synchronize_session=False)
+    for enclave_id in dict.fromkeys(enclave_ids):
+        enclave = db.get(Enclave, enclave_id)
+        if enclave is None or (
+            enclave.workspace_id is not None
+            and enclave.workspace_id != workspace.id
+        ):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"Enclave {enclave_id} not found"
+            )
+        db.add(
+            EquipmentTypeEnclave(equipment_type_id=row.id, enclave_id=enclave.id)
+        )
 
 
 def _load_type(db: Session, type_id: int, workspace: Workspace) -> EquipmentType:
@@ -117,7 +146,10 @@ def list_equipment_types(
 ):
     rows = (
         db.query(EquipmentType)
-        .options(selectinload(EquipmentType.capabilities))
+        .options(
+            selectinload(EquipmentType.capabilities),
+            selectinload(EquipmentType.enclave_links),
+        )
         .filter(_visible(EquipmentType, workspace, include_retired))
         .order_by(EquipmentType.category, EquipmentType.title)
         .all()
@@ -142,7 +174,7 @@ def create_equipment_type(
     owner_id = None if make_global else workspace.id
     _require_write(owner_id, current_user)
 
-    payload = body.model_dump(exclude={"capabilities"})
+    payload = body.model_dump(exclude={"capabilities", "enclave_ids"})
     payload["tags"] = _norm_tags(payload.get("tags") or [])
     row = EquipmentType(workspace_id=owner_id, **payload)
     db.add(row)
@@ -154,6 +186,7 @@ def create_equipment_type(
                 **{**cap.model_dump(exclude={"display_order"}), "display_order": order},
             )
         )
+    _set_type_enclaves(db, row, body.enclave_ids, workspace)
     db.flush()
     db.refresh(row)
     notify(background_tasks)
@@ -219,6 +252,31 @@ def replace_type_capabilities(
                 materialize_by_default=cap.materialize_by_default,
             )
         )
+    db.flush()
+    db.refresh(row)
+    notify(background_tasks)
+    return _type_out(row)
+
+
+@router.put("/equipment-types/{type_id}/enclaves", response_model=EquipmentTypeOut)
+def replace_type_enclaves(
+    type_id: int,
+    body: list[int],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    """Replace which enclaves this model of gear can serve.
+
+    Like capabilities, this does NOT retroactively change already-registered
+    gear: an instance keeps whatever `enclave_id` an operator recorded, even if
+    the type stops declaring it. Narrowing the catalog must not silently
+    rewrite history.
+    """
+    row = _load_type(db, type_id, workspace)
+    _require_write(row.workspace_id, current_user)
+    _set_type_enclaves(db, row, body, workspace)
     db.flush()
     db.refresh(row)
     notify(background_tasks)

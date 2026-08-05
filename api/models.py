@@ -1485,6 +1485,40 @@ class EquipmentType(Base):
         cascade="all, delete-orphan",
         order_by="EquipmentTypeCapability.display_order",
     )
+    enclave_links: Mapped[list["EquipmentTypeEnclave"]] = relationship(
+        "EquipmentTypeEnclave",
+        cascade="all, delete-orphan",
+    )
+
+
+class EquipmentTypeEnclave(Base):
+    """Which enclaves a model of gear is *capable* of serving.
+
+    The catalog/instance split again, same as capabilities: the type declares
+    what's possible, the instance records what's actually true. A switch type
+    may be capable of NIPR and SIPR; each physical switch is assigned exactly
+    one via `equipment.enclave_id`, because crypto separation means a box
+    serves one network at a time.
+
+    An empty list means unrestricted, not "capable of nothing" — the same
+    convention the rest of the catalog uses. Declaring nothing shouldn't stop
+    an operator from tagging gear.
+    """
+
+    __tablename__ = "equipment_type_enclave"
+    __table_args__ = (
+        UniqueConstraint(
+            "equipment_type_id", "enclave_id", name="uq_equipment_type_enclave"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="CASCADE"), nullable=False
+    )
+    enclave_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="CASCADE"), nullable=False
+    )
 
 
 class EquipmentTypeCapability(Base):

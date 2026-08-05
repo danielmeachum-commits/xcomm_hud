@@ -40,7 +40,11 @@ from models import (
     Workspace,
 )
 from pubsub import notify
-from routers.equipment import equipment_out_bulk, materialize_capabilities
+from routers.equipment import (
+    check_enclave_allowed,
+    equipment_out_bulk,
+    materialize_capabilities,
+)
 from rules_engine import emit_trigger
 from schemas import (
     EquipmentHoldingIn,
@@ -727,6 +731,7 @@ def deploy_utc(
     # find the capability the wizard proposed without a second round-trip.
     caps_by_item: dict[int, dict[str, EquipmentCapability]] = {}
     for index, (eq_type, code, item) in enumerate(resolved):
+        check_enclave_allowed(db, eq_type, item.enclave_id)
         eq = Equipment(
             workspace_id=workspace.id,
             equipment_type_id=eq_type.id,

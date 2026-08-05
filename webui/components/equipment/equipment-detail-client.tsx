@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import type {
   Enclave,
   Equipment,
+  EquipmentType,
   EquipmentCapability,
   EquipmentLink,
   Event,
@@ -28,6 +29,8 @@ import type {
 interface Props {
   equipment: Equipment
   enclaves?: Enclave[]
+  /** The catalog row, for its declared capable-enclave set. */
+  equipmentType?: EquipmentType | null
   services: Service[]
   gateways: Gateway[]
   links: EquipmentLink[]
@@ -37,6 +40,7 @@ interface Props {
 export function EquipmentDetailClient({
   equipment,
   enclaves = [],
+  equipmentType = null,
   services,
   gateways,
   links,
@@ -87,7 +91,11 @@ export function EquipmentDetailClient({
           />
           <Field label="Site" value={equipment.site_name ?? "—"} />
           <Field label="UTC" value={equipment.utc_name ?? "Not in a UTC"} />
-          <EnclaveField equipment={equipment} enclaves={enclaves} />
+          <EnclaveField
+            equipment={equipment}
+            enclaves={enclaves}
+            capableIds={equipmentType?.enclave_ids ?? []}
+          />
         </dl>
         {equipment.notes && (
           <p className="mt-3 text-sm text-muted-foreground">{equipment.notes}</p>
@@ -191,12 +199,27 @@ export function EquipmentDetailClient({
 function EnclaveField({
   equipment,
   enclaves,
+  capableIds,
 }: {
   equipment: Equipment
   enclaves: Enclave[]
+  /** What this model of gear is declared capable of. Empty = unrestricted. */
+  capableIds: number[]
 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
+  const offered =
+    capableIds.length > 0
+      ? enclaves.filter((e) => capableIds.includes(e.id))
+      : enclaves
+  // A value the type no longer declares still has to render — narrowing the
+  // catalog doesn't rewrite gear already recorded, so the select must not
+  // silently show the wrong thing.
+  const current = enclaves.find((e) => e.id === equipment.enclave_id)
+  const options =
+    current && !offered.some((e) => e.id === current.id)
+      ? [...offered, current]
+      : offered
 
   async function set(value: number | null) {
     setPending(true)
@@ -228,9 +251,12 @@ function EnclaveField({
             }
           >
             <option value="">None</option>
-            {enclaves.map((en) => (
+            {options.map((en) => (
               <option key={en.id} value={en.id}>
                 {en.name}
+                {current?.id === en.id && !offered.some((o) => o.id === en.id)
+                  ? " (not declared for this type)"
+                  : ""}
               </option>
             ))}
           </select>

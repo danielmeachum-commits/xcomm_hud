@@ -763,6 +763,47 @@ export function DeployUtcWizard({
                         <Trash2 className="size-3.5" />
                       </Button>
                     </div>
+                    {enclaves.length > 0 && (
+                      <div>
+                        <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
+                          Enclave
+                        </label>
+                        <select
+                          className={selectClass}
+                          value={item.enclave_id ?? ""}
+                          onChange={(e) =>
+                            setItems((prev) =>
+                              prev.map((it, i) =>
+                                i === index
+                                  ? {
+                                      ...it,
+                                      enclave_id: e.target.value
+                                        ? Number(e.target.value)
+                                        : null,
+                                    }
+                                  : it,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">None</option>
+                          {/* Only what this model of gear is declared capable
+                              of. An empty declaration means unrestricted, so
+                              fall back to the full list rather than offering
+                              nothing. */}
+                          {(t && t.enclave_ids.length > 0
+                            ? enclaves.filter((en) =>
+                                t.enclave_ids.includes(en.id),
+                              )
+                            : enclaves
+                          ).map((en) => (
+                            <option key={en.id} value={en.id}>
+                              {en.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">

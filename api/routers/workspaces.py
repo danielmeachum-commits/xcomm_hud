@@ -28,6 +28,7 @@ from models import (
     EquipmentLink,
     EquipmentType,
     EquipmentTypeCapability,
+    EquipmentTypeEnclave,
     Gateway,
     PackageDef,
     PackageDefUtc,
@@ -50,6 +51,7 @@ from pubsub import notify
 from workspace_slug import unique_workspace_slug
 from schemas import (
     ExportedAnnotation,
+    ExportedEnclave,
     ExportedEquipment,
     ExportedEquipmentCapability,
     ExportedEquipmentHolding,
@@ -808,8 +810,39 @@ def _export_equipment(
     links = (
         db.query(EquipmentLink).filter(EquipmentLink.workspace_id == ws.id).all()
     )
+    # Enclaves travel by name like every other cross-reference. Globals and
+    # this workspace's own are both resolvable on the far side: globals by
+    # matching name, locals because they ride along in the envelope.
+    enclave_name_by_id = {
+        e.id: e.name
+        for e in db.query(Enclave).filter(
+            (Enclave.workspace_id.is_(None)) | (Enclave.workspace_id == ws.id)
+        )
+    }
+    type_enclave_names: dict[int, list[str]] = {}
+    for link in db.query(EquipmentTypeEnclave):
+        name = enclave_name_by_id.get(link.enclave_id)
+        if name:
+            type_enclave_names.setdefault(link.equipment_type_id, []).append(name)
 
     return {
+        "enclaves": [
+            ExportedEnclave(
+                name=e.name,
+                short_name=e.short_name,
+                color=e.color,
+                display_order=e.display_order,
+                parent_name=enclave_name_by_id.get(e.parent_id)
+                if e.parent_id
+                else None,
+                notes=e.notes,
+            )
+            # Workspace-local only. Globals are shared by definition and
+            # resolve by name against the target instance.
+            for e in db.query(Enclave)
+            .filter(Enclave.workspace_id == ws.id)
+            .order_by(Enclave.display_order, Enclave.name)
+        ],
         "equipment_types": [
             ExportedEquipmentType(
                 title=t.title,
@@ -824,6 +857,7 @@ def _export_equipment(
                 model=t.model,
                 icon=t.icon,
                 description=t.description,
+                enclave_names=sorted(type_enclave_names.get(t.id, [])),
                 capabilities=[
                     ExportedEquipmentTypeCapability(
                         kind=c.kind,
@@ -850,6 +884,9 @@ def _export_equipment(
                             line.equipment_type_id, ""
                         ),
                         quantity=line.quantity,
+                        enclave_name=enclave_name_by_id.get(line.enclave_id)
+                        if line.enclave_id
+                        else None,
                         notes=line.notes,
                         display_order=line.display_order,
                     )
@@ -911,6 +948,9 @@ def _export_equipment(
                 equipment_code=e.equipment_code,
                 serial_number=e.serial_number,
                 equipment_type_title=all_type_titles.get(e.equipment_type_id, ""),
+                enclave_name=enclave_name_by_id.get(e.enclave_id)
+                if e.enclave_id
+                else None,
                 site_name=site_name_by_id[e.site_id],
                 utc_name=utc_name_by_id.get(e.utc_instance_id)
                 if e.utc_instance_id
@@ -986,6 +1026,14 @@ def export_workspace(
     )
     site_name_by_id = {s.id: s.name for s in sites}
     site_ids = list(site_name_by_id.keys())
+    # Same by-name convention as the equipment tier; services carry an enclave
+    # too, and it would otherwise be dropped on export.
+    enclave_names = {
+        e.id: e.name
+        for e in db.query(Enclave).filter(
+            (Enclave.workspace_id.is_(None)) | (Enclave.workspace_id == ws.id)
+        )
+    }
 
     services = (
         db.query(Service).filter(Service.site_id.in_(site_ids)).all()
@@ -1139,6 +1187,9 @@ def export_workspace(
                     if svc.service_template_id
                     else None
                 ),
+                enclave_name=enclave_names.get(svc.enclave_id)
+                if svc.enclave_id
+                else None,
                 name=svc.name,
                 kind=svc.kind,
                 category=svc.category,
@@ -1233,6 +1284,35 @@ def import_workspace(
     db.add(ws)
     db.flush()
 
+    # Enclaves first — services, equipment types, UTC lines and equipment all
+    # reference them by name. Workspace-local rows come from the envelope;
+    # global ones resolve by name against this instance's shared list, so an
+    # export from an instance with the same global seeds lands correctly.
+    enclave_id_by_name: dict[str, int] = {
+        e.name: e.id
+        for e in db.query(Enclave).filter(Enclave.workspace_id.is_(None))
+    }
+    imported_enclaves: list[Enclave] = []
+    for en in payload.enclaves:
+        # A local enclave that shadows a global name stays local, matching the
+        # shadowing rule the rest of the catalog uses.
+        new_en = Enclave(
+            workspace_id=ws.id,
+            name=en.name,
+            short_name=en.short_name,
+            color=en.color,
+            display_order=en.display_order,
+            notes=en.notes,
+        )
+        db.add(new_en)
+        db.flush()
+        enclave_id_by_name[en.name] = new_en.id
+        imported_enclaves.append(new_en)
+    # Second pass for parents, now that every name resolves.
+    for en, row in zip(payload.enclaves, imported_enclaves):
+        if en.parent_name:
+            row.parent_id = enclave_id_by_name.get(en.parent_name)
+
     site_id_by_name: dict[str, int] = {}
     for s in payload.sites:
         new_site = Site(
@@ -1279,6 +1359,9 @@ def import_workspace(
                 if svc.service_template_name
                 else None
             ),
+            enclave_id=enclave_id_by_name.get(svc.enclave_name)
+            if svc.enclave_name
+            else None,
             name=svc.name,
             kind=svc.kind,
             category=svc.category,
@@ -1412,7 +1495,13 @@ def import_workspace(
             new_p.supervisor_id = personnel_id_by_key[sup_key]
 
     _import_equipment(
-        db, ws, payload, site_id_by_name, service_id_by_key, gateway_id_by_key
+        db,
+        ws,
+        payload,
+        site_id_by_name,
+        service_id_by_key,
+        gateway_id_by_key,
+        enclave_id_by_name,
     )
 
     db.flush()
@@ -1427,6 +1516,7 @@ def _import_equipment(
     site_id_by_name: dict[str, int],
     service_id_by_key: dict[tuple[str, str], int],
     gateway_id_by_key: dict[tuple[str, str], int],
+    enclave_id_by_name: dict[str, int],
 ) -> None:
     """Rebuild the equipment tier from a v3 envelope.
 
@@ -1459,6 +1549,18 @@ def _import_equipment(
         db.add(new_t)
         db.flush()
         type_id_by_title[t.title] = new_t.id
+        for name in t.enclave_names:
+            enclave_id = enclave_id_by_name.get(name)
+            # An unresolvable enclave is skipped rather than fatal: a missing
+            # capability declaration only widens what's allowed, so it can't
+            # produce a wrong assignment the way a missing type would produce
+            # unidentifiable gear.
+            if enclave_id is not None:
+                db.add(
+                    EquipmentTypeEnclave(
+                        equipment_type_id=new_t.id, enclave_id=enclave_id
+                    )
+                )
         for order, cap in enumerate(t.capabilities):
             db.add(
                 EquipmentTypeCapability(
@@ -1507,6 +1609,9 @@ def _import_equipment(
                         line.equipment_type_title, f"UTC definition '{d.code}'"
                     ),
                     quantity=line.quantity,
+                    enclave_id=enclave_id_by_name.get(line.enclave_name)
+                    if line.enclave_name
+                    else None,
                     notes=line.notes,
                     display_order=order,
                 )
@@ -1612,6 +1717,9 @@ def _import_equipment(
             ),
             utc_instance_id=utc_id_by_name.get(e.utc_name) if e.utc_name else None,
             site_id=site_id_by_name[e.site_name],
+            enclave_id=enclave_id_by_name.get(e.enclave_name)
+            if e.enclave_name
+            else None,
             equipment_code=e.equipment_code,
             serial_number=e.serial_number,
             # status left as model default; imports are structural.

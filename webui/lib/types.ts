@@ -810,6 +810,10 @@ export interface EquipmentType {
   description: string | null
   retired_at: string | null
   capabilities: EquipmentTypeCapability[]
+  /** Enclaves this model of gear can serve. Empty = unrestricted, NOT
+   *  "capable of nothing" — a type whose catalog entry hasn't been filled in
+   *  must not block assignments. */
+  enclave_ids: number[]
   is_global: boolean
 }
 
