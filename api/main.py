@@ -22,7 +22,7 @@ from routers import (
     doc_pages,
     doc_sections,
     documents,
-    enclave_sources,
+    scoi_sources,
     equipment,
     equipment_catalog,
     equipment_topology,
@@ -156,7 +156,7 @@ app.include_router(doc_sections.router)
 app.include_router(rules.router)
 app.include_router(ingest.router)
 app.include_router(users.router)
-app.include_router(enclave_sources.router)
+app.include_router(scoi_sources.router)
 app.include_router(units.router)
 app.include_router(work_centers.router)
 app.include_router(teams.router)

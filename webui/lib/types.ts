@@ -660,7 +660,7 @@ export interface DocumentVersion {
   is_current: boolean
 }
 
-export interface EnclaveSource {
+export interface ScoiSource {
   id: number
   name: string
   scoi_url: string | null

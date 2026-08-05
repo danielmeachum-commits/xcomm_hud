@@ -1002,13 +1002,13 @@ class EventSummaryOut(BaseModel):
 # --- Enclave source / ingest ---
 
 
-class EnclaveSourceIn(BaseModel):
+class ScoiSourceIn(BaseModel):
     name: str
     scoi_url: Optional[str] = None
     notes: Optional[str] = None
 
 
-class EnclaveSourceOut(_ORM):
+class ScoiSourceOut(_ORM):
     id: int
     name: str
     scoi_url: Optional[str] = None
@@ -1017,8 +1017,8 @@ class EnclaveSourceOut(_ORM):
     notes: Optional[str] = None
 
 
-class EnclaveSourceCreated(BaseModel):
-    enclave_source: EnclaveSourceOut
+class ScoiSourceCreated(BaseModel):
+    scoi_source: ScoiSourceOut
     ingest_token: str
 
 
@@ -1037,7 +1037,7 @@ class IngestPayload(BaseModel):
 
 class IngestAck(BaseModel):
     accepted: bool
-    enclave_source_id: int
+    scoi_source_id: int
 
 
 # --- Site property templates ---

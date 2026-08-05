@@ -252,8 +252,8 @@ class Site(Base):
     )
 
 
-class EnclaveSource(Base):
-    __tablename__ = "enclave_source"
+class ScoiSource(Base):
+    __tablename__ = "scoi_source"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)

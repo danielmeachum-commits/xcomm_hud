@@ -1,6 +1,6 @@
 """Stub ingest endpoint for future scoi enclave pushes.
 
-Validates X-Ingest-Token against any EnclaveSource.ingest_token_hash via argon2,
+Validates X-Ingest-Token against any ScoiSource.ingest_token_hash via argon2,
 updates last_contact_at + sync_status, logs the payload, and returns 202.
 
 TODO: write-through to services + emit status_event rows with
@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from db import get_db
-from models import EnclaveSource
+from models import ScoiSource
 from schemas import IngestAck, IngestPayload
 
 log = logging.getLogger("xcomm_hud.ingest")
@@ -26,8 +26,8 @@ _ph = PasswordHasher()
 router = APIRouter(tags=["ingest"])
 
 
-def _verify_token(db: Session, token: str) -> EnclaveSource:
-    for src in db.query(EnclaveSource).all():
+def _verify_token(db: Session, token: str) -> ScoiSource:
+    for src in db.query(ScoiSource).all():
         if not src.ingest_token_hash:
             continue
         try:
@@ -56,10 +56,10 @@ def ingest(
     log.info(
         "ingest accepted",
         extra={
-            "enclave_source": src.name,
+            "scoi_source": src.name,
             "claimed_source_name": body.source_name,
             "service_count": len(body.services),
             "ts": body.ts.isoformat(),
         },
     )
-    return IngestAck(accepted=True, enclave_source_id=src.id)
+    return IngestAck(accepted=True, scoi_source_id=src.id)
