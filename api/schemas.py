@@ -69,6 +69,10 @@ EquipmentLinkDirection = Literal["bidirectional", "a_to_b"]
 UtcRole = Literal["primary", "extension", "independent"]
 UtcRoleHint = Literal["primary", "extension", "either"]
 CapabilityBindRole = Literal["endpoint", "transport"]
+# `reported` = a human owns the status; `derived` = the dependency chain
+# does, and the reported field goes read-only. Per delivery and per
+# gateway, independently switchable.
+StatusMode = Literal["reported", "derived"]
 CapabilitySource = Literal["template", "custom"]
 UserRole = Literal["viewer", "operator", "admin"]
 SubjectKind = Literal[
@@ -631,6 +635,12 @@ class ServicePatch(BaseModel):
     enabled_pace: Optional[list[GatewayPace]] = None
 
 
+class StatusModeIn(BaseModel):
+    """Switch a delivery or gateway between reported and derived status."""
+
+    status_mode: StatusMode
+
+
 class ServiceValidateIn(BaseModel):
     status: StatusValue
     note: Optional[str] = None
@@ -706,7 +716,14 @@ class ServiceOut(_ORM):
     reach: ServiceReach
     icon: Optional[str] = None
     description: Optional[str] = None
+    # The value to DISPLAY. In derived mode this is the dependency chain's
+    # answer; otherwise the human's. See equipment_status.resolve_status.
     status: StatusValue
+    # The stored human value, whatever mode this is in — so the UI can show
+    # "operator says X, chain says Y" without a second request.
+    reported_status: StatusValue = "unvalidated"
+    status_mode: StatusMode = "reported"
+    derived_status: Optional[EquipmentStatusValue] = None
     # Rolled-up status can be "ready" when every reachable path routes
     # through a gateway in PACE standby, so the effective side allows the
     # cell-status superset (StatusValue + "ready").
@@ -758,6 +775,9 @@ class GatewayValidateIn(BaseModel):
 
 class GatewayOut(_ORM):
     id: int
+    reported_status: GatewayStatusValue = "ready"
+    status_mode: StatusMode = "reported"
+    derived_status: Optional[EquipmentStatusValue] = None
     site_id: int
     name: str
     kind: GatewayKind
@@ -2054,6 +2074,11 @@ class CapabilityBindingOut(BaseModel):
 
     service_ids: list[int] = Field(default_factory=list)
     gateway_ids: list[int] = Field(default_factory=list)
+    # The subset of `service_ids` this capability is declared REQUIRED for,
+    # and the redundancy group per binding. Carried so the binding chip can
+    # show and toggle "needed for this service" without a second request.
+    required_service_ids: list[int] = Field(default_factory=list)
+    group_keys: dict[int, str] = Field(default_factory=dict)
 
 
 class EquipmentCapabilityOut(_ORM):
@@ -2281,6 +2306,12 @@ class BackingCapability(BaseModel):
     kind: CapabilityKind
     status: EquipmentStatusValue
     role: Optional[CapabilityBindRole] = None
+    # Does this gate the service, or just stand behind it? Only `required`
+    # bindings move the derived value.
+    required: bool = False
+    # Required bindings sharing a key are OR'd (one live path is enough);
+    # groups AND together. Null = its own group.
+    group_key: Optional[str] = None
 
 
 class DerivedStatus(BaseModel):
@@ -2300,6 +2331,15 @@ class DerivedStatus(BaseModel):
     # badges and what the advisory rule fires on.
     disagrees: bool = False
     backing: list[BackingCapability] = Field(default_factory=list)
+    # --- the hole in the chain, carried BESIDE the status, never inside it ---
+    # `derived` skips unvalidated capabilities when computing a value, because
+    # a chain that returned `unvalidated` for one unchecked port would be
+    # useless immediately. What we do not know is reported here instead, as a
+    # count — modelled on the UTC completeness panel, which already
+    # establishes "here is what we cannot see" as its own signal.
+    required_total: int = 0
+    required_unvalidated: int = 0
+    unvalidated_labels: list[str] = Field(default_factory=list)
 
 
 class CapabilityWiringIn(BaseModel):

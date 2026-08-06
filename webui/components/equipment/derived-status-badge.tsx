@@ -1,6 +1,6 @@
 "use client"
 
-import { TriangleAlert } from "lucide-react"
+import { CircleHelp, TriangleAlert } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
@@ -55,11 +55,20 @@ export function DerivedStatusBadge({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (!derived || !derived.disagrees || !derived.derived) return null
+  if (!derived) return null
+
+  // The hole in the chain is its OWN signal, not part of the status. It shows
+  // even when nothing disagrees — "everything I can see is up, and there are
+  // three things I cannot see" is the case this exists to make visible, and
+  // it is invisible in the status vocabulary by design.
+  const hole = derived.required_unvalidated > 0
+  if ((!derived.disagrees || !derived.derived) && !hole) return null
 
   const backing = derived.backing
   const bad = backing.filter((b) => b.status !== "up" && b.status !== "unvalidated")
-  const next = toTargetStatus(derived.derived, target)
+  // Safe: the hole-only branch below returns before this is read, and the
+  // disagreement branch cannot be reached with a null derived.
+  const next = derived.derived ? toTargetStatus(derived.derived, target) : ""
 
   async function apply() {
     setPending(true)
@@ -92,6 +101,19 @@ export function DerivedStatusBadge({
     } finally {
       setPending(false)
     }
+  }
+
+  // Nothing to apply, but a gap worth showing.
+  if (!derived.disagrees || !derived.derived) {
+    return (
+      <span
+        title={`Not validated: ${derived.unvalidated_labels.join(", ")}`}
+        className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+      >
+        <CircleHelp className="size-3" />
+        {derived.required_unvalidated} of {derived.required_total} unvalidated
+      </span>
+    )
   }
 
   return (
@@ -139,10 +161,26 @@ export function DerivedStatusBadge({
             </div>
           </div>
 
+          {hole && (
+            <p className="rounded-md border border-muted-foreground/30 bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+              <strong>
+                {derived.required_unvalidated} of {derived.required_total}
+              </strong>{" "}
+              required {derived.required_unvalidated === 1 ? "capability has" : "capabilities have"}{" "}
+              never been validated, so this comparison is made on incomplete
+              information: {derived.unvalidated_labels.join(", ")}.
+            </p>
+          )}
+
           <div>
             <div className="mb-1.5 text-xs font-medium">
               {backing.length - bad.length} of {backing.length} backing{" "}
               {backing.length === 1 ? "capability" : "capabilities"} healthy
+              {derived.required_total > 0 && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · {derived.required_total} required
+                </span>
+              )}
             </div>
             <ul className="flex flex-col gap-1">
               {backing.map((b) => (
@@ -154,6 +192,18 @@ export function DerivedStatusBadge({
                     <StatusIndicator state={statusToIndicatorState(b.status)} />
                     <span className="font-mono">{b.equipment_code}</span>
                     <span className="text-muted-foreground">{b.label}</span>
+                    {b.required && (
+                      <span
+                        title={
+                          b.group_key
+                            ? `Required — redundant with others in "${b.group_key}"`
+                            : "Required"
+                        }
+                        className="rounded-full border border-border px-1 py-px text-[9px] uppercase tracking-wide"
+                      >
+                        {b.group_key ? `req · ${b.group_key}` : "req"}
+                      </span>
+                    )}
                   </span>
                   <span className="text-muted-foreground">
                     {statusLabel(b.status)}

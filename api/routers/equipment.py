@@ -28,6 +28,7 @@ from equipment_status import (
     disagrees,
     load_backing_for_gateways,
     load_backing_for_services,
+    refresh_derived,
 )
 from models import (
     CapabilityGatewayLink,
@@ -131,6 +132,17 @@ def _capability_out(
         ]
     out.bindings.service_ids = service_ids
     out.bindings.gateway_ids = gateway_ids
+    links = (
+        db.query(CapabilityServiceLink)
+        .filter(CapabilityServiceLink.equipment_capability_id == cap.id)
+        .all()
+    )
+    out.bindings.required_service_ids = [
+        r.service_delivery_id for r in links if r.required
+    ]
+    out.bindings.group_keys = {
+        r.service_delivery_id: r.group_key for r in links if r.group_key
+    }
     return out
 
 
@@ -179,6 +191,8 @@ def equipment_out_bulk(db: Session, rows: list[Equipment]) -> list[EquipmentOut]
     )
     cap_ids = [c.id for c in caps]
     svc_links: dict[int, list[int]] = {}
+    svc_required: dict[int, list[int]] = {}
+    svc_groups: dict[int, dict[int, str]] = {}
     gw_links: dict[int, list[int]] = {}
     if cap_ids:
         for r in db.query(CapabilityServiceLink).filter(
@@ -187,6 +201,14 @@ def equipment_out_bulk(db: Session, rows: list[Equipment]) -> list[EquipmentOut]
             svc_links.setdefault(r.equipment_capability_id, []).append(
                 r.service_delivery_id
             )
+            if r.required:
+                svc_required.setdefault(r.equipment_capability_id, []).append(
+                    r.service_delivery_id
+                )
+            if r.group_key:
+                svc_groups.setdefault(r.equipment_capability_id, {})[
+                    r.service_delivery_id
+                ] = r.group_key
         for r in db.query(CapabilityGatewayLink).filter(
             CapabilityGatewayLink.equipment_capability_id.in_(cap_ids)
         ):
@@ -223,6 +245,8 @@ def equipment_out_bulk(db: Session, rows: list[Equipment]) -> list[EquipmentOut]
                 if cu:
                     cap_out.validated_by_username = cu.username
             cap_out.bindings.service_ids = svc_links.get(c.id, [])
+            cap_out.bindings.required_service_ids = svc_required.get(c.id, [])
+            cap_out.bindings.group_keys = svc_groups.get(c.id, {})
             cap_out.bindings.gateway_ids = gw_links.get(c.id, [])
             out.capabilities.append(cap_out)
         out_rows.append(out)
@@ -674,6 +698,16 @@ def set_capability_status(
     cap.validated_at = when
     cap.validated_by_user_id = current_user.id
     db.flush()
+    # This is the only thing that can move a dependency chain, so it is where
+    # the stored derived value is refreshed and `derived_changed_at` stamped —
+    # and only when the value actually MOVES, because that timestamp is what an
+    # operator override is measured against. Refreshing it on every save would
+    # expire every override on the next unrelated capability edit.
+    #
+    # Note what this does NOT do: it writes derived_status and its timestamp
+    # and nothing else. No status is set, no cell is touched, no cascade runs.
+    refresh_derived(db, bound_service_ids, bound_gateway_ids, when)
+    db.flush()
     notify(background_tasks)
     return _capability_out(db, cap, bound_service_ids, bound_gateway_ids)
 
@@ -705,6 +739,12 @@ def bind_capability_to_service(
     service_id: int,
     background_tasks: BackgroundTasks,
     role: str = Query(default="endpoint", pattern="^(endpoint|transport)$"),
+    # Does this capability GATE the service? Defaults to False so binding
+    # stays the low-commitment act it has always been — saying "this is
+    # related" must not silently mean "this must be up".
+    required: bool = Query(default=False),
+    # Bindings sharing a key are OR'd: one live path in the group is enough.
+    group_key: str | None = Query(default=None),
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
@@ -720,11 +760,18 @@ def bind_capability_to_service(
             CapabilityServiceLink(
                 equipment_capability_id=cap.id,
                 service_delivery_id=service_id,
+                required=required,
+                group_key=group_key,
                 role=role
             )
         )
     else:
         existing.role = role
+        existing.required = required
+        existing.group_key = group_key
+    db.flush()
+    # Marking something required can change the chain's answer immediately.
+    refresh_derived(db, [service_id], [], _now())
     db.flush()
     notify(background_tasks)
     return _capability_out(db, cap)

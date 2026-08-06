@@ -12,10 +12,17 @@ import datetime
 from db import get_db
 from deps import get_current_workspace, requires
 from effective import reset_cells_for_gateway
+from equipment_status import refresh_derived, resolve_status
 from models import Gateway, Service, Site, User, Workspace
 from pubsub import notify
 from rules_engine import emit_trigger
-from schemas import GatewayIn, GatewayOut, GatewayPatch, GatewayValidateIn
+from schemas import (
+    GatewayIn,
+    GatewayOut,
+    GatewayPatch,
+    GatewayValidateIn,
+    StatusModeIn,
+)
 
 
 def _now() -> datetime.datetime:
@@ -36,6 +43,11 @@ def _pace_order():
 
 def _gateway_out(db: Session, gw: Gateway) -> GatewayOut:
     out = GatewayOut.model_validate(gw)
+    out.reported_status = gw.status
+    out.status = resolve_status(
+        gw.status, gw.status_mode, gw.derived_status,
+        gw.validated_at, gw.derived_changed_at,
+    )
     if gw.validated_by_user_id is not None:
         u = db.get(User, gw.validated_by_user_id)
         if u:
@@ -177,7 +189,13 @@ def validate_gateway(
     # so they stay in code rather than in user-editable rules — but each
     # cell that actually changed emits its own trigger (source_flow
     # "cascade") so the audit trail covers cascaded changes too.
-    if body.cascade:
+    # Never in derived mode. `reset_cells_for_gateway` is the destructive
+    # half of the cascade — it blanks every cell for this gateway AND nulls
+    # validated_at/validated_by, discarding who signed for each path. At
+    # operator frequency that is a deliberate "re-validate these"; at
+    # equipment-flap frequency it is the matrix-wiping behaviour reason 1 in
+    # equipment_status.py describes. Read-time R10 still applies on display.
+    if body.cascade and gw.status_mode != "derived":
         changed = reset_cells_for_gateway(db, gw.id, body.status)
         # Cells key on deliveries; the display name lives on the identity.
         service_names = {
@@ -259,3 +277,26 @@ def delete_gateway(
     gw = _gateway_in_workspace(db, gateway_id, workspace)
     db.delete(gw)
     notify(background_tasks)
+
+
+@router.post("/gateways/{gateway_id}/status-mode", response_model=GatewayOut)
+def set_gateway_status_mode(
+    gateway_id: int,
+    body: StatusModeIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    """Switch a gateway between operator-reported and chain-derived status.
+
+    Independent of any delivery's mode. Turning this on also turns OFF the
+    cell-blanking cascade for this gateway — see the note in validate.
+    """
+    gw = _gateway_in_workspace(db, gateway_id, workspace)
+    gw.status_mode = body.status_mode
+    if body.status_mode == "derived":
+        refresh_derived(db, [], [gw.id], _now())
+    db.flush()
+    notify(background_tasks)
+    return _gateway_out(db, gw)

@@ -499,6 +499,25 @@ function CapabilityRow({
     }
   }
 
+  /** Flip whether this capability GATES the service, re-PUTting the binding.
+   *  Separate from binding at all, because "this is related" and "this must be
+   *  up" are different claims and only the second should move a status. */
+  async function toggleRequired(serviceId: number, nowRequired: boolean) {
+    setPending(true)
+    try {
+      const group = capability.bindings.group_keys?.[serviceId]
+      const params = new URLSearchParams({ required: String(nowRequired) })
+      if (group) params.set("group_key", group)
+      await fetch(
+        `/api/be/capabilities/${capability.id}/services/${serviceId}?${params}`,
+        { method: "PUT", headers: { "Content-Type": "application/json" } },
+      )
+      router.refresh()
+    } finally {
+      setPending(false)
+    }
+  }
+
   return (
     <li className={cn("rounded-lg border p-3", statusBadgeClass(capability.status))}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -531,19 +550,49 @@ function CapabilityRow({
             checked and tinted when on, plain when off. */}
         {services.map((s) => {
           const on = boundServices.some((b) => b.id === s.id)
+          const required =
+            capability.bindings.required_service_ids?.includes(s.id) ?? false
+          const group = capability.bindings.group_keys?.[s.id]
           return (
-            <button
-              key={`s-${s.id}`}
-              type="button"
-              disabled={pending}
-              aria-pressed={on}
-              title={on ? `Unbind from ${s.name}` : `Bind to ${s.name}`}
-              onClick={() => toggle("services", s.id, on)}
-              className={bindingChipClass(on)}
-            >
-              {on && <Check className="size-3" />}
-              {s.name}
-            </button>
+            <span key={`s-${s.id}`} className="inline-flex items-center">
+              <button
+                type="button"
+                disabled={pending}
+                aria-pressed={on}
+                title={on ? `Unbind from ${s.name}` : `Bind to ${s.name}`}
+                onClick={() => toggle("services", s.id, on)}
+                className={cn(bindingChipClass(on), on && "rounded-r-none")}
+              >
+                {on && <Check className="size-3" />}
+                {s.name}
+              </button>
+              {/* Only offered once bound — "required" is a property OF a
+                  binding, so there is nothing to require until one exists. */}
+              {on && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  aria-pressed={required}
+                  aria-label={`${s.name}: needed for this service`}
+                  title={
+                    required
+                      ? group
+                        ? `Needed — redundant with others in "${group}". Click to make optional.`
+                        : "Needed for this service. Click to make optional."
+                      : "Click to mark this capability as needed for the service"
+                  }
+                  onClick={() => toggleRequired(s.id, !required)}
+                  className={cn(
+                    "-ml-px rounded-r-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors",
+                    required
+                      ? "border-foreground/30 bg-foreground/10 font-medium"
+                      : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {required ? (group ? `req·${group}` : "req") : "opt"}
+                </button>
+              )}
+            </span>
           )
         })}
         {gateways.map((g) => {

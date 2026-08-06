@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import get_current_workspace, requires
+from equipment_status import refresh_derived, resolve_status
 from effective import (
     clamp_cells_for_service,
     effective_cell_status,
@@ -34,6 +35,7 @@ from schemas import (
     ServiceOut,
     ServicePatch,
     ServiceValidateIn,
+    StatusModeIn,
 )
 
 router = APIRouter(prefix="/services", tags=["services"])
@@ -76,15 +78,27 @@ def _service_out(
         reach=delivery.reach,
         icon=service.icon,
         description=service.description,
-        status=delivery.status,
+        status=resolve_status(
+            delivery.status,
+            delivery.status_mode,
+            delivery.derived_status,
+            delivery.validated_at,
+            delivery.derived_changed_at,
+        ),
+        reported_status=delivery.status,
+        status_mode=delivery.status_mode,
+        derived_status=delivery.derived_status,
         enabled_pace=delivery.enabled_pace,
         validated_at=delivery.validated_at,
         validated_by_user_id=delivery.validated_by_user_id,
         display_order=delivery.display_order,
         notes=delivery.notes,
     )
+    # R10/R11 read the displayed status, so a delivery in derived mode clamps
+    # its cells from the derived value rather than the stale reported one.
+    resolved = out.status
     out.effective_status = effective_service_status(
-        delivery, gateways, cells_by_gw
+        delivery, gateways, cells_by_gw, local_status=resolved
     )
     if service.service_template_id is not None:
         tpl = db.get(ServiceTemplate, service.service_template_id)
@@ -106,7 +120,7 @@ def _service_out(
             continue
         entry = ServiceGatewayStatusOut.model_validate(cell)
         entry.effective_status = effective_cell_status(
-            cell.status, delivery.status, gw.status
+            cell.status, resolved, gw.status
         )
         if cell.validated_by_user_id is not None:
             uid = cell.validated_by_user_id
@@ -349,7 +363,12 @@ def validate_service(
     # rather than in user-editable rules — but each cell that actually
     # changed emits its own trigger (source_flow "cascade") so the audit
     # trail covers cascaded changes too.
-    if body.cascade:
+    # Derived mode never drives the write cascade. `clamp_cells_for_service`
+    # mutates stored cells, and running it at equipment-flap frequency is the
+    # cell-blanking failure equipment_status.py has warned about from the
+    # start. Read-time R10/R11 still apply on display, so the operator's
+    # validated cells keep both their status and their provenance.
+    if body.cascade and delivery.status_mode != "derived":
         changed = clamp_cells_for_service(db, delivery.id, body.status)
         gateway_names = {
             g.id: g.name
@@ -452,3 +471,30 @@ def delete_service(
         if orphan is not None:
             db.delete(orphan)
     notify(background_tasks)
+
+
+@router.post("/{service_id}/status-mode", response_model=ServiceOut)
+def set_service_status_mode(
+    service_id: int,
+    body: StatusModeIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    """Switch a delivery between operator-reported and chain-derived status.
+
+    Per delivery, not per service: one site may have a complete set of required
+    bindings while another has none, and forcing both into the same mode would
+    make the mode useless at whichever site is less wired up.
+    """
+    delivery = _service_in_workspace(db, service_id, workspace)
+    delivery.status_mode = body.status_mode
+    if body.status_mode == "derived":
+        # Seed the stored value so the first read has something to resolve
+        # against, and so an override made right now is measured against a
+        # real timestamp rather than a null.
+        refresh_derived(db, [delivery.id], [], _now())
+    db.flush()
+    notify(background_tasks)
+    return _service_out(db, delivery)

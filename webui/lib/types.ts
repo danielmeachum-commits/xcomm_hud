@@ -211,7 +211,13 @@ export interface Service {
   reach: ServiceReach
   icon: string | null
   description: string | null
+  /** The value to DISPLAY. In derived mode this is the dependency chain's
+   *  answer; otherwise the operator's. */
   status: ServiceStatus
+  /** The stored human value, whatever mode this is in. */
+  reported_status: ServiceStatus
+  status_mode: StatusMode
+  derived_status: EquipmentStatus | null
   /** Rolled-up effective status — may resolve to "ready" if every reachable
    *  path routes through a gateway on PACE standby, so uses CellStatus. */
   effective_status: CellStatus
@@ -241,6 +247,9 @@ export interface ServiceTemplate {
 
 export interface Gateway {
   id: number
+  reported_status: GatewayStatus
+  status_mode: StatusMode
+  derived_status: EquipmentStatus | null
   site_id: number
   name: string
   kind: GatewayKind
@@ -765,6 +774,10 @@ export type EquipmentLinkKind =
   | "wireless"
   | "other"
 
+/** `reported` = a human owns the status; `derived` = the dependency chain
+ *  does, and the reported field goes read-only. */
+export type StatusMode = "reported" | "derived"
+
 export type EquipmentLinkDirection = "bidirectional" | "a_to_b"
 export type UtcRole = "primary" | "extension" | "independent"
 export type UtcRoleHint = "primary" | "extension" | "either"
@@ -980,6 +993,10 @@ export interface UtcCompleteness {
 export interface CapabilityBindings {
   service_ids: number[]
   gateway_ids: number[]
+  /** The subset of `service_ids` this capability is declared REQUIRED for. */
+  required_service_ids: number[]
+  /** Redundancy group per bound service. Bindings sharing a key are OR'd. */
+  group_keys: Record<number, string>
 }
 
 export interface EquipmentCapability {
@@ -1058,6 +1075,12 @@ export interface EquipmentLink {
 
 export interface BackingCapability {
   capability_id: number
+  /** Does this GATE the service, or just stand behind it? Only required
+   *  bindings move the derived value. */
+  required: boolean
+  /** Required bindings sharing a key are OR'd — one live path is enough.
+   *  Null means the binding is its own group. */
+  group_key: string | null
   equipment_id: number
   equipment_code: string
   label: string
@@ -1068,12 +1091,18 @@ export interface BackingCapability {
 
 /** Advisory comparison of reported vs equipment-derived status.
  *  Read-only: equipment never writes service or gateway status. */
+/** `derived` skips unvalidated capabilities when computing a value — a chain
+ *  that returned "unvalidated" for one unchecked port would be useless. What
+ *  we don't know is carried BESIDE the status as a count instead. */
 export interface DerivedStatus {
   reported: string
   derived: EquipmentStatus | null
   /** True only when equipment says things are meaningfully *worse*. */
   disagrees: boolean
   backing: BackingCapability[]
+  required_total: number
+  required_unvalidated: number
+  unvalidated_labels: string[]
 }
 
 export interface EquipmentPosition {

@@ -149,6 +149,8 @@ def load_backing_for_services(
                 "kind": capability.kind,
                 "status": capability.status,
                 "role": link.role,
+                "required": link.required,
+                "group_key": link.group_key,
             }
         )
     return out
@@ -186,17 +188,85 @@ def load_backing_for_gateways(
     return out
 
 
+def best_status(statuses: Iterable[str]) -> Optional[str]:
+    """Best of the given equipment statuses, ignoring `unvalidated`.
+
+    The OR half of the dependency chain: within a redundancy group, one live
+    path is enough. Returns None when the group has no opinion at all.
+    """
+    best: Optional[str] = None
+    for status in statuses:
+        if _rank(status) == 0:
+            continue
+        if best is None or _rank(status) < _rank(best):
+            best = status
+    return best
+
+
+def derive_from_chain(backing: list[dict]) -> Optional[str]:
+    """Worst-of across groups, best-of within a group.
+
+    Only `required` bindings gate. Everything else stays in `backing` for the
+    operator to see but never moves the number — binding a capability to say
+    "this is related" must not be the same act as saying "this must be up".
+
+    Grouping is what makes the checkbox safe. Two radios on one shot get the
+    same `group_key`, so losing one is degraded rather than down; a bare
+    boolean would have reported down and taught people to ignore the badge.
+    A null key means the binding is its own group, which is the common case.
+
+    Returns None when nothing required has anything to say — the caller
+    renders that as no opinion rather than as a problem.
+    """
+    groups: dict[object, list[str]] = {}
+    for index, item in enumerate(backing):
+        if not item.get("required"):
+            continue
+        # Null key → its own group, keyed by position so it cannot collide
+        # with a real group name.
+        key = item.get("group_key") or ("__solo__", index)
+        groups.setdefault(key, []).append(item["status"])
+    if not groups:
+        return None
+    # Each group contributes its BEST (redundancy satisfied by any one member);
+    # the service is only as good as its worst group (all groups needed).
+    return worst_status(
+        status for status in (best_status(v) for v in groups.values()) if status
+    )
+
+
 def build_derived(reported: str, backing: list[dict]) -> dict:
     """Assemble the advisory payload for one service or gateway.
 
     Shape matches schemas.DerivedStatus.
+
+    Two numbers, deliberately separate. `derived` skips `unvalidated` when
+    computing a value — a chain that returned `unvalidated` because one
+    capability was never checked would be useless on day one. The hole is
+    reported alongside instead, as a count: ignorance is not a status, and
+    folding it into the status vocabulary is what produced the carve-outs this
+    module and effective.py both had to write.
     """
-    derived = worst_status(item["status"] for item in backing)
+    gated = [b for b in backing if b.get("required")]
+    # Fall back to the old whole-set worst-of when nothing has been marked
+    # required, so a workspace that never touches the checkboxes keeps exactly
+    # the advisory it had before.
+    derived = (
+        derive_from_chain(backing)
+        if gated
+        else worst_status(item["status"] for item in backing)
+    )
+    unvalidated = [b for b in gated if _rank(b["status"]) == 0]
     return {
         "reported": reported,
         "derived": derived,
         "disagrees": disagrees(reported, derived),
         "backing": backing,
+        "required_total": len(gated),
+        "required_unvalidated": len(unvalidated),
+        "unvalidated_labels": [
+            f"{b['equipment_code']} {b['label']}" for b in unvalidated
+        ],
     }
 
 
@@ -249,3 +319,85 @@ def derive_utc_role(
     if has_cross_link:
         return "independent"
     return None
+
+
+# ---------- derived mode: resolution and refresh ----------
+#
+# The module docstring above still holds, with one boundary moved. Its two
+# arguments were provenance and cell-blanking. Provenance is answered: every
+# equipment_capability carries its own validated_by_user_id, so in derived mode
+# accountability moves DOWN a level rather than vanishing, and the binding now
+# says which capabilities were declared essential — so the number is a claim
+# about a stated dependency, not a guess over whatever happened to be bound.
+#
+# The cell-blanking argument is untouched and still governs: derived mode must
+# never drive the write cascades. `clamp_cells_for_service` mutates stored cell
+# rows and `reset_cells_for_gateway` nulls validated_at/validated_by, and those
+# run at operator frequency today. Letting equipment drive them would run them
+# at flap frequency and wipe the matrix. Derived mode therefore SUPPRESSES the
+# cascade rather than triggering it; the pure read-time functions in
+# effective.py already apply R10/R11 on display, so nothing is lost. Derived
+# mode is the removal of a write path, not the addition of one.
+
+
+def resolve_status(
+    reported: str,
+    status_mode: str,
+    derived: Optional[str],
+    validated_at,
+    derived_changed_at,
+) -> str:
+    """What to actually show for a delivery or gateway.
+
+    In `reported` mode, the human value — unchanged behaviour.
+
+    In `derived` mode the chain wins, except:
+
+    - when it has no opinion (`derived is None`), the reported value stands.
+      A service with nothing required bound must not blank itself.
+    - when the operator has validated more recently than the derived value last
+      moved, their override wins. It lapses the next time the equipment picture
+      actually changes, which is what makes "I know the radio reads down, the
+      service is fine" a claim about now rather than standing policy.
+    """
+    if status_mode != "derived" or derived is None:
+        return reported
+    if validated_at is not None and derived_changed_at is not None:
+        if validated_at > derived_changed_at:
+            return reported
+    return derived
+
+
+def refresh_derived(db: Session, delivery_ids: list[int], gateway_ids: list[int], now):
+    """Recompute stored derived values, stamping when one actually moves.
+
+    Called from the capability write path — the only thing that can move a
+    chain. Stamps `derived_changed_at` ONLY on a real change, because that
+    timestamp is what an operator override is compared against: touching it on
+    every save would expire every override immediately.
+
+    Writes nothing but `derived_status`/`derived_changed_at`. It does not touch
+    status, and it does not cascade.
+    """
+    from models import Gateway, ServiceDelivery  # local: avoid an import cycle
+
+    changed = []
+    if delivery_ids:
+        backing = load_backing_for_services(db, delivery_ids)
+        for row in db.query(ServiceDelivery).filter(
+            ServiceDelivery.id.in_(delivery_ids)
+        ):
+            value = build_derived(row.status, backing.get(row.id, []))["derived"]
+            if value != row.derived_status:
+                row.derived_status = value
+                row.derived_changed_at = now
+                changed.append(("delivery", row.id, value))
+    if gateway_ids:
+        backing = load_backing_for_gateways(db, gateway_ids)
+        for row in db.query(Gateway).filter(Gateway.id.in_(gateway_ids)):
+            value = build_derived(row.status, backing.get(row.id, []))["derived"]
+            if value != row.derived_status:
+                row.derived_status = value
+                row.derived_changed_at = now
+                changed.append(("gateway", row.id, value))
+    return changed

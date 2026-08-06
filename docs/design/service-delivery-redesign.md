@@ -1,7 +1,9 @@
 # Service / ServiceDelivery redesign
 
-Status: **proposed**. Sections 1–5, 7–9 are decided. Section 6 (`unknown` →
-`unvalidated`) is open.
+Status: **largely built**. §1–§5 and §8 shipped in migrations 0054–0056; §6 was
+decided (both options, see the DECIDED note there) and shipped in 0053+0055.
+§7 — gateway dependency targets, and with it the shared-component double count —
+is the one substantive piece still open. See "Still open" under §3b.
 
 This doc covers the model change only. The link editor (step 1) and the
 UTC/site decoupling (step 2) are prerequisites that need no schema change and
@@ -90,7 +92,7 @@ shape, not a schema hierarchy.
 
 ---
 
-## 3. Dependency chain
+## 3. Dependency chain — SHIPPED (0056)
 
 Two columns on the binding:
 
@@ -120,7 +122,7 @@ single-radio failure in a redundant pair gets muted within a week.
 
 ---
 
-## 4. Derived status
+## 4. Derived status — SHIPPED (0056)
 
 Add `status_mode: Literal["reported", "derived"]` to `ServiceDelivery` **and**
 to `Gateway`, independently switchable. Per-row, not global — some deliveries
@@ -212,7 +214,7 @@ complication for gateway-derive and feeds directly into §6.
 
 ---
 
-## 5. Manual override
+## 5. Manual override — SHIPPED (0056)
 
 **No new override columns.** `ServiceDelivery` already inherits `status`,
 `validated_at`, `validated_by_user_id` from today's `service` row. An override
@@ -335,6 +337,48 @@ Three things the rename had to get right, all now in the migration:
 
 ---
 
+## 3b. What actually shipped, and what it cost
+
+`required` defaults to FALSE. Every binding made before 0056 was created under
+the advisory contract, where binding meant "related" — promoting them wholesale
+to hard dependencies would have made derived status fire on gear nobody
+declared essential. A workspace that never touches the checkboxes keeps exactly
+the advisory it had: `build_derived` falls back to the old whole-set worst-of
+when nothing is marked required.
+
+`derive_from_chain` is worst-of across groups, best-of within one. Verified
+against the case that motivated `group_key` at all: two radios sharing a key,
+one dead, derives `up` — a bare boolean would have said `down`.
+
+`resolve_status` is the only place mode is interpreted. Derived loses to a
+newer operator validation and falls back to reported when the chain has no
+opinion, so a delivery with one unvalidated required capability keeps its
+reported status and shows the hole beside it rather than blanking.
+
+`derived_status` is STORED, not recomputed on read, because
+`derived_changed_at` must be stamped when the value moves and detecting that
+during a GET would mean writing on a read. `refresh_derived` runs on the
+capability-validation path — the only thing that can move a chain — and stamps
+only on a real change, since that timestamp is what an override is measured
+against.
+
+The cascade suppression is two one-line guards (`status_mode != "derived"`) in
+`validate_service` and `validate_gateway`. That is the whole of it: the
+read-time R10/R11 functions were already pure, so derived mode really is the
+removal of a write path.
+
+### Still open
+
+- **Gateway dependency targets** (§7). A delivery can only declare required
+  capabilities, not required *gateways*, so a capability backing both a gateway
+  and a delivery is still counted twice. Harmless under worst-of; a real
+  correctness bug once someone builds redundancy groups across a shared
+  component. This is the next thing to build.
+- **Gateway `status_mode` has no UI.** The column, the resolution and the
+  cascade suppression are all in place and the endpoint exists, but nothing in
+  the webui switches it. Deliberate: gateway-derive is the riskier half, and it
+  should not be one click away until the delivery side has been used in anger.
+
 ## 7. Gateway-as-service — the double count
 
 Structurally, **a gateway is a delivery of a Transport-enclave service.** That
@@ -376,7 +420,7 @@ sharing the `required` / `group_key` columns.
 
 ---
 
-## 8. Migration
+## 8. Migration — SHIPPED (0054)
 
 Next revision: **`0053_service_delivery`**, `down_revision =
 "0052_enclave_classification"` (latest confirmed in

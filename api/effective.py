@@ -124,6 +124,7 @@ def effective_service_status(
     service: ServiceDelivery,
     site_gateways: list[Gateway],
     cells_by_gateway_id: Optional[dict[int, ServiceGatewayStatus]] = None,
+    local_status: Optional[str] = None,
 ) -> str:
     """Roll per-cell effective statuses up to a single service status.
 
@@ -135,29 +136,34 @@ def effective_service_status(
     (see `_cell_contribution_to_rollup`) so a fresh install doesn't
     regress list/graph rendering.
     """
+    # `local_status` lets the caller pass the DISPLAYED status — which in
+    # derived mode is the dependency chain's answer, not the stored reported
+    # one. Defaults to the stored value so every existing caller is unchanged.
+    local = local_status if local_status is not None else service.status
+
     # Operator-controlled states are never overridden.
-    if service.status in ("offline", "setup"):
-        return service.status
+    if local in ("offline", "setup"):
+        return local
 
     enabled = service.enabled_pace or []
     # No PACE dependencies → not routed through a gateway; local status
     # is authoritative.
     if not enabled:
-        return service.status
+        return local
 
     candidates = relevant_gateways(service, site_gateways)
     if not candidates:
         # No gateway on any enabled tier — treat as "no path".
-        if service.status in ("up", "degraded"):
+        if local in ("up", "degraded"):
             return "down"
-        return service.status
+        return local
 
     # Legacy fallback when the caller hasn't loaded cells yet.
     if cells_by_gateway_id is None:
         live = any(g.status in ("active", "degraded") for g in candidates)
-        if not live and service.status in ("up", "degraded"):
+        if not live and local in ("up", "degraded"):
             return "down"
-        return service.status
+        return local
 
     # Per-cell rollup — pick the best contribution across all candidate
     # gateways. `None` = dead path (not counted).
@@ -166,7 +172,7 @@ def effective_service_status(
         cell = cells_by_gateway_id.get(gw.id)
         cell_status = cell.status if cell else "unvalidated"
         contribution = _cell_contribution_to_rollup(
-            cell_status, service.status, gw.status
+            cell_status, local, gw.status
         )
         if contribution is None or contribution == "unvalidated":
             continue
@@ -174,9 +180,9 @@ def effective_service_status(
             best = contribution
 
     if best is None:
-        if service.status in ("up", "degraded"):
+        if local in ("up", "degraded"):
             return "down"
-        return service.status
+        return local
     return best
 
 

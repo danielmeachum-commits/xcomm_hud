@@ -410,6 +410,33 @@ class ServiceDelivery(Base):
     validated_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    # --- derived mode (see api/equipment_status.py) ---
+    # `reported` keeps today's behaviour: a human validates, and the equipment
+    # tier only ever shows an advisory beside it. `derived` makes the computed
+    # value authoritative for display.
+    #
+    # Provenance is NOT lost in derived mode, which is why this is allowed at
+    # all: every equipment_capability carries its own validated_by_user_id, so
+    # accountability moves down a level rather than evaporating. What derived
+    # mode must never do is WRITE — see the cascade note below.
+    status_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="reported"
+    )
+    # When the derived value last actually changed. An operator override is an
+    # ordinary validation, so it wins while `validated_at > derived_changed_at`
+    # and lapses the next time the equipment picture moves. That matches how
+    # people reason — "I know the radio reads down, the service is fine" is a
+    # claim about current conditions, not standing policy — and it never
+    # strands a stale green the way sticky-until-cleared would.
+    # Last computed value of the dependency chain. Stored rather than derived
+    # on read for one reason: `derived_changed_at` has to be stamped when the
+    # value MOVES, and detecting that on a GET would mean writing during a
+    # read. It is refreshed on the capability-validation path instead — the
+    # only thing that can move it.
+    derived_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    derived_changed_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Which PACE tiers this delivery uses. Defaults to all four (full fan-out =
@@ -450,6 +477,21 @@ class Gateway(Base):
     # a row that fails on read. A gateway's "nothing said yet" is PACE standby.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
     pace: Mapped[str] = mapped_column(String(16), nullable=False, default="primary")
+    # Independently switchable from a delivery's — gateway-derive is the
+    # riskier of the two, since cell_status_from_gateway is the destructive
+    # cascade, so operators opt into it separately.
+    status_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="reported"
+    )
+    # Last computed value of the dependency chain. Stored rather than derived
+    # on read for one reason: `derived_changed_at` has to be stamped when the
+    # value MOVES, and detecting that on a GET would mean writing during a
+    # read. It is refreshed on the capability-validation path instead — the
+    # only thing that can move it.
+    derived_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    derived_changed_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -2176,6 +2218,22 @@ class CapabilityServiceLink(Base):
         index=True,
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="endpoint")
+    # Does this capability GATE the service, or merely stand behind it?
+    #
+    # Default False so the migration changes nothing: every binding that
+    # existed before this column was advisory context, and silently promoting
+    # them all to hard dependencies would have made derived status fire on
+    # gear nobody said was essential.
+    required: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Redundancy. Required bindings sharing a group_key are OR'd (best-of);
+    # groups AND together (worst-of). A null key means "own group".
+    #
+    # A bare `required` boolean would have given pure AND semantics, so two
+    # radios on one shot would report the service down the moment either died
+    # — when the truth is degraded. That is exactly the cry-wolf failure the
+    # advisory contract in equipment_status.py was written to avoid, so the
+    # checkbox does not ship without this.
+    group_key: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
