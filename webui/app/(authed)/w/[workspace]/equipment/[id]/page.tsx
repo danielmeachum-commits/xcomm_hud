@@ -26,7 +26,8 @@ export default async function EquipmentDetailPage({
   const equipment = await apiGet<Equipment>(`/equipment/${id}`).catch(() => null)
   if (!equipment) notFound()
 
-  const [services, gateways, links, events, enclaves, types] = await Promise.all([
+  const [services, gateways, links, events, enclaves, types, allEquipment] =
+    await Promise.all([
     apiGet<Service[]>(`/services?site_id=${equipment.site_id}`).catch(
       () => [] as Service[],
     ),
@@ -39,6 +40,9 @@ export default async function EquipmentDetailPage({
     apiGet<EquipmentType[]>("/equipment-types").catch(
       () => [] as EquipmentType[],
     ),
+    // The whole workspace, not this site — the far end of a cross-site shot
+    // has to be pickable from here.
+    apiGet<Equipment[]>("/equipment").catch(() => [] as Equipment[]),
   ])
 
   return (
@@ -61,6 +65,7 @@ export default async function EquipmentDetailPage({
           (l) =>
             l.a_equipment_id === equipment.id || l.b_equipment_id === equipment.id,
         )}
+        allEquipment={allEquipment}
         events={events}
       />
     </div>

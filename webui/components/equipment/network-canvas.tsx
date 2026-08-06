@@ -12,15 +12,17 @@ import {
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
+  type Connection,
   type Edge,
   type Node,
   type NodeChange,
   type NodeProps,
 } from "@xyflow/react"
-import { Maximize2, Minimize2 } from "lucide-react"
+import { Maximize2, Minimize2, Plus } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { LinkForm } from "@/components/equipment/link-form"
 import { Button } from "@/components/ui/button"
 import {
   CAPABILITY_LABELS,
@@ -182,6 +184,10 @@ function edgeFor(
     id: `link-${link.id}-${source}-${target}`,
     source,
     target,
+    // Carried so a click can find the row behind the edge. Only meaningful in
+    // the expanded view — a collapsed edge stands for every link between two
+    // sites, so the click handler ignores it there.
+    data: { linkId: link.id },
     label: labelOverride ?? link.label ?? LINK_KIND_LABELS[link.kind],
     animated: statusEdgeAnimates(link.status),
     // Arrowheads only on directional shots — a peer trunk isn't a hierarchy.
@@ -209,6 +215,53 @@ function NetworkCanvasInner({
   // Filtering is the half of enclave-awareness that costs no visual channel,
   // so it carries the weight here rather than the color accent.
   const [enclaveFilter, setEnclaveFilter] = useState<number | "all">("all")
+
+  // Link editor. One mounted instance re-pointed per open, rather than a
+  // dialog per edge — the graph can hold hundreds of links.
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editingLink, setEditingLink] = useState<EquipmentLink | null>(null)
+  const [draftEnds, setDraftEnds] = useState<{
+    a: number | null
+    b: number | null
+  }>({ a: null, b: null })
+  // Bumped on every open so the editor remounts with a fresh draft — see the
+  // note on LinkForm about resetting via `key` rather than an effect.
+  const [openSeq, setOpenSeq] = useState(0)
+
+  const openCreate = useCallback((a: number | null, b: number | null) => {
+    setEditingLink(null)
+    setDraftEnds({ a, b })
+    setOpenSeq((n) => n + 1)
+    setEditorOpen(true)
+  }, [])
+
+  /** Dragging one node's handle onto another's is the fastest way to say
+   *  "these two are connected" — it opens the editor pre-filled rather than
+   *  creating a link outright, because kind and status are not guessable. */
+  const onConnect = useCallback(
+    (c: Connection) => {
+      if (level !== "equipment") return
+      if (!c.source?.startsWith("eq-") || !c.target?.startsWith("eq-")) return
+      openCreate(Number(c.source.slice(3)), Number(c.target.slice(3)))
+    },
+    [level, openCreate],
+  )
+
+  const onEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: Edge) => {
+      // Collapsed edges aggregate every link between a pair of sites, so
+      // there is no single row to edit.
+      if (level !== "equipment") return
+      const linkId = (edge.data as { linkId?: number } | undefined)?.linkId
+      const link = topology.links.find((l) => l.id === linkId)
+      if (!link) return
+      setEditingLink(link)
+      setDraftEnds({ a: null, b: null })
+      setOpenSeq((n) => n + 1)
+      setEditorOpen(true)
+    },
+    [level, topology.links],
+  )
 
   const enclaveById = useMemo(
     () => new Map(enclaves.map((e) => [e.id, e])),
@@ -366,10 +419,15 @@ function NetworkCanvasInner({
   ).length
 
   return (
+    <>
     <ReactFlow
       nodes={nodes}
       edges={edges}
       onNodesChange={onNodesChange}
+      onConnect={onConnect}
+      onEdgeClick={onEdgeClick}
+      // Sites aren't linkable — only the gear inside them is.
+      nodesConnectable={level === "equipment"}
       nodeTypes={NODE_TYPES}
       fitView={nodes.length > 0}
       fitViewOptions={{ padding: 0.25 }}
@@ -382,8 +440,24 @@ function NetworkCanvasInner({
         {visibleEquipment.length}
         {enclaveFilter !== "all" && ` of ${topology.equipment.length}`} items ·{" "}
         {topology.links.length} links · {crossSite} cross-site
+        {level === "equipment" && (
+          <span className="ml-2 text-muted-foreground">
+            Drag between nodes to link · click a line to edit
+          </span>
+        )}
       </Panel>
       <Panel position="top-right" className="flex items-center gap-1.5">
+        {level === "equipment" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => openCreate(null, null)}
+          >
+            <Plus className="size-3.5" />
+            Add link
+          </Button>
+        )}
         {enclaves.length > 0 && (
           <select
             aria-label="Filter by enclave"
@@ -423,6 +497,18 @@ function NetworkCanvasInner({
         </Button>
       </Panel>
     </ReactFlow>
+    {/* Picks from the unfiltered set on purpose — you routinely need to link
+        to gear the current enclave filter is hiding. */}
+    <LinkForm
+      key={`${editingLink?.id ?? "new"}-${openSeq}`}
+      equipment={topology.equipment}
+      open={editorOpen}
+      onOpenChange={setEditorOpen}
+      link={editingLink}
+      defaultA={draftEnds.a}
+      defaultB={draftEnds.b}
+    />
+    </>
   )
 }
 

@@ -1,11 +1,13 @@
 "use client"
 
-import { Check, Wrench } from "lucide-react"
+import { Check, Plus, Wrench } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { EquipmentStatusPill } from "@/components/equipment/equipment-status-pill"
+import { LinkForm } from "@/components/equipment/link-form"
+import { Button } from "@/components/ui/button"
 import {
   CAPABILITY_LABELS,
   EQUIPMENT_CATEGORY_LABELS,
@@ -33,6 +35,8 @@ interface Props {
   services: Service[]
   gateways: Gateway[]
   links: EquipmentLink[]
+  /** Every piece of gear in the workspace, for the link editor's other end. */
+  allEquipment?: Equipment[]
   events: Event[]
 }
 
@@ -43,6 +47,7 @@ export function EquipmentDetailClient({
   services,
   gateways,
   links,
+  allEquipment = [],
   events,
 }: Props) {
   const Icon = equipmentIcon(equipment.type_category)
@@ -107,52 +112,11 @@ export function EquipmentDetailClient({
         gateways={gateways}
       />
 
-      <section className="rounded-lg border border-border p-4">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Connections
-        </h2>
-        {links.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Not linked to anything yet.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {links.map((l) => {
-              const outbound = l.a_equipment_id === equipment.id
-              const other = outbound ? l.b_equipment_code : l.a_equipment_code
-              const crossSite =
-                l.a_site_id != null &&
-                l.b_site_id != null &&
-                l.a_site_id !== l.b_site_id
-              return (
-                <li
-                  key={l.id}
-                  className={cn(
-                    "flex items-center justify-between gap-2 rounded-md border p-2 text-sm",
-                    statusBadgeClass(l.status),
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <StatusIndicator state={statusToIndicatorState(l.status)} />
-                    <span className="text-muted-foreground">
-                      {l.direction === "a_to_b"
-                        ? outbound
-                          ? "feeds"
-                          : "fed by"
-                        : "peer"}
-                    </span>
-                    <span className="font-mono">{other}</span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {LINK_KIND_LABELS[l.kind]}
-                    {crossSite ? " · cross-site" : ""}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
+      <ConnectionsSection
+        equipment={equipment}
+        links={links}
+        allEquipment={allEquipment}
+      />
 
       {/* Phase 2 lands here. Stubbed rather than omitted so the shape of the
           page doesn't shift when maintenance tracking arrives. */}
@@ -281,6 +245,99 @@ function Field({
       </dt>
       <dd className={mono ? "font-mono" : undefined}>{value}</dd>
     </div>
+  )
+}
+
+function ConnectionsSection({
+  equipment,
+  links,
+  allEquipment,
+}: {
+  equipment: Equipment
+  links: EquipmentLink[]
+  allEquipment: Equipment[]
+}) {
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<EquipmentLink | null>(null)
+  // See the note on LinkForm — resetting the draft is a remount, not an effect.
+  const [openSeq, setOpenSeq] = useState(0)
+
+  function openLink(link: EquipmentLink | null) {
+    setEditing(link)
+    setOpenSeq((n) => n + 1)
+    setOpen(true)
+  }
+
+  return (
+    <section className="rounded-lg border border-border p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          Connections
+        </h2>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => openLink(null)}
+        >
+          <Plus className="size-3.5" />
+          Add connection
+        </Button>
+      </div>
+      {links.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Not linked to anything yet.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {links.map((l) => {
+            const outbound = l.a_equipment_id === equipment.id
+            const other = outbound ? l.b_equipment_code : l.a_equipment_code
+            const crossSite =
+              l.a_site_id != null &&
+              l.b_site_id != null &&
+              l.a_site_id !== l.b_site_id
+            return (
+              <li key={l.id}>
+                <button
+                  type="button"
+                  onClick={() => openLink(l)}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-md border p-2 text-left text-sm transition-colors hover:brightness-110",
+                    statusBadgeClass(l.status),
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <StatusIndicator state={statusToIndicatorState(l.status)} />
+                    <span className="text-muted-foreground">
+                      {l.direction === "a_to_b"
+                        ? outbound
+                          ? "feeds"
+                          : "fed by"
+                        : "peer"}
+                    </span>
+                    <span className="font-mono">{other}</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {LINK_KIND_LABELS[l.kind]}
+                    {crossSite ? " · cross-site" : ""}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <LinkForm
+        key={`${editing?.id ?? "new"}-${openSeq}`}
+        equipment={allEquipment}
+        open={open}
+        onOpenChange={setOpen}
+        link={editing}
+        // New links from this page start with this piece of gear on end A.
+        defaultA={equipment.id}
+      />
+    </section>
   )
 }
 

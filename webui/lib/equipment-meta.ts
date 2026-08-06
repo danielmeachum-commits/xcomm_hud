@@ -23,6 +23,7 @@ import type {
   CapabilityKind,
   Equipment,
   EquipmentCategory,
+  EquipmentLinkDirection,
   EquipmentLinkKind,
   EquipmentStatus,
   UtcRole,
@@ -117,6 +118,24 @@ export const LINK_KIND_LABELS: Record<EquipmentLinkKind, string> = {
   wireless: "Wireless",
   other: "Other",
 }
+
+/** Picker order for the link editor. Explicit rather than
+ *  `Object.keys(LINK_KIND_LABELS)` so the ordering is a decision, not a
+ *  side effect of how the label record happens to be written — same
+ *  precedent as EQUIPMENT_STATUS_VALUES above. */
+export const EQUIPMENT_LINK_KINDS: EquipmentLinkKind[] = [
+  "los",
+  "satcom",
+  "fiber",
+  "cable",
+  "wireless",
+  "other",
+]
+
+export const EQUIPMENT_LINK_DIRECTIONS: EquipmentLinkDirection[] = [
+  "bidirectional",
+  "a_to_b",
+]
 
 /** Dash pattern per link kind, so the canvas distinguishes an RF shot from a
  *  physical run without relying on color (which already carries status). */
