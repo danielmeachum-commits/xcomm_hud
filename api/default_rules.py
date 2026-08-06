@@ -251,7 +251,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "conditions": {
             "and": [
                 {"in": [{"var": "new_status"}, ["up", "active", "ready", "online", "standby"]]},
-                {"in": [{"var": "prev_status"}, ["down", "offline", "unknown"]]},
+                {"in": [{"var": "prev_status"}, ["down", "offline", "unvalidated"]]},
             ]
         },
         "enrichers": ["gateway_context"],

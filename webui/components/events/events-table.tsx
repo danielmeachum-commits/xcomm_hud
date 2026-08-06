@@ -166,15 +166,18 @@ const STATUS_GROUPS: MultiSelectGroup[] = [
   { key: "other", label: "Other" },
 ]
 
-// Personnel sign-in states carried by personnel_location events. Skip
-// "unknown" — the "other" group already contributes that value.
-const PERSONNEL_STATUS_OPTIONS: MultiSelectOption[] = PERSONNEL_STATUSES.filter(
-  (s) => s !== "unknown",
-).map((s) => ({
-  value: s,
-  label: PERSONNEL_STATUS_LABELS[s],
-  group: "personnel",
-}))
+// Personnel sign-in states carried by personnel_location events. `unknown`
+// used to be dropped here because the "other" group contributed one shared
+// entry for it. It no longer does: that entry became `unvalidated` (the
+// service/equipment seed), and personnel's `unknown` — "never signed in" — is
+// a genuinely different value that now needs its own filterable option.
+const PERSONNEL_STATUS_OPTIONS: MultiSelectOption[] = PERSONNEL_STATUSES.map(
+  (s) => ({
+    value: s,
+    label: PERSONNEL_STATUS_LABELS[s],
+    group: "personnel",
+  }),
+)
 
 const STATUS_OPTIONS: MultiSelectOption[] = [
   { value: "up", label: "Up", group: "operational" },
@@ -188,7 +191,7 @@ const STATUS_OPTIONS: MultiSelectOption[] = [
   { value: "offline", label: "Offline", group: "issue" },
   { value: "maintenance", label: "Maintenance", group: "transitional" },
   { value: "setup", label: "Setup", group: "transitional" },
-  { value: "unknown", label: "Unknown", group: "other" },
+  { value: "unvalidated", label: "Unvalidated", group: "other" },
   { value: "normal", label: "FPCON Normal", group: "other" },
   { value: "alpha", label: "FPCON Alpha", group: "other" },
   { value: "bravo", label: "FPCON Bravo", group: "other" },

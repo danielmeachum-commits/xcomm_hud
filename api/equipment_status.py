@@ -12,7 +12,7 @@ nothing here should ever be called from a write path in effective.py.
 
 Two reasons, both load-bearing:
 
-1. `cell_status_from_gateway` blanks every cell for a gateway to `unknown` on
+1. `cell_status_from_gateway` blanks every cell for a gateway to `unvalidated` on
    any status change that isn't `ready`/`down`/`offline`. If equipment drove
    gateway status, a radio flapping between up and degraded would repeatedly
    wipe the operator's entire matrix and demand re-validation of paths nobody
@@ -51,7 +51,7 @@ from models import (
 
 # Worst-of ordering for equipment. Higher rank = worse. `maintenance` sits
 # between `degraded` and `down`: gear that is deliberately off the line is
-# worse than gear limping along, but it isn't a failure. `unknown` is exempt
+# worse than gear limping along, but it isn't a failure. `unvalidated` is exempt
 # from ordering entirely — it means "no information", not "worst case" —
 # which mirrors how effective.STATUS_RANK treats it.
 EQUIPMENT_STATUS_RANK: dict[str, int] = {
@@ -78,15 +78,15 @@ _REPORTED_RANK: dict[str, int] = {
 
 
 def _rank(status: str) -> int:
-    """Rank an equipment status; unranked (i.e. `unknown`) sorts as 0."""
+    """Rank an equipment status; unranked (i.e. `unvalidated`) sorts as 0."""
     return EQUIPMENT_STATUS_RANK.get(status, 0)
 
 
 def worst_status(statuses: Iterable[str]) -> Optional[str]:
-    """Worst of the given equipment statuses, ignoring `unknown`.
+    """Worst of the given equipment statuses, ignoring `unvalidated`.
 
     Returns None when there is nothing to say — no capabilities at all, or
-    every one of them `unknown`. None means "no opinion", and the UI renders
+    every one of them `unvalidated`. None means "no opinion", and the UI renders
     that as no advisory rather than as a problem.
     """
     worst: Optional[str] = None

@@ -171,7 +171,7 @@ def validate_gateway(
     gw.validated_at = when
     gw.validated_by_user_id = current_user.id
     # R8/R9/R10 cascade — cell states for this gateway snap to the derived
-    # value (unknown for active/degraded/setup, ready for ready, matching
+    # value (unvalidated for active/degraded/setup, ready for ready, matching
     # down/offline). Skipped when the operator unchecked "cascade to cells"
     # in the validation dialog. Cascades are transactional integrity logic,
     # so they stay in code rather than in user-editable rules — but each

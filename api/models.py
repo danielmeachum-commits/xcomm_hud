@@ -32,7 +32,7 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-SERVICE_STATUS_VALUES = ("up", "degraded", "down", "unknown", "offline", "setup")
+SERVICE_STATUS_VALUES = ("up", "degraded", "down", "unvalidated", "offline", "setup")
 GATEWAY_STATUS_VALUES = ("active", "ready", "degraded", "down", "offline", "setup")
 SITE_STATUS_VALUES = (
     "operational",
@@ -139,7 +139,7 @@ EQUIPMENT_STATUS_VALUES = (
     "down",
     "maintenance",
     "offline",
-    "unknown",
+    "unvalidated",
 )
 EQUIPMENT_LINK_KINDS = ("los", "satcom", "fiber", "cable", "wireless", "other")
 # `a_to_b` is the extension shot (A feeds B); `bidirectional` is a peer trunk.
@@ -313,7 +313,7 @@ class Service(Base):
     enclave_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
     )
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unvalidated")
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -352,7 +352,12 @@ class Gateway(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
     provider: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    # `ready`, matching GatewayIn — NOT the seed value the other tiers use.
+    # GATEWAY_STATUS_VALUES has never contained one, so this column defaulted
+    # to a string its own output schema rejects; nothing reached it because the
+    # API always supplies a status, but any direct Gateway() would have written
+    # a row that fails on read. A gateway's "nothing said yet" is PACE standby.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
     pace: Mapped[str] = mapped_column(String(16), nullable=False, default="primary")
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -377,7 +382,7 @@ class ServiceGatewayStatus(Base):
 
     One row per intersection where a service's enabled_pace matches a
     gateway's pace. The API materializes missing rows on read/write and
-    seeds them to `unknown` (needs validation). Cascade rules in
+    seeds them to `unvalidated` (needs validation). Cascade rules in
     api/effective.py drive how a gateway or local service status change
     propagates here — but only when the validation dialog leaves
     "cascade to cells" checked. Manual cell writes enforce R11 (cell
@@ -402,7 +407,7 @@ class ServiceGatewayStatus(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="unknown"
+        String(16), nullable=False, default="unvalidated"
     )
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -1929,7 +1934,7 @@ class Equipment(Base):
     )
     equipment_code: Mapped[str] = mapped_column(String(32), nullable=False)
     serial_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unvalidated")
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -2012,7 +2017,7 @@ class EquipmentCapability(Base):
     )
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     label: Mapped[str] = mapped_column(String(96), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unvalidated")
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="template")
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -2149,7 +2154,7 @@ class EquipmentLink(Base):
         String(16), nullable=False, default="bidirectional"
     )
     label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unvalidated")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now

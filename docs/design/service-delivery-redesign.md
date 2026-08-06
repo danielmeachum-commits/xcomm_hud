@@ -299,21 +299,39 @@ one). Alongside the status, surface *"3 required capabilities unvalidated"* —
 modeled on the existing UTC completeness panel, which already establishes this
 exact "here is what we don't know" pattern separate from status.
 
-### Recommendation
+### DECIDED — (c) **and** (a), 2026-08-06
 
-**Option (c)**, tentatively. Rationale: ignorance is not a status, and folding
-it into the status vocabulary is what produced six special-case sites and two
-independently-written rank-table carve-outs already. Adding derived mode on top
-of that overload compounds a known problem. A separate completeness signal
-keeps the status vocabulary stable through a migration that is already large,
-and the UI pattern is proven.
+Both, not either. `unknown` is renamed to `unvalidated` (migration
+`0053_unvalidated_status`), *and* the unvalidated-count ships as a separate
+completeness signal on `DerivedStatus` rather than as a status value. The
+rename makes the six carve-outs self-documenting — "`unvalidated` carries no
+ordering" is obviously true where "`unknown` carries no ordering" was
+arguable — and the separate signal keeps ignorance out of the vocabulary
+entirely, which is what (c) was for.
 
-Option (a) is defensible as a follow-up once (c) has shown which of the six
-special cases actually still need `unknown` at all — possibly none, at which
-point the rename is mechanical and low-risk.
+Option (b) was rejected: it would have added a seventh value to vocabularies
+that are already non-aligned, and nothing in the system has ever produced
+"assessed, inconclusive". If that is ever wanted it is a new value, not this
+one reinterpreted.
 
-**Decide before writing the migration**, because (a) and (b) change the
-enum/check constraints that the migration would otherwise touch once.
+Three things the rename had to get right, all now in the migration:
+
+- **Personnel keep `unknown`.** `PersonnelStatusValue.unknown` means "never
+  signed in" — a fact about a person, not an unvalidated assessment. The two
+  shared one entry in `AnyStatusValue`, which now carries both. The
+  `validation` rewrite is filtered by `subject_kind`, or it would have
+  relabelled 25 personnel history rows with something false.
+- **Gateways get `ready`, not `unvalidated`.** `GATEWAY_STATUS_VALUES` never
+  had a seed value; a gateway's "nothing said yet" is PACE standby. This
+  surfaced a live bug: `gateway.status` defaulted to `'unknown'` in both the
+  model and the DB, a value its own output schema rejects. Unreachable through
+  the API, but any direct insert wrote a row that fails on read. Also fixed
+  `events.py`'s revert path, which used one hardcoded `"unknown"` for every
+  subject kind and so wrote that impossible value into gateways.
+- **History is relabelled, not deleted.** Renaming a value to a new label for
+  the same concept makes the rewrite faithful; deleting the rows would destroy
+  an audit trail whose entire purpose is attribution. Verified to round-trip
+  through `downgrade`.
 
 ---
 

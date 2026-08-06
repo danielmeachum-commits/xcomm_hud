@@ -2,11 +2,16 @@
 
 export type Role = "viewer" | "operator" | "admin"
 
+/** `unvalidated` is the seed state — nobody has said anything about this yet.
+ *  It is NOT an assessment: it carries no ordering and constrains nothing, and
+ *  every rank table and clamp in the API carves it out for exactly that
+ *  reason. PersonnelStatus keeps a separate `unknown` meaning "never signed
+ *  in", which is a different fact about a different kind of subject. */
 export type ServiceStatus =
   | "up"
   | "degraded"
   | "down"
-  | "unknown"
+  | "unvalidated"
   | "offline"
   | "setup"
 
@@ -745,7 +750,7 @@ export type EquipmentStatus =
   | "down"
   | "maintenance"
   | "offline"
-  | "unknown"
+  | "unvalidated"
 
 export type EquipmentLinkKind =
   | "los"

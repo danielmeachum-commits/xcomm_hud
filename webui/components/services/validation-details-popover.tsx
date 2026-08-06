@@ -199,7 +199,7 @@ export function ValidationDetailsPopover({
 
   function startEditing() {
     const src = event
-    setEditStatus(((src?.status ?? status) as AnyStatus) || "unknown")
+    setEditStatus(((src?.status ?? status) as AnyStatus) || "unvalidated")
     setEditNote(src?.note ?? note ?? "")
     setEditWhenLocal(toLocalInput(new Date(src?.validated_at ?? validatedAt)))
     setSaveError(null)
@@ -466,7 +466,7 @@ export function ValidationDetailsPopover({
             <p>
               This will remove the validation event and restore the status back to{" "}
               <span className="font-semibold capitalize">
-                {event?.prev_status ?? "unknown"}
+                {event?.prev_status ?? "unvalidated"}
               </span>
               .
             </p>

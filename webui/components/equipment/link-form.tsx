@@ -73,7 +73,7 @@ function draftFrom(
     bCapId: link?.b_capability_id ?? null,
     kind: link?.kind ?? "cable",
     direction: link?.direction ?? "bidirectional",
-    status: link?.status ?? "unknown",
+    status: link?.status ?? "unvalidated",
     label: link?.label ?? "",
     notes: link?.notes ?? "",
   }

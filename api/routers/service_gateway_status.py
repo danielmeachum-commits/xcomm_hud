@@ -81,34 +81,34 @@ def _reject_invalid_write(
     """Hard invariants — reject writes that would violate R10 or R11.
 
     R10: while the gateway or the local service is down/offline, the only
-    permissible cell states are `unknown` (means "I don't know") or the
+    permissible cell states are `unvalidated` (means "I don't know") or the
     matching cascaded value. Setting a cell to `up` while a gateway is
     down would misrepresent reality.
 
-    R11: the cell can't be better than the local service status. `unknown`
+    R11: the cell can't be better than the local service status. `unvalidated`
     on either side is exempt (no ordering constraint).
     """
     if gateway.status in ("down", "offline"):
-        if new_status not in ("unknown", gateway.status):
+        if new_status not in ("unvalidated", gateway.status):
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 (
                     f"Gateway is {gateway.status}; cell can only be "
-                    f"{gateway.status} or unknown."
+                    f"{gateway.status} or unvalidated."
                 ),
             )
         return
     if service.status in ("down", "offline"):
-        if new_status not in ("unknown", service.status):
+        if new_status not in ("unvalidated", service.status):
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 (
                     f"Local service is {service.status}; cell can only be "
-                    f"{service.status} or unknown."
+                    f"{service.status} or unvalidated."
                 ),
             )
         return
-    if new_status == "unknown" or service.status == "unknown":
+    if new_status == "unvalidated" or service.status == "unvalidated":
         return
     if _rank(new_status) < _rank(service.status):
         raise HTTPException(
@@ -148,7 +148,7 @@ def validate_cell(
         )
         .one_or_none()
     )
-    prev = cell.status if cell else "unknown"
+    prev = cell.status if cell else "unvalidated"
 
     when = body.validated_at or _now()
     emit_trigger(

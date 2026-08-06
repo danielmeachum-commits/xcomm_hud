@@ -35,7 +35,7 @@ export const EQUIPMENT_STATUS_VALUES: EquipmentStatus[] = [
   "maintenance",
   "down",
   "offline",
-  "unknown",
+  "unvalidated",
 ]
 
 /** Worst-of ordering, mirroring EQUIPMENT_STATUS_RANK in

@@ -53,7 +53,7 @@ def rollup(
         gateways_by_site.setdefault(g.site_id, []).append(g)
     site_name_by_id = {s.id: s.name for s in sites}
 
-    # Bulk-load matrix cells (see canvas.py note). Missing cells → unknown,
+    # Bulk-load matrix cells (see canvas.py note). Missing cells → unvalidated,
     # which the rollup treats optimistically over a live gateway so this
     # summary keeps matching pre-matrix behaviour on fresh installs.
     service_ids = [s.id for s in services]

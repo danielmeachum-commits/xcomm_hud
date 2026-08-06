@@ -10,7 +10,7 @@ export const STATUS_VALUES: StatusValue[] = [
   "up",
   "degraded",
   "down",
-  "unknown",
+  "unvalidated",
   "offline",
   "setup",
 ]
@@ -36,7 +36,11 @@ export const SITE_STATUS_VALUES: SiteStatus[] = [
   "setup",
 ]
 
-export type StatusCategory = "operational" | "issue" | "transitional" | "unknown"
+export type StatusCategory =
+  | "operational"
+  | "issue"
+  | "transitional"
+  | "unvalidated"
 
 /** Stroke color used on canvas edges keyed on a service's status. The three
  *  "lane" colors (green/orange/red) also match the handles on the gateway so a
@@ -63,6 +67,7 @@ export function statusEdgeStroke(s: AnyStatus): string {
       return "rgb(14 165 233)" // sky-500
     case "offline":
       return "rgb(71 85 105)" // slate-600
+    case "unvalidated":
     case "unknown":
     default:
       return "rgb(148 163 184)" // slate-400
@@ -99,7 +104,7 @@ export const SERVICE_STATUS_CATEGORIES: {
   { key: "operational", label: "Operational", values: ["up"] },
   { key: "issue", label: "Issue", values: ["degraded", "down", "offline"] },
   { key: "transitional", label: "Transitional", values: ["setup"] },
-  { key: "unknown", label: "Unknown", values: ["unknown"] },
+  { key: "unvalidated", label: "Unvalidated", values: ["unvalidated"] },
 ]
 
 export const GATEWAY_STATUS_CATEGORIES: {
@@ -161,6 +166,8 @@ export function statusLabel(s: AnyStatus): string {
       return "Sick"
     case "training":
       return "Training"
+    case "unvalidated":
+      return "Unvalidated"
     case "unknown":
     default:
       return "Unknown"
@@ -189,6 +196,8 @@ export function statusBadgeClass(s: AnyStatus): string {
       return "border-sky-500/50 bg-sky-500/10"
     case "setup":
       return "border-sky-500/50 bg-sky-500/10"
+    case "unvalidated":
+    // Personnel's "never signed in" — a different fact, same neutral render.
     case "unknown":
     default:
       return "border-muted-foreground/30 bg-muted/30"
@@ -216,6 +225,7 @@ export function statusToIndicatorState(
     case "ready":
     case "standby":
       return "ready"
+    case "unvalidated":
     case "unknown":
     default:
       return "idle"

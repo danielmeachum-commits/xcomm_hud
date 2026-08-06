@@ -601,8 +601,11 @@ def revert_event(
     row.hidden_by_user_id = current_user.id
     db.flush()
 
-    # Restore subject status to prev_status, falling back to "unknown".
-    restore_status = row.prev_status or "unknown"
+    # Restore subject status to prev_status, falling back to whatever "nobody
+    # has said anything yet" means for THAT subject. A single literal was wrong
+    # even before the rename: gateways have no seed value at all, so reverting
+    # the first-ever gateway validation wrote a status its own schema rejects.
+    restore_status = row.prev_status or _seed_status(row.subject_kind)
     # Find the previous event's timestamp to use as the restored validated_at.
     prev_event = (
         db.query(Event)
@@ -649,6 +652,19 @@ def _maybe_update_subject(
     if row.status is None:
         return
     _apply_subject_status(db, row, row.status, row.validated_at, row.validated_by_user_id, background_tasks)
+
+
+def _seed_status(subject_kind: str) -> str:
+    """The "nothing has been said about this yet" value for a subject kind.
+
+    Services, cells and equipment share `unvalidated`. Gateways deliberately
+    have no such value — GATEWAY_STATUS_VALUES never contained one — and their
+    equivalent is `ready`: PACE standby, available but not carrying. Keep this
+    in agreement with the column defaults in models.py.
+    """
+    if subject_kind == SubjectKinds.GATEWAY:
+        return "ready"
+    return "unvalidated"
 
 
 def _apply_subject_status(

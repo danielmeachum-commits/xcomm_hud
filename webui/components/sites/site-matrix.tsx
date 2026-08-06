@@ -1434,10 +1434,10 @@ function PaceTile({
   // status already reflects R10/R11 from the backend, so we can render it
   // directly.
   const best = bestCellForTier(service, tierGateways)
-  const cellStored: CellStatus = best ? best.cell.status : "unknown"
+  const cellStored: CellStatus = best ? best.cell.status : "unvalidated"
   const cellEffective: CellStatus = best
     ? best.cell.effective_status
-    : "unknown"
+    : "unvalidated"
   const softTint = dotOnly
     ? tileTintStrong(cellEffective)
     : tileTintSoft(cellEffective)

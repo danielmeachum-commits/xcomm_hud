@@ -10,7 +10,7 @@ called by the validation endpoints.
 Rules (see the design conversation for the full ruleset):
 
     R8/R9/R10  Gateway status change → cells snap to a derived state:
-               active/degraded/setup → unknown (needs re-validation);
+               active/degraded/setup → unvalidated (needs re-validation);
                ready → cells untouched (PACE standby means "available but
                not active" — the operator's prior cell validation still
                holds); down/offline → matching down/offline.
@@ -18,7 +18,7 @@ Rules (see the design conversation for the full ruleset):
                cell no matter what's stored — you cannot report a working
                path over a dead gateway or a dead service.
     R11        Cell effective status is clamped to be no better than the
-               local service status. `unknown` is exempt (means "no info",
+               local service status. `unvalidated` is exempt (means "no info",
                not "worst case").
 
 Rollup semantics for the top-level `service.effective_status` are
@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 from models import Gateway, Service, ServiceGatewayStatus
 
 
-# Operational quality ordering used by R11. Lower rank = better. `unknown`
+# Operational quality ordering used by R11. Lower rank = better. `unvalidated`
 # is exempt from ordering (represents "no information", so it does not
 # constrain anything and is not treated as "worst").
 STATUS_RANK: dict[str, int] = {
@@ -51,7 +51,7 @@ STATUS_RANK: dict[str, int] = {
 
 
 def _rank(status: str) -> int:
-    """Rank for comparison, treating unranked values as "unknown"."""
+    """Rank for comparison, treating unranked values as "unvalidated"."""
     return STATUS_RANK.get(status, 0)
 
 
@@ -60,10 +60,10 @@ def _rank(status: str) -> int:
 def clamp_by_local(cell_status: str, local_status: str) -> str:
     """R11: cap the cell to be no better than the local service status.
 
-    `unknown` on either side is exempt (no constraint). Otherwise, if the
+    `unvalidated` on either side is exempt (no constraint). Otherwise, if the
     cell ranks better than local, return local.
     """
-    if cell_status == "unknown" or local_status == "unknown":
+    if cell_status == "unvalidated" or local_status == "unvalidated":
         return cell_status
     if _rank(cell_status) < _rank(local_status):
         return local_status
@@ -103,9 +103,9 @@ def _cell_contribution_to_rollup(
     """What this cell contributes to `service.effective_status`.
 
     Returns `None` when the cell offers no reachable path (gateway or
-    local dead). `unknown` cells over a live gateway are treated
+    local dead). `unvalidated` cells over a live gateway are treated
     optimistically as "inheriting the local status" so a freshly
-    migrated site — where every cell defaults to `unknown` — doesn't
+    migrated site — where every cell defaults to `unvalidated` — doesn't
     turn every service red in the list and graph views. Once the
     operator validates a cell explicitly, its stored status takes over.
     """
@@ -113,7 +113,7 @@ def _cell_contribution_to_rollup(
         return None
     if local_status in ("down", "offline"):
         return None
-    if cell_status == "unknown":
+    if cell_status == "unvalidated":
         return local_status
     return clamp_by_local(cell_status, local_status)
 
@@ -129,7 +129,7 @@ def effective_service_status(
     supply cell state (canvas/status routers pre-frontend rewire), the
     result matches the pre-matrix "any live gateway on an enabled tier
     keeps the stored status; else force down" rule. When cells are
-    provided, unknown cells over a live gateway contribute optimistically
+    provided, unvalidated cells over a live gateway contribute optimistically
     (see `_cell_contribution_to_rollup`) so a fresh install doesn't
     regress list/graph rendering.
     """
@@ -162,11 +162,11 @@ def effective_service_status(
     best: Optional[str] = None
     for gw in candidates:
         cell = cells_by_gateway_id.get(gw.id)
-        cell_status = cell.status if cell else "unknown"
+        cell_status = cell.status if cell else "unvalidated"
         contribution = _cell_contribution_to_rollup(
             cell_status, service.status, gw.status
         )
-        if contribution is None or contribution == "unknown":
+        if contribution is None or contribution == "unvalidated":
             continue
         if best is None or _rank(contribution) < _rank(best):
             best = contribution
@@ -191,13 +191,13 @@ def cell_status_from_gateway(new_gateway_status: str) -> Optional[str]:
                        stored status and their validated_at. If the gateway
                        later goes back to `active`, effective_status flows
                        naturally from the preserved cell.status.)
-    - anything else   → `unknown` (R8; force operator to re-validate the path)
+    - anything else   → `unvalidated` (R8; force operator to re-validate the path)
     """
     if new_gateway_status in ("down", "offline"):
         return new_gateway_status
     if new_gateway_status == "ready":
         return None
-    return "unknown"
+    return "unvalidated"
 
 
 def reset_cells_for_gateway(
@@ -241,17 +241,17 @@ def clamp_cells_for_service(
 
     - Local `down`/`offline` (R10): force every cell for this service to
       match the local status — no path can survive a dead service.
-    - Local `unknown`: no cascade (unknown carries no ordering).
+    - Local `unvalidated`: no cascade (unvalidated carries no ordering).
     - Otherwise (R11): clamp cells that rank better than the new local.
 
-    Cells at `unknown` are left alone in the R11 branch — unknown is not
+    Cells at `unvalidated` are left alone in the R11 branch — unvalidated is not
     "worse than degraded", it's "no info", so it isn't upgraded either.
 
     Returns (cell, prev_status, new_status) for every cell whose status
     actually changed, so the caller can emit per-cell triggers.
     """
     changed: list[tuple[ServiceGatewayStatus, str, str]] = []
-    if new_local_status == "unknown":
+    if new_local_status == "unvalidated":
         return changed
 
     cells = (
@@ -269,7 +269,7 @@ def clamp_cells_for_service(
 
     local_rank = _rank(new_local_status)
     for cell in cells:
-        if cell.status == "unknown":
+        if cell.status == "unvalidated":
             continue
         if _rank(cell.status) < local_rank:
             prev = cell.status
@@ -283,7 +283,7 @@ def materialize_cells(
 ) -> dict[int, ServiceGatewayStatus]:
     """Ensure a cell exists for every (service, gateway) pair whose PACE
     aligns with the service's enabled tiers. Missing cells are inserted
-    with status='unknown'. Returns a `{gateway_id: cell}` map.
+    with status='unvalidated'. Returns a `{gateway_id: cell}` map.
     """
     candidates = relevant_gateways(service, site_gateways)
     existing = {
@@ -297,7 +297,7 @@ def materialize_cells(
             cell = ServiceGatewayStatus(
                 service_id=service.id,
                 gateway_id=gw.id,
-                status="unknown",
+                status="unvalidated",
             )
             db.add(cell)
             existing[gw.id] = cell

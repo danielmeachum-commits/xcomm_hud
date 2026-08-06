@@ -70,7 +70,7 @@ export function ServiceForm({
     reach: "local" as ServiceReach,
     icon: null as string | null,
     description: "",
-    status: "unknown" as StatusValue,
+    status: "unvalidated" as StatusValue,
     // Local services default to no gateway dependency; operator opts in via
     // the checkbox below. External services are always gateway-bound.
     connects_externally: false,

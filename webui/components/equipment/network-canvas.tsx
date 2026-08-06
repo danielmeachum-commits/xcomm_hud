@@ -64,7 +64,7 @@ function SiteGroupNode({ data }: NodeProps) {
     ? d.equipment
         .map(equipmentRollup)
         .sort((a, b) => rank(b) - rank(a))[0]
-    : "unknown"
+    : "unvalidated"
   return (
     <div className="min-w-[200px] rounded-xl border-2 border-border bg-card p-3 shadow-sm">
       <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />

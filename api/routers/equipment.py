@@ -409,7 +409,7 @@ def materialize_capabilities(
             equipment_id=eq.id,
             kind=decl.kind,
             label=decl.label,
-            status="unknown",
+            status="unvalidated",
             source="template",
             display_order=order,
         )

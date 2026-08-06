@@ -7,13 +7,21 @@ from typing import Any, Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
-StatusValue = Literal["up", "degraded", "down", "unknown", "offline", "setup"]
+# `unvalidated` is the seed state: nobody has said anything about this yet.
+# It was called `unknown`, which read as an assessment ("we looked and can't
+# tell") and never was one — every rank table and clamp in effective.py has a
+# carve-out saying it carries no ordering and constrains nothing, precisely
+# because it means absence rather than badness. The name now says that.
+#
+# Nothing in this system expresses "assessed, inconclusive". If that is ever
+# wanted it is a NEW value, not this one reinterpreted.
+StatusValue = Literal["up", "degraded", "down", "unvalidated", "offline", "setup"]
 ServiceStatusValue = StatusValue
 GatewayStatusValue = Literal["active", "ready", "degraded", "down", "offline", "setup"]
 # A cell can inherit "ready" from a gateway on PACE standby (R9 cascade in
 # api/effective.py), so its allowed set is a superset of ServiceStatus.
 CellStatusValue = Literal[
-    "up", "degraded", "down", "unknown", "offline", "setup", "ready"
+    "up", "degraded", "down", "unvalidated", "offline", "setup", "ready"
 ]
 SiteStatusValue = Literal[
     "operational", "limited", "degraded", "maintenance", "standby", "offline", "setup"
@@ -22,12 +30,19 @@ SiteStatusValue = Literal[
 # record the new level — keep this union in sync with FPCON_LEVELS,
 # EMCON_LEVELS, and SITE_STATUS_VALUES.
 AnyStatusValue = Literal[
-    "up", "active", "ready", "degraded", "down", "unknown", "offline", "setup",
+    "up", "active", "ready", "degraded", "down", "unvalidated", "offline", "setup",
     "operational", "limited", "maintenance", "standby",
     "normal", "alpha", "bravo", "charlie", "delta",
     "a", "b", "c", "d",
     # Personnel sign-in states — appear on Event rows with
     # subject_kind == "personnel_location".
+    #
+    # `unknown` here is PERSONNEL's, not the old service/equipment seed value:
+    # it means the person has never signed in. It shares nothing with
+    # `unvalidated` above beyond the English word, and PersonnelStatusValue
+    # deliberately keeps it — renaming that one would say something false about
+    # a human's whereabouts.
+    "unknown",
     "on_site", "traveling", "off_site", "out_of_office", "lunch", "leave",
     "sick", "training",
 ]
@@ -47,7 +62,7 @@ CapabilityKind = Literal[
 ]
 # Its own set — gear goes to `maintenance`, services and gateways don't.
 EquipmentStatusValue = Literal[
-    "up", "degraded", "down", "maintenance", "offline", "unknown"
+    "up", "degraded", "down", "maintenance", "offline", "unvalidated"
 ]
 EquipmentLinkKind = Literal["los", "satcom", "fiber", "cable", "wireless", "other"]
 EquipmentLinkDirection = Literal["bidirectional", "a_to_b"]
@@ -596,7 +611,7 @@ class ServiceIn(BaseModel):
     reach: ServiceReach = "local"
     icon: Optional[str] = None
     description: Optional[str] = None
-    status: StatusValue = "unknown"
+    status: StatusValue = "unvalidated"
     notes: Optional[str] = None
     enabled_pace: list[GatewayPace] = Field(default_factory=lambda: list(_DEFAULT_PACE))
 
@@ -654,7 +669,7 @@ class ServiceGatewayStatusOut(_ORM):
 
     gateway_id: int
     status: CellStatusValue
-    effective_status: CellStatusValue = "unknown"
+    effective_status: CellStatusValue = "unvalidated"
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
@@ -681,7 +696,7 @@ class ServiceOut(_ORM):
     # Rolled-up status can be "ready" when every reachable path routes
     # through a gateway in PACE standby, so the effective side allows the
     # cell-status superset (StatusValue + "ready").
-    effective_status: CellStatusValue = "unknown"
+    effective_status: CellStatusValue = "unvalidated"
     allowed_statuses: Optional[list[StatusValue]] = None  # from template if has one
     enabled_pace: list[GatewayPace] = Field(
         default_factory=lambda: list(_DEFAULT_PACE)
@@ -1067,7 +1082,7 @@ class ScoiSourceCreated(BaseModel):
 class IngestService(BaseModel):
     name: str
     kind: ServiceKind = "other"
-    status: StatusValue = "unknown"
+    status: StatusValue = "unvalidated"
     site_name: Optional[str] = None
 
 
@@ -2008,7 +2023,7 @@ class UtcInstanceOut(_ORM):
 class EquipmentCapabilityIn(BaseModel):
     kind: CapabilityKind
     label: str
-    status: EquipmentStatusValue = "unknown"
+    status: EquipmentStatusValue = "unvalidated"
     source: CapabilitySource = "custom"
     notes: Optional[str] = None
     display_order: int = 0
@@ -2052,7 +2067,7 @@ class EquipmentIn(BaseModel):
     # Omit to let the server generate `<id_prefix><last 4 of serial>`.
     equipment_code: Optional[str] = None
     utc_instance_id: Optional[int] = None
-    status: EquipmentStatusValue = "unknown"
+    status: EquipmentStatusValue = "unvalidated"
     notes: Optional[str] = None
     # Which of the type's declared capabilities to materialize. Omit to take
     # every capability flagged materialize_by_default.
@@ -2209,7 +2224,7 @@ class EquipmentLinkIn(BaseModel):
     kind: EquipmentLinkKind = "other"
     direction: EquipmentLinkDirection = "bidirectional"
     label: Optional[str] = None
-    status: EquipmentStatusValue = "unknown"
+    status: EquipmentStatusValue = "unvalidated"
     notes: Optional[str] = None
 
 
@@ -2293,7 +2308,7 @@ class UtcDeployItemIn(BaseModel):
     equipment_code: Optional[str] = None
     # The enclave this kit serves, carried from the UTC line it came from.
     enclave_id: Optional[int] = None
-    status: EquipmentStatusValue = "unknown"
+    status: EquipmentStatusValue = "unvalidated"
     notes: Optional[str] = None
     capability_kinds: Optional[list[str]] = None
 

@@ -262,7 +262,7 @@ def duplicate_workspace(
                 reach=svc.reach,
                 icon=svc.icon,
                 description=svc.description,
-                # status left as default ("unknown"); no validated_* fields.
+                # status left as default ("unvalidated"); no validated_* fields.
                 display_order=svc.display_order,
                 notes=svc.notes,
                 enabled_pace=list(svc.enabled_pace),
@@ -280,7 +280,7 @@ def duplicate_workspace(
                 kind=gw.kind,
                 provider=gw.provider,
                 pace=gw.pace,
-                # status left as default ("unknown"); no validated_* fields.
+                # status left as default ("unvalidated"); no validated_* fields.
                 display_order=gw.display_order,
                 notes=gw.notes,
             )
@@ -424,7 +424,7 @@ def _duplicate_equipment(
 
     Follows the same convention as services and gateways: structure is copied,
     live status is not. Equipment, capabilities, and links all land at their
-    default `unknown` with no `validated_*` fields, because a duplicate is a
+    default `unvalidated` with no `validated_*` fields, because a duplicate is a
     planning scenario and inheriting yesterday's validations at another site
     would be a lie about who checked what.
 
@@ -584,7 +584,7 @@ def _duplicate_equipment(
             enclave_id=enclave_map.get(e.enclave_id, e.enclave_id),
             equipment_code=e.equipment_code,
             serial_number=e.serial_number,
-            # status left as default ("unknown"); no validated_* fields.
+            # status left as default ("unvalidated"); no validated_* fields.
             notes=e.notes,
         )
         db.add(new_e)

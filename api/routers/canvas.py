@@ -89,7 +89,7 @@ def map_bundle(
 
     # Bulk-load the matrix cells once so effective_service_status can apply
     # R10/R11 accurately across every service instead of falling back to the
-    # legacy any-live-gateway heuristic. Missing cells default to unknown
+    # legacy any-live-gateway heuristic. Missing cells default to unvalidated
     # inside the rollup (treated as inheriting local when the gateway is
     # live), so a fresh workspace with no validated cells still renders
     # normal statuses instead of collapsing to "down".

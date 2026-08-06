@@ -58,7 +58,7 @@ export function DerivedStatusBadge({
   if (!derived || !derived.disagrees || !derived.derived) return null
 
   const backing = derived.backing
-  const bad = backing.filter((b) => b.status !== "up" && b.status !== "unknown")
+  const bad = backing.filter((b) => b.status !== "up" && b.status !== "unvalidated")
   const next = toTargetStatus(derived.derived, target)
 
   async function apply() {
