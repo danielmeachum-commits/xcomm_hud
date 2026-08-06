@@ -33,6 +33,7 @@ from models import (
     EquipmentLink,
     Gateway,
     Service,
+    ServiceDelivery,
     Site,
     User,
     UtcDef,
@@ -392,7 +393,8 @@ def network_topology(
 
     services = (
         db.query(Service)
-        .join(Site, Site.id == Service.site_id)
+        .join(ServiceDelivery, ServiceDelivery.service_id == Service.id)
+        .join(Site, Site.id == ServiceDelivery.site_id)
         .filter(Site.workspace_id == workspace.id)
         .all()
     )

@@ -20,7 +20,7 @@ from effective import STATUS_RANK, effective_cell_status
 from rules_engine import emit_trigger
 from models import (
     Gateway,
-    Service,
+    ServiceDelivery,
     ServiceGatewayStatus,
     Site,
     User,
@@ -37,7 +37,7 @@ def _rank(s: str) -> int:
 
 
 def _cell_out(
-    db: Session, cell: ServiceGatewayStatus, service: Service, gateway: Gateway
+    db: Session, cell: ServiceGatewayStatus, service: ServiceDelivery, gateway: Gateway
 ) -> ServiceGatewayStatusOut:
     out = ServiceGatewayStatusOut.model_validate(cell)
     out.effective_status = effective_cell_status(
@@ -52,8 +52,8 @@ def _cell_out(
 
 def _resolve_pair(
     db: Session, service_id: int, gateway_id: int, workspace: Workspace
-) -> tuple[Service, Gateway]:
-    service = db.get(Service, service_id)
+) -> tuple[ServiceDelivery, Gateway]:
+    service = db.get(ServiceDelivery, service_id)
     if service is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
     site = db.get(Site, service.site_id)
@@ -76,7 +76,7 @@ def _resolve_pair(
 
 
 def _reject_invalid_write(
-    new_status: str, service: Service, gateway: Gateway
+    new_status: str, service: ServiceDelivery, gateway: Gateway
 ) -> None:
     """Hard invariants — reject writes that would violate R10 or R11.
 
@@ -143,7 +143,7 @@ def validate_cell(
     cell = (
         db.query(ServiceGatewayStatus)
         .filter(
-            ServiceGatewayStatus.service_id == service_id,
+            ServiceGatewayStatus.service_delivery_id == service_id,
             ServiceGatewayStatus.gateway_id == gateway_id,
         )
         .one_or_none()
@@ -172,7 +172,7 @@ def validate_cell(
 
     if cell is None:
         cell = ServiceGatewayStatus(
-            service_id=service.id,
+            service_delivery_id=service.id,
             gateway_id=gw.id,
             status=body.status,
             validated_at=when,

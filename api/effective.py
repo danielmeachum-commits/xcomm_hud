@@ -34,7 +34,7 @@ from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
 
-from models import Gateway, Service, ServiceGatewayStatus
+from models import Gateway, ServiceDelivery, ServiceGatewayStatus
 
 
 # Operational quality ordering used by R11. Lower rank = better. `unvalidated`
@@ -89,7 +89,9 @@ def effective_cell_status(
 
 # ---------- Rollup used by services / canvas / status routers ----------
 
-def relevant_gateways(service: Service, gateways: Iterable[Gateway]) -> list[Gateway]:
+def relevant_gateways(
+    service: ServiceDelivery, gateways: Iterable[Gateway]
+) -> list[Gateway]:
     """Subset of site gateways whose PACE tier this service is enabled for."""
     enabled = service.enabled_pace or []
     if not enabled:
@@ -119,7 +121,7 @@ def _cell_contribution_to_rollup(
 
 
 def effective_service_status(
-    service: Service,
+    service: ServiceDelivery,
     site_gateways: list[Gateway],
     cells_by_gateway_id: Optional[dict[int, ServiceGatewayStatus]] = None,
 ) -> str:
@@ -256,7 +258,7 @@ def clamp_cells_for_service(
 
     cells = (
         db.query(ServiceGatewayStatus)
-        .filter(ServiceGatewayStatus.service_id == service_id)
+        .filter(ServiceGatewayStatus.service_delivery_id == service_id)
         .all()
     )
     if new_local_status in ("down", "offline"):
@@ -279,7 +281,7 @@ def clamp_cells_for_service(
 
 
 def materialize_cells(
-    db: Session, service: Service, site_gateways: list[Gateway]
+    db: Session, service: ServiceDelivery, site_gateways: list[Gateway]
 ) -> dict[int, ServiceGatewayStatus]:
     """Ensure a cell exists for every (service, gateway) pair whose PACE
     aligns with the service's enabled tiers. Missing cells are inserted
@@ -289,16 +291,25 @@ def materialize_cells(
     existing = {
         c.gateway_id: c
         for c in db.query(ServiceGatewayStatus).filter(
-            ServiceGatewayStatus.service_id == service.id
+            ServiceGatewayStatus.service_delivery_id == service.id
         )
     }
+    added = False
     for gw in candidates:
         if gw.id not in existing:
             cell = ServiceGatewayStatus(
-                service_id=service.id,
+                service_delivery_id=service.id,
                 gateway_id=gw.id,
                 status="unvalidated",
             )
             db.add(cell)
             existing[gw.id] = cell
+            added = True
+    # Flush what we just created. The session runs with autoflush=False, so
+    # without this the `existing` query above cannot see cells added by an
+    # earlier call in the same session and happily inserts them a second time,
+    # violating the (delivery, gateway) primary key at commit. One request that
+    # materializes the same delivery twice is enough to hit it.
+    if added:
+        db.flush()
     return existing

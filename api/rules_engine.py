@@ -54,6 +54,7 @@ from models import (
     SEVERITIES,
     SITE_STATUS_VALUES,
     Service,
+    ServiceDelivery,
     Site,
     Team,
     Unit,
@@ -273,17 +274,24 @@ _COMMON_FIELDS = [
 
 
 def _enrich_service_context(db: Session, ctx: dict) -> dict:
-    svc = db.get(Service, ctx.get("service_id")) if ctx.get("service_id") else None
-    if svc is None:
+    # `service_id` in a rule context is a delivery id — that is what the
+    # triggers have always carried, and what rules were written against.
+    delivery = (
+        db.get(ServiceDelivery, ctx.get("service_id"))
+        if ctx.get("service_id")
+        else None
+    )
+    if delivery is None:
         return {}
-    site = db.get(Site, svc.site_id)
+    svc = db.get(Service, delivery.service_id)
+    site = db.get(Site, delivery.site_id)
     return {
-        "site_id": svc.site_id,
+        "site_id": delivery.site_id,
         "site_name": site.name if site else None,
-        "service_kind": svc.kind,
-        "service_category": svc.category,
-        "service_reach": svc.reach,
-        "enabled_pace": svc.enabled_pace or [],
+        "service_kind": svc.kind if svc else None,
+        "service_category": svc.category if svc else None,
+        "service_reach": delivery.reach,
+        "enabled_pace": delivery.enabled_pace or [],
     }
 
 

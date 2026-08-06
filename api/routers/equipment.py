@@ -39,6 +39,7 @@ from models import (
     EquipmentTypeCapability,
     Gateway,
     Service,
+    ServiceDelivery,
     Site,
     User,
     UtcInstance,
@@ -116,7 +117,7 @@ def _capability_out(
             out.validated_by_username = u.username
     if service_ids is None:
         service_ids = [
-            r.service_id
+            r.service_delivery_id
             for r in db.query(CapabilityServiceLink).filter(
                 CapabilityServiceLink.equipment_capability_id == cap.id
             )
@@ -183,7 +184,9 @@ def equipment_out_bulk(db: Session, rows: list[Equipment]) -> list[EquipmentOut]
         for r in db.query(CapabilityServiceLink).filter(
             CapabilityServiceLink.equipment_capability_id.in_(cap_ids)
         ):
-            svc_links.setdefault(r.equipment_capability_id, []).append(r.service_id)
+            svc_links.setdefault(r.equipment_capability_id, []).append(
+                r.service_delivery_id
+            )
         for r in db.query(CapabilityGatewayLink).filter(
             CapabilityGatewayLink.equipment_capability_id.in_(cap_ids)
         ):
@@ -616,7 +619,7 @@ def set_capability_status(
     site = db.get(Site, eq.site_id)
 
     bound_service_ids = [
-        r.service_id
+        r.service_delivery_id
         for r in db.query(CapabilityServiceLink).filter(
             CapabilityServiceLink.equipment_capability_id == cap.id
         )
@@ -629,9 +632,16 @@ def set_capability_status(
     ]
     contradicts = False
     bound_labels: list[str] = []
-    for svc in db.query(Service).filter(Service.id.in_(bound_service_ids)) if bound_service_ids else []:
+    # Bound ids are DELIVERY ids; the label comes from the shared identity.
+    for d, svc in (
+        db.query(ServiceDelivery, Service)
+        .join(Service, Service.id == ServiceDelivery.service_id)
+        .filter(ServiceDelivery.id.in_(bound_service_ids))
+        if bound_service_ids
+        else []
+    ):
         bound_labels.append(svc.name)
-        if disagrees(svc.status, body.status):
+        if disagrees(d.status, body.status):
             contradicts = True
     for gw in db.query(Gateway).filter(Gateway.id.in_(bound_gateway_ids)) if bound_gateway_ids else []:
         bound_labels.append(gw.name)
@@ -700,7 +710,7 @@ def bind_capability_to_service(
     _=Depends(requires("operator")),
 ):
     cap, _eq = _load_capability(db, capability_id, workspace)
-    svc = db.get(Service, service_id)
+    svc = db.get(ServiceDelivery, service_id)
     if svc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
     _site_in_workspace(db, svc.site_id, workspace)
@@ -708,7 +718,9 @@ def bind_capability_to_service(
     if existing is None:
         db.add(
             CapabilityServiceLink(
-                equipment_capability_id=cap.id, service_id=service_id, role=role
+                equipment_capability_id=cap.id,
+                service_delivery_id=service_id,
+                role=role
             )
         )
     else:
@@ -803,7 +815,11 @@ def site_equipment_advisory(
     from equipment_status import build_derived
 
     _site_in_workspace(db, site_id, workspace)
-    services = db.query(Service).filter(Service.site_id == site_id).all()
+    services = (
+        db.query(ServiceDelivery)
+        .filter(ServiceDelivery.site_id == site_id)
+        .all()
+    )
     gateways = db.query(Gateway).filter(Gateway.site_id == site_id).all()
     svc_backing = load_backing_for_services(db, [s.id for s in services])
     gw_backing = load_backing_for_gateways(db, [g.id for g in gateways])

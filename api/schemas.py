@@ -682,7 +682,21 @@ class ServiceGatewayStatusValidateIn(BaseModel):
 
 
 class ServiceOut(_ORM):
+    """One service AS DELIVERED AT ONE SITE.
+
+    Deliberately still delivery-shaped after the 0054 split: `id` is the
+    delivery's id (which is the id this row has always had), and `site_id`,
+    `status` and `gateway_statuses` mean exactly what they did before. That
+    keeps every existing caller working while the storage underneath is now
+    Service + ServiceDelivery.
+
+    `service_id` is the new part — the shared identity two sites' "NIPR Web"
+    now have in common. Answering "is NIPR up anywhere?" means grouping on it.
+    """
+
     id: int
+    # The identity row. Multiple deliveries share one of these.
+    service_id: int
     name: str
     site_id: int
     service_template_id: Optional[int] = None

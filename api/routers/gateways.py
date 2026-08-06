@@ -179,10 +179,15 @@ def validate_gateway(
     # "cascade") so the audit trail covers cascaded changes too.
     if body.cascade:
         changed = reset_cells_for_gateway(db, gw.id, body.status)
+        # Cells key on deliveries; the display name lives on the identity.
         service_names = {
-            s.id: s.name
-            for s in db.query(Service).filter(
-                Service.id.in_({cell.service_id for cell, _, _ in changed})
+            d.id: svc.name
+            for d, svc in db.query(ServiceDelivery, Service)
+            .join(Service, Service.id == ServiceDelivery.service_id)
+            .filter(
+                ServiceDelivery.id.in_(
+                    {cell.service_delivery_id for cell, _, _ in changed}
+                )
             )
         } if changed else {}
         for cell, prev, new in changed:
@@ -190,9 +195,9 @@ def validate_gateway(
                 db,
                 "cell.status_changed",
                 {
-                    "service_id": cell.service_id,
+                    "service_id": cell.service_delivery_id,
                     "gateway_id": gw.id,
-                    "service_name": service_names.get(cell.service_id),
+                    "service_name": service_names.get(cell.service_delivery_id),
                     "gateway_name": gw.name,
                     "prev_status": prev,
                     "new_status": new,

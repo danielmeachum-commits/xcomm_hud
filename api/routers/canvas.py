@@ -13,6 +13,7 @@ from models import (
     CanvasAnnotation,
     Gateway,
     Service,
+    ServiceDelivery,
     ServiceGatewayStatus,
     ServiceTemplate,
     Site,
@@ -49,12 +50,17 @@ def map_bundle(
         .all()
     )
     site_ids = [s.id for s in sites]
-    services = (
-        db.query(Service)
-        .filter(Service.site_id.in_(site_ids))
-        .order_by(Service.site_id, Service.display_order, Service.name)
+    # (delivery, service) pairs — per-site state from one, identity from the
+    # other. Still one query: the canvas renders every service at once and an
+    # N+1 here would be felt immediately.
+    pairs = (
+        db.query(ServiceDelivery, Service)
+        .join(Service, Service.id == ServiceDelivery.service_id)
+        .filter(ServiceDelivery.site_id.in_(site_ids))
+        .order_by(ServiceDelivery.site_id, ServiceDelivery.display_order, Service.name)
         .all()
     ) if site_ids else []
+    services = [d for d, _ in pairs]
     pace_order = sql_case(
         (Gateway.pace == "primary", 0),
         (Gateway.pace == "alternate", 1),
@@ -80,7 +86,7 @@ def map_bundle(
         .all()
     )
 
-    services_by_site: dict[int, list[Service]] = {}
+    services_by_site: dict[int, list[ServiceDelivery]] = {}
     for s in services:
         services_by_site.setdefault(s.site_id, []).append(s)
     gateways_by_site: dict[int, list[Gateway]] = {}
@@ -98,28 +104,48 @@ def map_bundle(
     if service_ids:
         for c in (
             db.query(ServiceGatewayStatus)
-            .filter(ServiceGatewayStatus.service_id.in_(service_ids))
+            .filter(ServiceGatewayStatus.service_delivery_id.in_(service_ids))
             .all()
         ):
-            cells_by_svc.setdefault(c.service_id, {})[c.gateway_id] = c
+            cells_by_svc.setdefault(c.service_delivery_id, {})[c.gateway_id] = c
 
     site_outs: list[SiteOut] = [SiteOut.model_validate(s) for s in sites]
 
     template_cache: dict[int, ServiceTemplate] = {}
     service_outs: list[ServiceOut] = []
     user_cache: dict[int, str] = {}
-    for s in services:
+    for s, svc in pairs:
         gws = gateways_by_site.get(s.site_id, [])
-        so = ServiceOut.model_validate(s)
+        # Built by hand rather than model_validate: the payload spans both
+        # tables now, and the delivery alone can't answer for name or kind.
+        so = ServiceOut(
+            id=s.id,
+            service_id=s.service_id,
+            name=svc.name,
+            site_id=s.site_id,
+            service_template_id=svc.service_template_id,
+            enclave_id=svc.enclave_id,
+            kind=svc.kind,
+            category=svc.category,
+            reach=s.reach,
+            icon=svc.icon,
+            description=svc.description,
+            status=s.status,
+            enabled_pace=s.enabled_pace,
+            validated_at=s.validated_at,
+            validated_by_user_id=s.validated_by_user_id,
+            display_order=s.display_order,
+            notes=s.notes,
+        )
         so.effective_status = effective_service_status(
             s, gws, cells_by_svc.get(s.id, {})
         )
-        if s.service_template_id is not None:
-            tpl = template_cache.get(s.service_template_id)
+        if svc.service_template_id is not None:
+            tpl = template_cache.get(svc.service_template_id)
             if tpl is None:
-                tpl = db.get(ServiceTemplate, s.service_template_id)
+                tpl = db.get(ServiceTemplate, svc.service_template_id)
                 if tpl:
-                    template_cache[s.service_template_id] = tpl
+                    template_cache[svc.service_template_id] = tpl
             if tpl and tpl.allowed_statuses:
                 so.allowed_statuses = tpl.allowed_statuses
         if s.validated_by_user_id is not None:

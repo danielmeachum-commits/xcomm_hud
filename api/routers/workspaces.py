@@ -9,6 +9,7 @@ current baseline.
 from __future__ import annotations
 
 import datetime
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -35,6 +36,7 @@ from models import (
     PackageInstance,
     Personnel,
     Service,
+    ServiceDelivery,
     ServiceTemplate,
     Site,
     SiteCanvasPosition,
@@ -249,27 +251,45 @@ def duplicate_workspace(
     service_id_map: dict[int, int] = {}
     gateway_id_map: dict[int, int] = {}
     if site_id_map:
-        for svc in (
-            db.query(Service).filter(Service.site_id.in_(site_id_map.keys())).all()
+        # One identity per source Service, then a delivery per site it reached.
+        # `service_id_map` still maps old DELIVERY id → new delivery id, because
+        # that is what the capability bindings below point at.
+        identity_map: dict[int, int] = {}
+        for delivery, svc in (
+            db.query(ServiceDelivery, Service)
+            .join(Service, Service.id == ServiceDelivery.service_id)
+            .filter(ServiceDelivery.site_id.in_(site_id_map.keys()))
+            .all()
         ):
-            new_svc = Service(
-                site_id=site_id_map[svc.site_id],
-                service_template_id=svc.service_template_id,
-                enclave_id=enclave_map.get(svc.enclave_id, svc.enclave_id),
-                name=svc.name,
-                kind=svc.kind,
-                category=svc.category,
-                reach=svc.reach,
-                icon=svc.icon,
-                description=svc.description,
+            new_service_id = identity_map.get(svc.id)
+            if new_service_id is None:
+                new_svc = Service(
+                    workspace_id=dest.id,
+                    service_template_id=svc.service_template_id,
+                    enclave_id=enclave_map.get(svc.enclave_id, svc.enclave_id),
+                    name=svc.name,
+                    kind=svc.kind,
+                    category=svc.category,
+                    icon=svc.icon,
+                    description=svc.description,
+                )
+                db.add(new_svc)
+                db.flush()
+                identity_map[svc.id] = new_svc.id
+                new_service_id = new_svc.id
+            new_delivery = ServiceDelivery(
+                service_id=new_service_id,
+                site_id=site_id_map[delivery.site_id],
+                source=delivery.source,
+                reach=delivery.reach,
                 # status left as default ("unvalidated"); no validated_* fields.
-                display_order=svc.display_order,
-                notes=svc.notes,
-                enabled_pace=list(svc.enabled_pace),
+                display_order=delivery.display_order,
+                notes=delivery.notes,
+                enabled_pace=list(delivery.enabled_pace),
             )
-            db.add(new_svc)
+            db.add(new_delivery)
             db.flush()
-            service_id_map[svc.id] = new_svc.id
+            service_id_map[delivery.id] = new_delivery.id
 
         for gw in (
             db.query(Gateway).filter(Gateway.site_id.in_(site_id_map.keys())).all()
@@ -404,7 +424,7 @@ def duplicate_workspace(
             )
 
     _duplicate_equipment(
-        db, source, dest, site_id_map, service_id_map, gateway_id_map
+        db, source, dest, site_id_map, service_id_map, gateway_id_map, enclave_map
     )
 
     db.flush()
@@ -419,6 +439,11 @@ def _duplicate_equipment(
     site_id_map: dict[int, int],
     service_id_map: dict[int, int],
     gateway_id_map: dict[int, int],
+    # Pre-existing bug, unrelated to the Service split: this function already
+    # read `enclave_map` in two places but never received it, so duplicating a
+    # workspace that owned any equipment or UTC lines raised NameError. It went
+    # unnoticed because the path is only reachable once equipment exists.
+    enclave_map: dict[int, int],
 ) -> None:
     """Copy the equipment tier into the destination workspace.
 
@@ -633,14 +658,14 @@ def _duplicate_equipment(
         for link in db.query(CapabilityServiceLink).filter(
             CapabilityServiceLink.equipment_capability_id.in_(capability_map.keys())
         ):
-            if link.service_id not in service_id_map:
+            if link.service_delivery_id not in service_id_map:
                 continue
             db.add(
                 CapabilityServiceLink(
                     equipment_capability_id=capability_map[
                         link.equipment_capability_id
                     ],
-                    service_id=service_id_map[link.service_id],
+                    service_delivery_id=service_id_map[link.service_delivery_id],
                     role=link.role,
                 )
             )
@@ -773,9 +798,13 @@ def _export_equipment(
     )
     cap_ids = [c.id for c in caps]
     service_names = {
-        s.id: s.name
-        for s in (
-            db.query(Service).filter(Service.site_id.in_(site_ids)) if site_ids else []
+        d.id: svc.name
+        for d, svc in (
+            db.query(ServiceDelivery, Service)
+            .join(Service, Service.id == ServiceDelivery.service_id)
+            .filter(ServiceDelivery.site_id.in_(site_ids))
+            if site_ids
+            else []
         )
     }
     gateway_names = {
@@ -790,7 +819,7 @@ def _export_equipment(
         for link in db.query(CapabilityServiceLink).filter(
             CapabilityServiceLink.equipment_capability_id.in_(cap_ids)
         ):
-            name = service_names.get(link.service_id)
+            name = service_names.get(link.service_delivery_id)
             if name:
                 svc_binding.setdefault(link.equipment_capability_id, []).append(name)
         for link in db.query(CapabilityGatewayLink).filter(
@@ -1037,11 +1066,20 @@ def export_workspace(
         )
     }
 
-    services = (
-        db.query(Service).filter(Service.site_id.in_(site_ids)).all()
+    # One exported row per DELIVERY. The format is unchanged and needs no
+    # version bump: ExportedService was already keyed on (site_name, name) and
+    # already carried the per-site fields, so a service spanning two sites
+    # simply exports as two rows — which is exactly what it did before the
+    # split. Import rebuilds the shared identity by find-or-create.
+    service_pairs = (
+        db.query(ServiceDelivery, Service)
+        .join(Service, Service.id == ServiceDelivery.service_id)
+        .filter(ServiceDelivery.site_id.in_(site_ids))
+        .all()
         if site_ids
         else []
     )
+    services = [d for d, _ in service_pairs]
     gateways = (
         db.query(Gateway).filter(Gateway.site_id.in_(site_ids)).all()
         if site_ids
@@ -1062,7 +1100,9 @@ def export_workspace(
     )
 
     template_name_by_id: dict[int, str] = {}
-    template_ids = {s.service_template_id for s in services if s.service_template_id}
+    template_ids = {
+        svc.service_template_id for _, svc in service_pairs if svc.service_template_id
+    }
     if template_ids:
         for tpl in (
             db.query(ServiceTemplate)
@@ -1183,7 +1223,7 @@ def export_workspace(
         ],
         services=[
             ExportedService(
-                site_name=site_name_by_id[svc.site_id],
+                site_name=site_name_by_id[d.site_id],
                 service_template_name=(
                     template_name_by_id.get(svc.service_template_id)
                     if svc.service_template_id
@@ -1195,14 +1235,14 @@ def export_workspace(
                 name=svc.name,
                 kind=svc.kind,
                 category=svc.category,
-                reach=svc.reach,
+                reach=d.reach,
                 icon=svc.icon,
                 description=svc.description,
-                display_order=svc.display_order,
-                notes=svc.notes,
-                enabled_pace=list(svc.enabled_pace),
+                display_order=d.display_order,
+                notes=d.notes,
+                enabled_pace=list(d.enabled_pace),
             )
-            for svc in services
+            for d, svc in service_pairs
         ],
         gateways=[
             ExportedGateway(
@@ -1354,30 +1394,47 @@ def import_workspace(
     service_id_by_key: dict[tuple[str, str], int] = {}
     gateway_id_by_key: dict[tuple[str, str], int] = {}
 
+    # Two exported rows with the same (enclave, name) are the SAME service
+    # delivered at two sites — that is the whole point of the split, and it is
+    # how an archive taken before it still imports correctly: the rows were
+    # always per-site, and find-or-create rebuilds the identity they share.
+    identity_by_key: dict[tuple[Optional[int], str], int] = {}
     for svc in payload.services:
-        new_svc = Service(
+        enclave_id = (
+            enclave_id_by_name.get(svc.enclave_name) if svc.enclave_name else None
+        )
+        identity_key = (enclave_id, svc.name)
+        service_pk = identity_by_key.get(identity_key)
+        if service_pk is None:
+            new_svc = Service(
+                workspace_id=ws.id,
+                service_template_id=(
+                    template_id_by_name.get(svc.service_template_name)
+                    if svc.service_template_name
+                    else None
+                ),
+                enclave_id=enclave_id,
+                name=svc.name,
+                kind=svc.kind,
+                category=svc.category,
+                icon=svc.icon,
+                description=svc.description,
+            )
+            db.add(new_svc)
+            db.flush()
+            identity_by_key[identity_key] = new_svc.id
+            service_pk = new_svc.id
+        new_delivery = ServiceDelivery(
+            service_id=service_pk,
             site_id=site_id_by_name[svc.site_name],
-            service_template_id=(
-                template_id_by_name.get(svc.service_template_name)
-                if svc.service_template_name
-                else None
-            ),
-            enclave_id=enclave_id_by_name.get(svc.enclave_name)
-            if svc.enclave_name
-            else None,
-            name=svc.name,
-            kind=svc.kind,
-            category=svc.category,
             reach=svc.reach,
-            icon=svc.icon,
-            description=svc.description,
             display_order=svc.display_order,
             notes=svc.notes,
             enabled_pace=list(svc.enabled_pace),
         )
-        db.add(new_svc)
+        db.add(new_delivery)
         db.flush()
-        service_id_by_key[(svc.site_name, svc.name)] = new_svc.id
+        service_id_by_key[(svc.site_name, svc.name)] = new_delivery.id
 
     for gw in payload.gateways:
         new_gw = Gateway(
@@ -1748,7 +1805,8 @@ def _import_equipment(
                 if svc_id is not None:
                     db.add(
                         CapabilityServiceLink(
-                            equipment_capability_id=new_cap.id, service_id=svc_id
+                            equipment_capability_id=new_cap.id,
+                            service_delivery_id=svc_id,
                         )
                     )
             for gw_name in cap.gateway_names:

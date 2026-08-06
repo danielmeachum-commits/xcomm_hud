@@ -34,6 +34,7 @@ from models import (
     Gateway,
     Personnel,
     Service,
+    ServiceDelivery,
     ServiceGatewayStatus,
     Site,
     Team,
@@ -87,11 +88,14 @@ def _enrich(db: Session, v: Event) -> EventOut:
             out.validated_by_username = u.username
     if v.subject_id is not None:
         if v.subject_kind == SubjectKinds.SERVICE:
-            svc = db.get(Service, v.subject_id)
-            if svc:
+            # subject_id is a delivery (the per-site row it always was); the
+            # display name comes from the identity it belongs to.
+            d = db.get(ServiceDelivery, v.subject_id)
+            svc = db.get(Service, d.service_id) if d else None
+            if d and svc:
                 out.subject_name = svc.name
-                out.site_id = svc.site_id
-                site = db.get(Site, svc.site_id)
+                out.site_id = d.site_id
+                site = db.get(Site, d.site_id)
                 if site:
                     out.site_name = site.name
         elif v.subject_kind == SubjectKinds.GATEWAY:
@@ -106,11 +110,12 @@ def _enrich(db: Session, v: Event) -> EventOut:
             # subject_id is the service; the gateway lives in second_subject_id
             # so subject_name stays the service, and subject_label carries the
             # "svc via gw" hint that the UI shows as a subtitle.
-            svc = db.get(Service, v.subject_id)
-            if svc:
+            d = db.get(ServiceDelivery, v.subject_id)
+            svc = db.get(Service, d.service_id) if d else None
+            if d and svc:
                 out.subject_name = svc.name
-                out.site_id = svc.site_id
-                site = db.get(Site, svc.site_id)
+                out.site_id = d.site_id
+                site = db.get(Site, d.site_id)
                 if site:
                     out.site_name = site.name
         elif v.subject_kind in _SITE_SUBJECT_KINDS:
@@ -203,7 +208,8 @@ def _enrich(db: Session, v: Event) -> EventOut:
 def _resolve_subject(db: Session, subject_kind: str, subject_id: int):
     """Return the current row for a known-entity subject kind, or raise 404."""
     if subject_kind == SubjectKinds.SERVICE:
-        obj = db.get(Service, subject_id)
+        # A "service" subject id is a delivery — see _enrich.
+        obj = db.get(ServiceDelivery, subject_id)
     elif subject_kind == SubjectKinds.GATEWAY:
         obj = db.get(Gateway, subject_id)
     elif subject_kind in _SITE_SUBJECT_KINDS:
@@ -359,10 +365,13 @@ def events_summary(
         )
         .count()
     )
+    # Counts DELIVERIES that are down, not services. A service down at one of
+    # three sites is one outage to deal with, and collapsing it to "1 service
+    # down" would understate the work while hiding where it is.
     services_down = (
-        db.query(Service)
-        .join(Site, Site.id == Service.site_id)
-        .filter(Site.workspace_id == workspace.id, Service.status == "down")
+        db.query(ServiceDelivery)
+        .join(Site, Site.id == ServiceDelivery.site_id)
+        .filter(Site.workspace_id == workspace.id, ServiceDelivery.status == "down")
         .count()
     )
 
@@ -677,7 +686,7 @@ def _apply_subject_status(
 ) -> None:
     """Write `new_status`/`new_ts` back to the live subject row."""
     if row.subject_kind == SubjectKinds.SERVICE:
-        svc = db.get(Service, row.subject_id)
+        svc = db.get(ServiceDelivery, row.subject_id)
         if svc:
             svc.status = new_status
             svc.validated_at = new_ts
@@ -696,7 +705,7 @@ def _apply_subject_status(
         cell = (
             db.query(ServiceGatewayStatus)
             .filter(
-                ServiceGatewayStatus.service_id == row.subject_id,
+                ServiceGatewayStatus.service_delivery_id == row.subject_id,
                 ServiceGatewayStatus.gateway_id == row.second_subject_id,
             )
             .one_or_none()

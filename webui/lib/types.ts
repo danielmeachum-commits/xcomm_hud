@@ -193,7 +193,12 @@ export interface ServiceGatewayStatus {
 }
 
 export interface Service {
+  /** The DELIVERY id — one service at one site. Unchanged across the
+   *  Service/ServiceDelivery split: every stored reference still resolves. */
   id: number
+  /** The shared identity. Two sites' "NIPR Web" have the same service_id,
+   *  which is what makes "is NIPR up anywhere?" answerable. */
+  service_id: number
   name: string
   site_id: number
   service_template_id: number | null

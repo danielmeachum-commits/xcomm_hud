@@ -19,6 +19,7 @@ from effective import (
 from models import (
     Gateway,
     Service,
+    ServiceDelivery,
     ServiceGatewayStatus,
     ServiceTemplate,
     Site,
@@ -42,24 +43,55 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def _service_out(db: Session, service: Service) -> ServiceOut:
+def _service_out(
+    db: Session, delivery: ServiceDelivery, service: Service | None = None
+) -> ServiceOut:
+    """Serialize a delivery in the shape callers have always seen.
+
+    `id` is the delivery's, which is the id this row carried before 0054 —
+    every stored reference (bindings, matrix cells, canvas positions, event
+    subject ids) still resolves. Identity fields are joined in from Service.
+    """
+    service = service or db.get(Service, delivery.service_id)
     gateways = (
-        db.query(Gateway).filter(Gateway.site_id == service.site_id).all()
+        db.query(Gateway).filter(Gateway.site_id == delivery.site_id).all()
     )
-    # Materialize any missing (service, gateway) cells so downstream views
+    # Materialize any missing (delivery, gateway) cells so downstream views
     # always see a full row per enabled-tier gateway. `cells_by_gw` maps
     # gateway_id → ServiceGatewayStatus for the rollup + response shaping.
-    cells_by_gw = materialize_cells(db, service, gateways)
-    out = ServiceOut.model_validate(service)
+    #
+    # These take the delivery where they used to take the service, and needed
+    # no other change: `status` and `enabled_pace` moved to the delivery, which
+    # is the only state effective.py ever read.
+    cells_by_gw = materialize_cells(db, delivery, gateways)
+    out = ServiceOut(
+        id=delivery.id,
+        service_id=delivery.service_id,
+        name=service.name,
+        site_id=delivery.site_id,
+        service_template_id=service.service_template_id,
+        enclave_id=service.enclave_id,
+        kind=service.kind,
+        category=service.category,
+        reach=delivery.reach,
+        icon=service.icon,
+        description=service.description,
+        status=delivery.status,
+        enabled_pace=delivery.enabled_pace,
+        validated_at=delivery.validated_at,
+        validated_by_user_id=delivery.validated_by_user_id,
+        display_order=delivery.display_order,
+        notes=delivery.notes,
+    )
     out.effective_status = effective_service_status(
-        service, gateways, cells_by_gw
+        delivery, gateways, cells_by_gw
     )
     if service.service_template_id is not None:
         tpl = db.get(ServiceTemplate, service.service_template_id)
         if tpl and tpl.allowed_statuses:
             out.allowed_statuses = tpl.allowed_statuses
-    if service.validated_by_user_id is not None:
-        u = db.get(User, service.validated_by_user_id)
+    if delivery.validated_by_user_id is not None:
+        u = db.get(User, delivery.validated_by_user_id)
         if u:
             out.validated_by_username = u.username
 
@@ -74,7 +106,7 @@ def _service_out(db: Session, service: Service) -> ServiceOut:
             continue
         entry = ServiceGatewayStatusOut.model_validate(cell)
         entry.effective_status = effective_cell_status(
-            cell.status, service.status, gw.status
+            cell.status, delivery.status, gw.status
         )
         if cell.validated_by_user_id is not None:
             uid = cell.validated_by_user_id
@@ -88,14 +120,22 @@ def _service_out(db: Session, service: Service) -> ServiceOut:
     return out
 
 
-def _service_in_workspace(db: Session, service_id: int, workspace: Workspace) -> Service:
-    service = db.get(Service, service_id)
-    if service is None:
+def _service_in_workspace(
+    db: Session, service_id: int, workspace: Workspace
+) -> ServiceDelivery:
+    """Resolve a path `{service_id}` to a delivery.
+
+    The path parameter keeps its name because the ids did not change: what
+    callers have always passed here was a per-site row, which 0054 turned into
+    a delivery of the same id.
+    """
+    delivery = db.get(ServiceDelivery, service_id)
+    if delivery is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
-    site = db.get(Site, service.site_id)
+    site = db.get(Site, delivery.site_id)
     if site is None or site.workspace_id != workspace.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Service not found")
-    return service
+    return delivery
 
 
 @router.get("", response_model=list[ServiceOut])
@@ -112,16 +152,16 @@ def list_services(
     offered another site's services as binding targets.
     """
     q = (
-        db.query(Service)
-        .join(Site, Site.id == Service.site_id)
-        .filter(Site.workspace_id == workspace.id)
+        db.query(ServiceDelivery, Service)
+        .join(Service, Service.id == ServiceDelivery.service_id)
+        .filter(Service.workspace_id == workspace.id)
     )
     if site_id is not None:
-        q = q.filter(Service.site_id == site_id)
-    services = q.order_by(
-        Service.site_id, Service.display_order, Service.name
+        q = q.filter(ServiceDelivery.site_id == site_id)
+    rows = q.order_by(
+        ServiceDelivery.site_id, ServiceDelivery.display_order, Service.name
     ).all()
-    return [_service_out(db, s) for s in services]
+    return [_service_out(db, d, s) for d, s in rows]
 
 
 @router.post("", response_model=ServiceOut, status_code=status.HTTP_201_CREATED)
@@ -143,26 +183,75 @@ def create_service(
                 status.HTTP_404_NOT_FOUND, "Service template not found"
             )
 
-    # Place new service at the end of the site's current list.
+    # Place the new delivery at the end of the site's current list.
     max_order = (
-        db.query(Service)
-        .filter(Service.site_id == body.site_id)
-        .order_by(Service.display_order.desc())
+        db.query(ServiceDelivery)
+        .filter(ServiceDelivery.site_id == body.site_id)
+        .order_by(ServiceDelivery.display_order.desc())
         .first()
     )
     next_order = (max_order.display_order + 1) if max_order else 0
 
-    data = body.model_dump()
     # Inherit the template's enclave unless the caller named one. Templates are
     # where the NIPR/SIPR split has always lived, so a service built from one
     # should arrive already tagged rather than needing a second edit.
-    if data.get("enclave_id") is None and template is not None:
-        data["enclave_id"] = template.enclave_id
-    service = Service(**data, display_order=next_order)
-    db.add(service)
+    enclave_id = body.enclave_id
+    if enclave_id is None and template is not None:
+        enclave_id = template.enclave_id
+
+    # Find-or-create the identity. This is the behavioural change the split was
+    # for: standing up "NIPR Web" at a second site now JOINS the existing
+    # service instead of minting an unrelated row that nothing could correlate.
+    service = (
+        db.query(Service)
+        .filter(
+            Service.workspace_id == workspace.id,
+            Service.name == body.name,
+            Service.enclave_id.is_not_distinct_from(enclave_id),
+        )
+        .first()
+    )
+    if service is None:
+        service = Service(
+            workspace_id=workspace.id,
+            name=body.name,
+            service_template_id=body.service_template_id,
+            enclave_id=enclave_id,
+            kind=body.kind,
+            category=body.category,
+            icon=body.icon,
+            description=body.description,
+        )
+        db.add(service)
+        db.flush()
+    else:
+        existing = (
+            db.query(ServiceDelivery)
+            .filter(
+                ServiceDelivery.service_id == service.id,
+                ServiceDelivery.site_id == body.site_id,
+            )
+            .first()
+        )
+        if existing is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"'{service.name}' is already delivered at '{site.name}'.",
+            )
+
+    delivery = ServiceDelivery(
+        service_id=service.id,
+        site_id=body.site_id,
+        reach=body.reach,
+        status=body.status,
+        notes=body.notes,
+        enabled_pace=body.enabled_pace,
+        display_order=next_order,
+    )
+    db.add(delivery)
     db.flush()
     notify(background_tasks)
-    return _service_out(db, service)
+    return _service_out(db, delivery, service)
 
 
 @router.get("/{service_id}", response_model=ServiceOut)
@@ -185,7 +274,8 @@ def patch_service(
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    service = _service_in_workspace(db, service_id, workspace)
+    delivery = _service_in_workspace(db, service_id, workspace)
+    service = db.get(Service, delivery.service_id)
 
     data = body.model_dump(exclude_unset=True)
     if "site_id" in data:
@@ -198,13 +288,24 @@ def patch_service(
                 status.HTTP_404_NOT_FOUND, "Service template not found"
             )
 
+    # Identity edits hit every site that delivers this service, which is the
+    # point — renaming "NIPR Web" should not rename it at one site only.
+    # Anything per-location stays on the delivery.
+    identity_fields = {
+        "name", "service_template_id", "enclave_id", "kind", "category",
+        "icon", "description",
+    }
+    delivery_fields = {"site_id", "reach", "notes", "display_order", "enabled_pace"}
     for k, v in data.items():
-        setattr(service, k, v)
+        if k in identity_fields:
+            setattr(service, k, v)
+        elif k in delivery_fields:
+            setattr(delivery, k, v)
 
     db.flush()
-    db.refresh(service)
+    db.refresh(delivery)
     notify(background_tasks)
-    return _service_out(db, service)
+    return _service_out(db, delivery, service)
 
 
 @router.post("/{service_id}/validate", response_model=ServiceOut)
@@ -216,16 +317,18 @@ def validate_service(
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    service = _service_in_workspace(db, service_id, workspace)
+    delivery = _service_in_workspace(db, service_id, workspace)
+    service = db.get(Service, delivery.service_id)
 
     when = body.validated_at or _now()
     emit_trigger(
         db,
         "service.status_changed",
         {
-            "service_id": service.id,
+            # The delivery id — what this subject id has always been.
+            "service_id": delivery.id,
             "service_name": service.name,
-            "prev_status": service.status,
+            "prev_status": delivery.status,
             "new_status": body.status,
             "note": body.note,
             "user_id": current_user.id,
@@ -234,9 +337,9 @@ def validate_service(
         },
         workspace_id=workspace.id,
     )
-    service.status = body.status
-    service.validated_at = when
-    service.validated_by_user_id = current_user.id
+    delivery.status = body.status
+    delivery.validated_at = when
+    delivery.validated_by_user_id = current_user.id
     # R10/R11 cascade to matrix cells. R10: local down/offline forces every
     # cell to match. R11: any cell better than the new local is clamped
     # down. Cascade is skipped when the operator unchecks "cascade to
@@ -247,7 +350,7 @@ def validate_service(
     # changed emits its own trigger (source_flow "cascade") so the audit
     # trail covers cascaded changes too.
     if body.cascade:
-        changed = clamp_cells_for_service(db, service.id, body.status)
+        changed = clamp_cells_for_service(db, delivery.id, body.status)
         gateway_names = {
             g.id: g.name
             for g in db.query(Gateway).filter(
@@ -259,7 +362,7 @@ def validate_service(
                 db,
                 "cell.status_changed",
                 {
-                    "service_id": service.id,
+                    "service_id": delivery.id,
                     "gateway_id": cell.gateway_id,
                     "service_name": service.name,
                     "gateway_name": gateway_names.get(cell.gateway_id),
@@ -274,9 +377,9 @@ def validate_service(
                 workspace_id=workspace.id,
             )
     db.flush()
-    db.refresh(service)
+    db.refresh(delivery)
     notify(background_tasks)
-    return _service_out(db, service)
+    return _service_out(db, delivery, service)
 
 
 @router.post("/{service_id}/move", response_model=ServiceOut)
@@ -294,31 +397,34 @@ def move_service(
     move only reshuffles within Local or within External, matching the canvas
     layout the operator sees.
     """
-    service = _service_in_workspace(db, service_id, workspace)
+    delivery = _service_in_workspace(db, service_id, workspace)
 
     siblings = (
-        db.query(Service)
+        db.query(ServiceDelivery)
         .filter(
-            Service.site_id == service.site_id,
-            Service.reach == service.reach,
+            ServiceDelivery.site_id == delivery.site_id,
+            ServiceDelivery.reach == delivery.reach,
         )
-        .order_by(Service.display_order, Service.id)
+        .order_by(ServiceDelivery.display_order, ServiceDelivery.id)
         .all()
     )
-    idx = next((i for i, s in enumerate(siblings) if s.id == service.id), None)
+    idx = next((i for i, d in enumerate(siblings) if d.id == delivery.id), None)
     if idx is None:
-        return _service_out(db, service)
+        return _service_out(db, delivery)
 
     swap_idx = idx - 1 if direction == "up" else idx + 1
     if swap_idx < 0 or swap_idx >= len(siblings):
-        return _service_out(db, service)
+        return _service_out(db, delivery)
 
     other = siblings[swap_idx]
-    service.display_order, other.display_order = other.display_order, service.display_order
+    delivery.display_order, other.display_order = (
+        other.display_order,
+        delivery.display_order,
+    )
     db.flush()
-    db.refresh(service)
+    db.refresh(delivery)
     notify(background_tasks)
-    return _service_out(db, service)
+    return _service_out(db, delivery)
 
 
 @router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -329,6 +435,20 @@ def delete_service(
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    service = _service_in_workspace(db, service_id, workspace)
-    db.delete(service)
+    delivery = _service_in_workspace(db, service_id, workspace)
+    service_pk = delivery.service_id
+    db.delete(delivery)
+    db.flush()
+    # Deleting the last delivery retires the identity too. Without this a
+    # service nobody delivers anywhere would linger, still occupying its
+    # (workspace, enclave, name) slot and blocking a later re-create.
+    remaining = (
+        db.query(ServiceDelivery)
+        .filter(ServiceDelivery.service_id == service_pk)
+        .count()
+    )
+    if remaining == 0:
+        orphan = db.get(Service, service_pk)
+        if orphan is not None:
+            db.delete(orphan)
     notify(background_tasks)

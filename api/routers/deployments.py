@@ -32,6 +32,7 @@ from models import (
     PackageDef,
     PackageInstance,
     Service,
+    ServiceDelivery,
     Site,
     User,
     UtcDef,
@@ -940,7 +941,7 @@ def deploy_utc(
             # failing the whole deploy over a stale proposal would be hostile.
             continue
         if wire.service_id is not None:
-            svc = db.get(Service, wire.service_id)
+            svc = db.get(ServiceDelivery, wire.service_id)
             if svc is None:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,

@@ -135,12 +135,12 @@ def load_backing_for_services(
             EquipmentCapability.id == CapabilityServiceLink.equipment_capability_id,
         )
         .join(Equipment, Equipment.id == EquipmentCapability.equipment_id)
-        .filter(CapabilityServiceLink.service_id.in_(service_ids))
+        .filter(CapabilityServiceLink.service_delivery_id.in_(service_ids))
         .all()
     )
     out: dict[int, list[dict]] = {}
     for link, capability, equipment in rows:
-        out.setdefault(link.service_id, []).append(
+        out.setdefault(link.service_delivery_id, []).append(
             {
                 "capability_id": capability.id,
                 "equipment_id": equipment.id,
