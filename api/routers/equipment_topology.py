@@ -391,9 +391,11 @@ def network_topology(
         row.derived_role = derive_utc_role(u.id, equipment_by_utc, links)
         utc_out.append(row)
 
+    # Deliveries, not identities: `service_derived` is keyed by the id that
+    # capability bindings point at, and status is per-site — an identity row
+    # has neither.
     services = (
-        db.query(Service)
-        .join(ServiceDelivery, ServiceDelivery.service_id == Service.id)
+        db.query(ServiceDelivery)
         .join(Site, Site.id == ServiceDelivery.site_id)
         .filter(Site.workspace_id == workspace.id)
         .all()
