@@ -240,7 +240,11 @@ class Site(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
-    services: Mapped[list["Service"]] = relationship("Service", back_populates="site")
+    # A site holds DELIVERIES now, not services — a service outlives any one
+    # site, so the old `site.services` had the ownership backwards.
+    deliveries: Mapped[list["ServiceDelivery"]] = relationship(
+        "ServiceDelivery", back_populates="site"
+    )
     gateways: Mapped[list["Gateway"]] = relationship(
         "Gateway", back_populates="site", cascade="all, delete-orphan"
     )
@@ -290,11 +294,45 @@ class ServiceTemplate(Base):
 
 
 class Service(Base):
+    """WHAT a service is, once per workspace — not where you can get it.
+
+    "NIPR Web" is one row even when three sites deliver it. That is the whole
+    point of the split: `site_id` used to live here and be NOT NULL, which made
+    a service's identity inseparable from one location. Every symptom followed
+    from that single column — equipment serving two sites had nowhere to bind,
+    an extension had to be modelled as its own UTC to give its gear a site, and
+    two sites' "NIPR Web" were unrelated rows that could not be asked "is NIPR
+    up anywhere?".
+
+    Identity attributes live here (what the thing IS). Anything that can
+    legitimately differ per location lives on ServiceDelivery — see the note
+    there about `enabled_pace`, which real data already disagreed on.
+
+    Uniqueness is (workspace, enclave, name) with NULLS NOT DISTINCT, so two
+    enclave-less services of the same name collapse rather than splitting on a
+    NULL that SQL would otherwise treat as never-equal.
+    """
+
     __tablename__ = "service"
+    __table_args__ = (
+        Index(
+            "uq_service_workspace_enclave_name",
+            "workspace_id",
+            "enclave_id",
+            "name",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    site_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False
+    # Direct, where it used to be reached through `site`. A service no longer
+    # has one site to inherit a workspace from.
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     service_template_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
@@ -304,7 +342,6 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
     category: Mapped[str] = mapped_column(String(24), nullable=False, default="other")
-    reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
     icon: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Which network this service is on. Copied from the template at creation,
@@ -313,7 +350,60 @@ class Service(Base):
     enclave_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
     )
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unvalidated")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    deliveries: Mapped[list["ServiceDelivery"]] = relationship(
+        "ServiceDelivery", back_populates="service", cascade="all, delete-orphan"
+    )
+
+
+class ServiceDelivery(Base):
+    """WHERE a service is delivered, and what its status is THERE.
+
+    This table is the old `service` row: same id values, carried across by
+    migration 0054 precisely so `capability_service_link` and
+    `service_gateway_status` only had to rename a column rather than remap
+    every foreign key. Anything holding a pre-0054 "service id" is really
+    holding a delivery id, and still resolves correctly.
+
+    Status lives here, not on Service. A rollup across deliveries is a derived
+    question ("is NIPR up anywhere?") and deliberately not a stored column —
+    storing it would need a cascade, and every status in this system is
+    attributed to whoever validated it at a place.
+
+    `enabled_pace` and `reach` are here rather than on Service because real
+    data already disagreed: VoIP at one site enabled three PACE tiers and the
+    same service at another enabled four. Gateways are per-site, so the PACE
+    matrix could not work any other way.
+    """
+
+    __tablename__ = "service_delivery"
+    __table_args__ = (
+        UniqueConstraint("service_id", "site_id", name="uq_delivery_service_site"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    service_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("service.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    site_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # `local` = delivered by gear at this site. `extended` = reached from
+    # another site over a shot. Descriptive; nothing branches on it yet.
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
+    reach: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="unvalidated"
+    )
     validated_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -322,8 +412,8 @@ class Service(Base):
     )
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Which PACE tiers this service uses. Defaults to all four (full fan-out =
-    # previous behavior). Operators clear PACE letters a service can't use.
+    # Which PACE tiers this delivery uses. Defaults to all four (full fan-out =
+    # previous behavior). Operators clear PACE letters it can't use.
     enabled_pace: Mapped[list[str]] = mapped_column(
         JSONB,
         nullable=False,
@@ -336,7 +426,8 @@ class Service(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
-    site: Mapped["Site"] = relationship("Site", back_populates="services")
+    service: Mapped["Service"] = relationship("Service", back_populates="deliveries")
+    site: Mapped["Site"] = relationship("Site", back_populates="deliveries")
 
 
 class Gateway(Base):
@@ -392,9 +483,13 @@ class ServiceGatewayStatus(Base):
 
     __tablename__ = "service_gateway_status"
 
-    service_id: Mapped[int] = mapped_column(
+    # A cell is (delivery × gateway), not (service × gateway): gateways belong
+    # to a site, so a cell only ever meant "this service AT THIS SITE over that
+    # path". The column was renamed in 0054 and the values were already correct
+    # — delivery ids reuse the old service ids.
+    service_delivery_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("service.id", ondelete="CASCADE"),
+        ForeignKey("service_delivery.id", ondelete="CASCADE"),
         primary_key=True,
     )
     # Composite PK covers service-side lookups; a separate index on
@@ -2059,7 +2154,13 @@ class EquipmentCanvasPosition(Base):
 
 
 class CapabilityServiceLink(Base):
-    """This capability backs that service."""
+    """This capability backs that service AT A PARTICULAR SITE.
+
+    Binding to a delivery rather than to a service is what lets the far end of
+    a shot back the same service the near end does, without claiming the gear
+    is in two places. Renamed from `service_id` in 0054; the values needed no
+    remapping because delivery ids reuse the old service ids.
+    """
 
     __tablename__ = "capability_service_link"
 
@@ -2068,9 +2169,9 @@ class CapabilityServiceLink(Base):
         ForeignKey("equipment_capability.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    service_id: Mapped[int] = mapped_column(
+    service_delivery_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("service.id", ondelete="CASCADE"),
+        ForeignKey("service_delivery.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
     )
