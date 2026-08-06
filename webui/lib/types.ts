@@ -908,6 +908,10 @@ export interface UtcInstance {
   utc_def_code: string | null
   site_name: string | null
   package_name: string | null
+  /** Every site this UTC's gear actually sits at, home site always included.
+   *  `site_id` is where the UTC is accountable; this is where it reaches, so
+   *  `site_ids.length > 1` is the test for "spread across sites". */
+  site_ids: number[]
   /** What the link graph says it actually is. null = not enough links to
    *  tell. A mismatch with `role` is shown, not silently reconciled. */
   derived_role: UtcRole | null

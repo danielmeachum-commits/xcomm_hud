@@ -63,8 +63,13 @@ export function UtcDetailClient({
     () => new Map(enclaves.map((e) => [e.id, e])),
     [enclaves],
   )
-  const siteServices = services.filter((s) => s.site_id === utc.site_id)
-  const siteGateways = gateways.filter((g) => g.site_id === utc.site_id)
+  // Every site this UTC reaches, not just its home. A UTC that shoots to a
+  // second location backs the services at the far end too — that's the whole
+  // point of the extension — and the API stopped rejecting those binds.
+  const reached = new Set(utc.site_ids.length ? utc.site_ids : [utc.site_id])
+  const siteServices = services.filter((s) => reached.has(s.site_id))
+  const siteGateways = gateways.filter((g) => reached.has(g.site_id))
+  const spread = reached.size > 1
 
   /** Sections in catalog order, untagged last. Mirrors the bill of materials
    *  so the deployed thing reads like the doctrine it came from. */
@@ -83,6 +88,18 @@ export function UtcDetailClient({
 
   const roleDisagrees =
     utc.derived_role !== null && utc.derived_role !== utc.role
+
+  /** Names for the sites this UTC reaches beyond its home, read off the gear
+   *  that's actually sitting there. */
+  const awaySites = useMemo(() => {
+    const names = new Map<number, string>()
+    for (const e of equipment) {
+      if (e.site_id !== utc.site_id) {
+        names.set(e.site_id, e.site_name ?? `Site ${e.site_id}`)
+      }
+    }
+    return Array.from(names.entries()).map(([id, name]) => ({ id, name }))
+  }, [equipment, utc.site_id])
 
   return (
     <div className="flex flex-col gap-4">
@@ -112,6 +129,23 @@ export function UtcDetailClient({
             <ChevronRight className="size-3" />
             <span>{utc.role}</span>
           </p>
+          {spread && awaySites.length > 0 && (
+            <p className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+              {/* A UTC with gear at another site IS the extension. Saying so
+                  here is what makes standing up a second UTC to represent it
+                  unnecessary. */}
+              <span>Also reaches</span>
+              {awaySites.map((s) => (
+                <Link
+                  key={s.id}
+                  href={w(`/sites/${s.id}`)}
+                  className="rounded-full border border-sky-500/50 bg-sky-500/10 px-1.5 py-0.5 text-sky-700 hover:underline dark:text-sky-400"
+                >
+                  {s.name}
+                </Link>
+              ))}
+            </p>
+          )}
           {roleDisagrees && (
             <p className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-400">
               <TriangleAlert className="size-3" />

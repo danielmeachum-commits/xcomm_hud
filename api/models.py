@@ -1767,6 +1767,13 @@ class UtcInstance(Base):
     view independently derives primary-vs-extension from the equipment_link
     graph and shows both, so plan-vs-reality drift is visible rather than
     silently resolved.
+
+    `site_id` is the HOME site — where this UTC is accountable — not the
+    authority on where its gear is. Equipment carries its own `site_id`, and a
+    UTC that shoots to a second location legitimately has gear at both; the
+    API derives that spread (`UtcInstanceOut.site_ids`) rather than reading it
+    off this column. Standing up a separate "extension" UTC to hold the far
+    end is a workaround for a UI limit, not something the model requires.
     """
 
     __tablename__ = "utc_instance"

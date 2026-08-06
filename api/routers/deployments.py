@@ -124,19 +124,28 @@ def _package_out(db: Session, row: PackageInstance) -> PackageInstanceOut:
 
 
 def _utc_role_context(db: Session, workspace: Workspace):
-    """Everything `derive_utc_role` needs, loaded once for a whole list."""
+    """Everything `derive_utc_role` needs, loaded once for a whole list.
+
+    Also returns where each UTC's gear actually sits, since that falls out of
+    the same scan for free — see `_utc_out` for why site is derived rather
+    than read off `utc_instance.site_id`.
+    """
     equipment_by_utc: dict[int, set[int]] = {}
-    for eq_id, utc_id in db.query(Equipment.id, Equipment.utc_instance_id).filter(
+    sites_by_utc: dict[int, set[int]] = {}
+    for eq_id, utc_id, site_id in db.query(
+        Equipment.id, Equipment.utc_instance_id, Equipment.site_id
+    ).filter(
         Equipment.workspace_id == workspace.id,
         Equipment.utc_instance_id.isnot(None),
     ):
         equipment_by_utc.setdefault(utc_id, set()).add(eq_id)
+        sites_by_utc.setdefault(utc_id, set()).add(site_id)
     links = (
         db.query(EquipmentLink)
         .filter(EquipmentLink.workspace_id == workspace.id)
         .all()
     )
-    return equipment_by_utc, links
+    return equipment_by_utc, links, sites_by_utc
 
 
 def _utc_out(
@@ -144,11 +153,19 @@ def _utc_out(
     row: UtcInstance,
     equipment_by_utc: dict[int, set[int]] | None = None,
     links: list | None = None,
+    sites_by_utc: dict[int, set[int]] | None = None,
 ) -> UtcInstanceOut:
     out = UtcInstanceOut.model_validate(row)
     site = db.get(Site, row.site_id)
     if site is not None:
         out.site_name = site.name
+    # Where the gear IS, as opposed to where the UTC is accountable. Always
+    # includes the home site, so a UTC that hasn't been spread reports exactly
+    # one entry and `len(site_ids) > 1` is the whole "is this thing extended?"
+    # test. Mirrors how `_package_out` already reports a package's sites.
+    out.site_ids = sorted(
+        {row.site_id} | (sites_by_utc.get(row.id, set()) if sites_by_utc else set())
+    )
     if row.utc_def_id is not None:
         d = db.get(UtcDef, row.utc_def_id)
         if d is not None:
@@ -434,8 +451,8 @@ def list_utcs(
     if site_id is not None:
         q = q.filter(UtcInstance.site_id == site_id)
     rows = q.order_by(UtcInstance.site_id, UtcInstance.display_order, UtcInstance.name).all()
-    equipment_by_utc, links = _utc_role_context(db, workspace)
-    return [_utc_out(db, r, equipment_by_utc, links) for r in rows]
+    equipment_by_utc, links, sites_by_utc = _utc_role_context(db, workspace)
+    return [_utc_out(db, r, equipment_by_utc, links, sites_by_utc) for r in rows]
 
 
 @router.get("/utcs/{utc_id}", response_model=UtcInstanceOut)
@@ -452,8 +469,8 @@ def get_utc(
     same UTC read in a list.
     """
     row = _load_utc(db, utc_id, workspace)
-    equipment_by_utc, links = _utc_role_context(db, workspace)
-    return _utc_out(db, row, equipment_by_utc, links)
+    equipment_by_utc, links, sites_by_utc = _utc_role_context(db, workspace)
+    return _utc_out(db, row, equipment_by_utc, links, sites_by_utc)
 
 
 @router.post("/utcs", response_model=UtcInstanceOut, status_code=status.HTTP_201_CREATED)
@@ -487,18 +504,27 @@ def patch_utc(
     data = body.model_dump(exclude_unset=True)
     if data.get("site_id") is not None:
         _site_in_workspace(db, data["site_id"], workspace)
+    prev_site_id = row.site_id
     for k, v in data.items():
         setattr(row, k, v)
-    # Moving a UTC moves its gear — the denormalized site_id on equipment
-    # exists for query speed, not as an independent fact, so it must follow.
-    if data.get("site_id") is not None:
-        db.query(Equipment).filter(Equipment.utc_instance_id == row.id).update(
-            {"site_id": data["site_id"]}, synchronize_session=False
-        )
+    # Moving a UTC moves the gear that was WITH it — but only that gear.
+    #
+    # This used to rewrite site_id on every piece of equipment on the UTC, on
+    # the reasoning that the column is denormalized for query speed and not an
+    # independent fact. That stopped being true once a UTC could spread across
+    # sites: gear deliberately placed at the far end of a shot is exactly what
+    # makes the second site an extension, and dragging it back would delete
+    # that fact silently. Co-located gear still follows, which is what anyone
+    # moving a UTC actually means.
+    if data.get("site_id") is not None and data["site_id"] != prev_site_id:
+        db.query(Equipment).filter(
+            Equipment.utc_instance_id == row.id,
+            Equipment.site_id == prev_site_id,
+        ).update({"site_id": data["site_id"]}, synchronize_session=False)
     db.flush()
     notify(background_tasks)
-    equipment_by_utc, links = _utc_role_context(db, workspace)
-    return _utc_out(db, row, equipment_by_utc, links)
+    equipment_by_utc, links, sites_by_utc = _utc_role_context(db, workspace)
+    return _utc_out(db, row, equipment_by_utc, links, sites_by_utc)
 
 
 @router.delete("/utcs/{utc_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -915,11 +941,17 @@ def deploy_utc(
             continue
         if wire.service_id is not None:
             svc = db.get(Service, wire.service_id)
-            if svc is None or svc.site_id != site.id:
+            if svc is None:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
-                    f"Service {wire.service_id} is not at site '{site.name}'.",
+                    f"Service {wire.service_id} not found.",
                 )
+            # Workspace, not site. This used to demand the service sit at the
+            # UTC's own site, which the bind endpoint never required — so the
+            # same wiring was legal after deploy and illegal during it. It also
+            # made the real case unrepresentable: gear at an extension site
+            # backs the service it reaches, which is at the other end.
+            _site_in_workspace(db, svc.site_id, workspace)
             if db.get(CapabilityServiceLink, (cap.id, svc.id)) is None:
                 db.add(
                     CapabilityServiceLink(
@@ -931,11 +963,12 @@ def deploy_utc(
                 bindings_created += 1
         if wire.gateway_id is not None:
             gw = db.get(Gateway, wire.gateway_id)
-            if gw is None or gw.site_id != site.id:
+            if gw is None:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
-                    f"Gateway {wire.gateway_id} is not at site '{site.name}'.",
+                    f"Gateway {wire.gateway_id} not found.",
                 )
+            _site_in_workspace(db, gw.site_id, workspace)
             if db.get(CapabilityGatewayLink, (cap.id, gw.id)) is None:
                 db.add(
                     CapabilityGatewayLink(
@@ -967,9 +1000,9 @@ def deploy_utc(
     db.flush()
     notify(background_tasks)
 
-    equipment_by_utc, links = _utc_role_context(db, workspace)
+    equipment_by_utc, links, sites_by_utc = _utc_role_context(db, workspace)
     return UtcDeployOut(
-        utc_instance=_utc_out(db, utc, equipment_by_utc, links),
+        utc_instance=_utc_out(db, utc, equipment_by_utc, links, sites_by_utc),
         equipment=equipment_out_bulk(db, created),
         holdings=[_holding_out(db, h) for h in holdings],
         bindings_created=bindings_created,

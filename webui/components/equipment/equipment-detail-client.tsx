@@ -25,6 +25,8 @@ import type {
   Event,
   Gateway,
   Service,
+  Site,
+  UtcInstance,
 } from "@/lib/types"
 
 interface Props {
@@ -37,6 +39,10 @@ interface Props {
   links: EquipmentLink[]
   /** Every piece of gear in the workspace, for the link editor's other end. */
   allEquipment?: Equipment[]
+  /** Workspace sites, so this gear can be placed at one of them. */
+  sites?: Site[]
+  /** The UTC this gear came in on, if any — for the away-from-home note. */
+  utc?: UtcInstance | null
   events: Event[]
 }
 
@@ -48,6 +54,8 @@ export function EquipmentDetailClient({
   gateways,
   links,
   allEquipment = [],
+  sites = [],
+  utc = null,
   events,
 }: Props) {
   const Icon = equipmentIcon(equipment.type_category)
@@ -93,7 +101,7 @@ export function EquipmentDetailClient({
                 : "—"
             }
           />
-          <Field label="Site" value={equipment.site_name ?? "—"} />
+          <SiteField equipment={equipment} sites={sites} utc={utc} />
           <Field label="UTC" value={equipment.utc_name ?? "Not in a UTC"} />
           <EnclaveField
             equipment={equipment}
@@ -223,6 +231,71 @@ function EnclaveField({
               </option>
             ))}
           </select>
+        )}
+      </dd>
+    </div>
+  )
+}
+
+/** Where this piece of gear physically sits. Editable because a UTC that
+ *  shoots to a second location has gear at both ends, and the far end is what
+ *  makes that location an extension — see UtcInstance.site_id, which is the
+ *  UTC's home rather than the authority on where its kit is. Saves on change,
+ *  matching EnclaveField above. */
+function SiteField({
+  equipment,
+  sites,
+  utc,
+}: {
+  equipment: Equipment
+  sites: Site[]
+  /** The UTC this gear came in on, for the away-from-home note. */
+  utc: UtcInstance | null
+}) {
+  const router = useRouter()
+  const [pending, setPending] = useState(false)
+  const awayFromHome = !!utc && utc.site_id !== equipment.site_id
+
+  async function set(value: number) {
+    setPending(true)
+    const res = await fetch(`/api/be/equipment/${equipment.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site_id: value }),
+    })
+    setPending(false)
+    if (res.ok) router.refresh()
+  }
+
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-widest text-muted-foreground">
+        Site
+      </dt>
+      <dd>
+        {sites.length === 0 ? (
+          <span className="text-muted-foreground">
+            {equipment.site_name ?? "—"}
+          </span>
+        ) : (
+          <select
+            aria-label="Site"
+            className="h-7 w-full rounded-md border border-input bg-background px-1.5 text-sm"
+            value={equipment.site_id}
+            disabled={pending}
+            onChange={(e) => set(Number(e.target.value))}
+          >
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {awayFromHome && (
+          <span className="mt-0.5 block text-[10px] text-sky-600 dark:text-sky-400">
+            Away from {utc!.name} ({utc!.site_name})
+          </span>
         )}
       </dd>
     </div>

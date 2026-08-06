@@ -1994,6 +1994,11 @@ class UtcInstanceOut(_ORM):
     utc_def_code: Optional[str] = None
     site_name: Optional[str] = None
     package_name: Optional[str] = None
+    # Every site this UTC's gear actually sits at, home site always included.
+    # `site_id` above is where the UTC is accountable; this is where it reaches.
+    # More than one entry means the UTC is spread — which is what an extension
+    # really is, rather than a second UTC standing in for one.
+    site_ids: list[int] = Field(default_factory=list)
     # What the link graph says this UTC actually is, independent of the
     # operator-declared `role`. Null when there aren't enough links to tell.
     # A mismatch is surfaced in the UI rather than silently reconciled.
