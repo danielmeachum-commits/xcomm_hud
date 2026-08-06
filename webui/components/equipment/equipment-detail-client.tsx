@@ -1,12 +1,11 @@
 "use client"
 
-import { Wrench } from "lucide-react"
+import { Check, Wrench } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { EquipmentStatusPill } from "@/components/equipment/equipment-status-pill"
-import { Button } from "@/components/ui/button"
 import {
   CAPABILITY_LABELS,
   EQUIPMENT_CATEGORY_LABELS,
@@ -325,6 +324,17 @@ function CapabilitiesSection({
   )
 }
 
+/** Bound-vs-not for a capability's binding chips. Mirrors the deploy wizard's
+ *  wiring step, so "what does this back" looks the same wherever it's set. */
+function bindingChipClass(on: boolean): string {
+  return cn(
+    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50",
+    on
+      ? "border-primary/50 bg-primary/10 font-medium text-primary"
+      : "border-border text-muted-foreground hover:bg-muted",
+  )
+}
+
 function CapabilityRow({
   equipment,
   capability,
@@ -384,36 +394,43 @@ function CapabilityRow({
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
           Backs
         </span>
+        {/* These were already toggles, but `secondary` against `outline` is
+            near-indistinguishable — the row read as a static list of names and
+            nobody could tell which were bound, let alone that clicking did
+            anything. Same treatment as the deploy wizard's wiring chips:
+            checked and tinted when on, plain when off. */}
         {services.map((s) => {
           const on = boundServices.some((b) => b.id === s.id)
           return (
-            <Button
+            <button
               key={`s-${s.id}`}
               type="button"
-              size="sm"
-              variant={on ? "secondary" : "outline"}
               disabled={pending}
+              aria-pressed={on}
+              title={on ? `Unbind from ${s.name}` : `Bind to ${s.name}`}
               onClick={() => toggle("services", s.id, on)}
-              className="h-6 px-2 text-[11px]"
+              className={bindingChipClass(on)}
             >
+              {on && <Check className="size-3" />}
               {s.name}
-            </Button>
+            </button>
           )
         })}
         {gateways.map((g) => {
           const on = boundGateways.some((b) => b.id === g.id)
           return (
-            <Button
+            <button
               key={`g-${g.id}`}
               type="button"
-              size="sm"
-              variant={on ? "secondary" : "outline"}
               disabled={pending}
+              aria-pressed={on}
+              title={on ? `Unbind from ${g.name}` : `Bind to ${g.name}`}
               onClick={() => toggle("gateways", g.id, on)}
-              className="h-6 px-2 text-[11px]"
+              className={bindingChipClass(on)}
             >
+              {on && <Check className="size-3" />}
               {g.name}
-            </Button>
+            </button>
           )
         })}
         {services.length === 0 && gateways.length === 0 && (

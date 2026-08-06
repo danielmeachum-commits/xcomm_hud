@@ -530,28 +530,35 @@ export function EquipmentPageClient({
                                 >
                                   <Icon className="size-5 shrink-0 text-muted-foreground" />
                                   <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-mono font-medium">
-                                        {e.equipment_code}
-                                      </span>
-                                      <span className="truncate text-sm">
-                                        {e.type_short_name ?? e.type_title}
-                                      </span>
+                                    {/* The full model name, not the short one:
+                                        "KG-175D TACLANE Micro" is what appears
+                                        on the hand receipt, and the short name
+                                        is only useful once you already know
+                                        which box you're looking at. */}
+                                    <div className="truncate text-sm font-medium">
+                                      {e.type_title ?? e.type_short_name}
                                     </div>
                                     {/* The UTC and enclave chips this row used
                                         to carry are the two headings above it
                                         now, so what is left is what the
-                                        headings do not already say. */}
+                                        headings do not already say. The NSN
+                                        that lived here identifies the *model*,
+                                        which the title already gives — the
+                                        equipment ID identifies this one box,
+                                        which is what you look a row up by. */}
                                     <div className="truncate text-xs text-muted-foreground">
                                       {e.type_category
                                         ? EQUIPMENT_CATEGORY_LABELS[
                                             e.type_category
                                           ]
                                         : "—"}
+                                      {" · "}
+                                      <span className="font-mono">
+                                        {e.equipment_code}
+                                      </span>
                                       {e.serial_number
                                         ? ` · SN ${e.serial_number}`
                                         : ""}
-                                      {e.nsn ? ` · NSN ${e.nsn}` : ""}
                                     </div>
                                   </div>
                                 </Link>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -99,17 +100,27 @@ def _service_in_workspace(db: Session, service_id: int, workspace: Workspace) ->
 
 @router.get("", response_model=list[ServiceOut])
 def list_services(
+    site_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    services = (
+    """Every service in the workspace, or one site's when `site_id` is given.
+
+    Two callers were already asking for `?site_id=`; the parameter simply
+    didn't exist, so they silently got the whole workspace and one of them
+    offered another site's services as binding targets.
+    """
+    q = (
         db.query(Service)
         .join(Site, Site.id == Service.site_id)
         .filter(Site.workspace_id == workspace.id)
-        .order_by(Service.site_id, Service.display_order, Service.name)
-        .all()
     )
+    if site_id is not None:
+        q = q.filter(Service.site_id == site_id)
+    services = q.order_by(
+        Service.site_id, Service.display_order, Service.name
+    ).all()
     return [_service_out(db, s) for s in services]
 
 
