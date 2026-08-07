@@ -42,6 +42,24 @@ export function enclaveChipClass(color: string | null): string {
     : ""
 }
 
+/** Style for an enclave used as a GROUP HEADING rather than as a tag.
+ *
+ *  A chip is a label attached to a thing. Repeating it as the header of every
+ *  group turns a page into a field of pills and loses the one job a heading
+ *  has, which is to sit quietly above its contents. This keeps the enclave's
+ *  hue as text and a rule, with no fill or border box.
+ *
+ *  Returns {} for neutral colors, same contract as `enclaveChipStyle` — pair
+ *  it with `enclaveHeadingClass`. */
+export function enclaveHeadingStyle(color: string | null): React.CSSProperties {
+  if (isNeutralEnclaveColor(color) || !color) return {}
+  return { color }
+}
+
+export function enclaveHeadingClass(color: string | null): string {
+  return isNeutralEnclaveColor(color) ? "text-foreground" : ""
+}
+
 export function enclaveLabel(e: Enclave): string {
   return e.short_name || e.name
 }

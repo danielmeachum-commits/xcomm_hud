@@ -1,6 +1,6 @@
 "use client"
 
-import { Check, Plus, Wrench } from "lucide-react"
+import { Check, Plus, Wrench, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
@@ -118,6 +118,7 @@ export function EquipmentDetailClient({
         equipment={equipment}
         services={services}
         gateways={gateways}
+        sites={sites}
       />
 
       <ConnectionsSection
@@ -418,10 +419,12 @@ function CapabilitiesSection({
   equipment,
   services,
   gateways,
+  sites,
 }: {
   equipment: Equipment
   services: Service[]
   gateways: Gateway[]
+  sites: Site[]
 }) {
   return (
     <section className="rounded-lg border border-border p-4">
@@ -446,6 +449,7 @@ function CapabilitiesSection({
               capability={c}
               services={services}
               gateways={gateways}
+              sites={sites}
             />
           ))}
         </ul>
@@ -470,14 +474,27 @@ function CapabilityRow({
   capability,
   services,
   gateways,
+  sites,
 }: {
   equipment: Equipment
   capability: EquipmentCapability
   services: Service[]
   gateways: Gateway[]
+  sites: Site[]
 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
+
+  /** Two deliveries of the same service at different sites share a name, so
+   *  the list showed "VoIP" twice with no way to tell them apart. Qualify the
+   *  ones that aren't where this gear is — which is also the interesting case,
+   *  since backing a service at another site is what a shot does. */
+  const siteNameById = new Map(sites.map((s) => [s.id, s.name]))
+  function deliveryLabel(s: Service): string {
+    if (s.site_id === equipment.site_id) return s.name
+    const site = siteNameById.get(s.site_id)
+    return site ? `${s.name} · ${site}` : s.name
+  }
 
   const boundServices = services.filter((s) =>
     capability.bindings.service_ids.includes(s.id),
@@ -485,6 +502,15 @@ function CapabilityRow({
   const boundGateways = gateways.filter((g) =>
     capability.bindings.gateway_ids.includes(g.id),
   )
+  // Split rather than rendering all of them equally. A site's full service
+  // list as chips is mostly noise: what this capability backs is the answer,
+  // and what it *could* back is a separate, occasional act.
+  const unboundServices = services.filter(
+    (s) => !capability.bindings.service_ids.includes(s.id),
+  )
+  const requiredCount = boundServices.filter((s) =>
+    capability.bindings.required_service_ids?.includes(s.id),
+  ).length
 
   async function toggle(kind: "services" | "gateways", id: number, on: boolean) {
     setPending(true)
@@ -503,10 +529,25 @@ function CapabilityRow({
    *  Separate from binding at all, because "this is related" and "this must be
    *  up" are different claims and only the second should move a status. */
   async function toggleRequired(serviceId: number, nowRequired: boolean) {
+    const group = capability.bindings.group_keys?.[serviceId]
+    await writeBinding(serviceId, nowRequired, group)
+  }
+
+  /** Change only the redundancy group, preserving the required flag. */
+  async function setGroupKey(serviceId: number, group: string) {
+    const required =
+      capability.bindings.required_service_ids?.includes(serviceId) ?? false
+    await writeBinding(serviceId, required, group.trim() || undefined)
+  }
+
+  async function writeBinding(
+    serviceId: number,
+    required: boolean,
+    group?: string,
+  ) {
     setPending(true)
     try {
-      const group = capability.bindings.group_keys?.[serviceId]
-      const params = new URLSearchParams({ required: String(nowRequired) })
+      const params = new URLSearchParams({ required: String(required) })
       if (group) params.set("group_key", group)
       await fetch(
         `/api/be/capabilities/${capability.id}/services/${serviceId}?${params}`,
@@ -539,79 +580,179 @@ function CapabilityRow({
         />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-          Backs
-        </span>
-        {/* These were already toggles, but `secondary` against `outline` is
-            near-indistinguishable — the row read as a static list of names and
-            nobody could tell which were bound, let alone that clicking did
-            anything. Same treatment as the deploy wizard's wiring chips:
-            checked and tinted when on, plain when off. */}
-        {services.map((s) => {
-          const on = boundServices.some((b) => b.id === s.id)
-          const required =
-            capability.bindings.required_service_ids?.includes(s.id) ?? false
-          const group = capability.bindings.group_keys?.[s.id]
-          return (
-            <span key={`s-${s.id}`} className="inline-flex items-center">
-              <button
-                type="button"
-                disabled={pending}
-                aria-pressed={on}
-                title={on ? `Unbind from ${s.name}` : `Bind to ${s.name}`}
-                onClick={() => toggle("services", s.id, on)}
-                className={cn(bindingChipClass(on), on && "rounded-r-none")}
-              >
-                {on && <Check className="size-3" />}
-                {s.name}
-              </button>
-              {/* Only offered once bound — "required" is a property OF a
-                  binding, so there is nothing to require until one exists. */}
-              {on && (
-                <button
-                  type="button"
-                  disabled={pending}
-                  aria-pressed={required}
-                  aria-label={`${s.name}: needed for this service`}
-                  title={
-                    required
-                      ? group
-                        ? `Needed — redundant with others in "${group}". Click to make optional.`
-                        : "Needed for this service. Click to make optional."
-                      : "Click to mark this capability as needed for the service"
-                  }
-                  onClick={() => toggleRequired(s.id, !required)}
-                  className={cn(
-                    "-ml-px rounded-r-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide transition-colors",
-                    required
-                      ? "border-foreground/30 bg-foreground/10 font-medium"
-                      : "border-border text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {required ? (group ? `req·${group}` : "req") : "opt"}
-                </button>
-              )}
+      {/* Bindings.
+          The previous version rendered EVERY service at the site as an equal
+          chip, bound or not, distinguished only by a tint — with a tiny
+          req/opt stub fused to the right of the bound ones. Three unrelated
+          questions ("is it bound", "does it gate", "which redundancy group")
+          were compressed into one two-part control, and "OPT" read as a label
+          rather than a switch. Split them apart: bound services are rows with
+          a worded two-state control, and binding something new is its own
+          separate act. */}
+      <div className="mt-3 flex flex-col gap-3">
+        <div>
+          <div className="mb-1.5 flex items-baseline gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Backs
             </span>
-          )
-        })}
-        {gateways.map((g) => {
-          const on = boundGateways.some((b) => b.id === g.id)
-          return (
-            <button
-              key={`g-${g.id}`}
-              type="button"
-              disabled={pending}
-              aria-pressed={on}
-              title={on ? `Unbind from ${g.name}` : `Bind to ${g.name}`}
-              onClick={() => toggle("gateways", g.id, on)}
-              className={bindingChipClass(on)}
-            >
-              {on && <Check className="size-3" />}
-              {g.name}
-            </button>
-          )
-        })}
+            {boundServices.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                {requiredCount} of {boundServices.length} required
+              </span>
+            )}
+          </div>
+
+          {boundServices.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Not backing any service yet.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {boundServices.map((s) => {
+                const required =
+                  capability.bindings.required_service_ids?.includes(s.id) ??
+                  false
+                const group = capability.bindings.group_keys?.[s.id] ?? ""
+                return (
+                  <li
+                    key={`s-${s.id}`}
+                    className="rounded-md border border-border bg-background/60 px-2.5 py-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-medium">
+                        {deliveryLabel(s)}
+                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Worded, two-state, and always showing BOTH
+                            options — the old single stub could not say what
+                            clicking it would do. */}
+                        <div className="inline-flex overflow-hidden rounded-md border border-border">
+                          {[false, true].map((want) => (
+                            <button
+                              key={String(want)}
+                              type="button"
+                              disabled={pending}
+                              aria-pressed={required === want}
+                              title={
+                                want
+                                  ? "This capability must be up for the service to count as up"
+                                  : "Recorded as related, but never moves the service's status"
+                              }
+                              onClick={() =>
+                                required === want
+                                  ? undefined
+                                  : toggleRequired(s.id, want)
+                              }
+                              className={cn(
+                                "px-2 py-1 text-[11px] transition-colors",
+                                required === want
+                                  ? "bg-foreground/10 font-medium text-foreground"
+                                  : "text-muted-foreground hover:bg-muted",
+                              )}
+                            >
+                              {want ? "Required" : "Optional"}
+                            </button>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={pending}
+                          title={`Unbind from ${s.name}`}
+                          aria-label={`Unbind from ${s.name}`}
+                          onClick={() => toggle("services", s.id, true)}
+                          className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Only meaningful for a gate — an optional binding has
+                        nothing to be redundant with. */}
+                    {required && (
+                      <label className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span>Redundancy group</span>
+                        <input
+                          defaultValue={group}
+                          placeholder="none"
+                          disabled={pending}
+                          onBlur={(e) => {
+                            if (e.target.value !== group) {
+                              setGroupKey(s.id, e.target.value)
+                            }
+                          }}
+                          className="h-6 w-32 rounded border border-input bg-background px-1.5 text-[11px] text-foreground"
+                        />
+                        <span>
+                          {group
+                            ? `Any one live member of “${group}” satisfies this`
+                            : "On its own — losing it takes the service down"}
+                        </span>
+                      </label>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {unboundServices.length > 0 && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <Plus className="size-3 text-muted-foreground" />
+              <select
+                value=""
+                disabled={pending}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    toggle("services", Number(e.target.value), false)
+                  }
+                }}
+                className="h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+              >
+                <option value="">Back another service…</option>
+                {unboundServices.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {deliveryLabel(s)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {gateways.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Realizes transport
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* No required/optional here on purpose. Whether a SERVICE needs
+                  a gateway is declared on the service (gateway dependencies),
+                  not on the gear — otherwise the same radio gets counted both
+                  directly and through the gateway. */}
+              {gateways.map((g) => {
+                const on = boundGateways.some((b) => b.id === g.id)
+                return (
+                  <button
+                    key={`g-${g.id}`}
+                    type="button"
+                    disabled={pending}
+                    aria-pressed={on}
+                    title={on ? `Unbind from ${g.name}` : `Bind to ${g.name}`}
+                    onClick={() => toggle("gateways", g.id, on)}
+                    className={bindingChipClass(on)}
+                  >
+                    {on && <Check className="size-3" />}
+                    {g.name}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {services.length === 0 && gateways.length === 0 && (
           <span className="text-xs text-muted-foreground">
             No services or gateways at this site yet.

@@ -369,17 +369,13 @@ removal of a write path.
 
 ### Still open
 
-- **Gateway dependency targets** (§7). A delivery can only declare required
-  capabilities, not required *gateways*, so a capability backing both a gateway
-  and a delivery is still counted twice. Harmless under worst-of; a real
-  correctness bug once someone builds redundancy groups across a shared
-  component. This is the next thing to build.
+- ~~**Gateway dependency targets** (§7).~~ **SHIPPED (0057)** — see below.
 - **Gateway `status_mode` has no UI.** The column, the resolution and the
   cascade suppression are all in place and the endpoint exists, but nothing in
   the webui switches it. Deliberate: gateway-derive is the riskier half, and it
   should not be one click away until the delivery side has been used in anger.
 
-## 7. Gateway-as-service — the double count
+## 7. Gateway-as-service — the double count — SHIPPED (0057)
 
 Structurally, **a gateway is a delivery of a Transport-enclave service.** That
 is why `Transport` sits at the top of the enclave tree with no color
@@ -417,6 +413,56 @@ against a `(target_kind, target_id)` table — the comment at
 over one polymorphic one, for real FKs and real cascades. Follow that: two
 tables, `delivery_capability_dependency` and `delivery_gateway_dependency`,
 sharing the `required` / `group_key` columns.
+
+### What shipped
+
+Two concrete tables as planned, with **one deviation**: only
+`delivery_gateway_dependency` is new. `capability_service_link` *is* the
+capability half — it has carried `required`/`group_key` since 0056 — so it was
+not renamed to `delivery_capability_dependency`. The rename would have churned
+every call site for no behavioural gain.
+
+- **`DeliveryGatewayDependency`** (`api/models.py`), migration
+  `0057_delivery_gateway_dependency`. `required` defaults **True** here, unlike
+  0056's column: this table starts empty, so every row is a deliberate
+  declaration and there is no legacy advisory reading to protect.
+- **Suppression is the actual fix.** `_shadowed_capabilities`
+  (`api/equipment_status.py`) resolves, per delivery, which capabilities also
+  back a depended-on gateway. Those bindings keep their `required` flag and
+  stay in `backing` carrying `superseded_by_gateway_id`, but `gates()` skips
+  them, so the shared component votes exactly once — at the gateway. Showing
+  them beats hiding them: the dependency did not vanish, it moved up a level.
+- **Group keys share one namespace.** A capability and a gateway can sit in the
+  same redundancy group, so "this radio or the Starlink path" is expressible.
+- **What a gateway contributes.** Its own capability-derived value when it has
+  one, else its reported status mapped into equipment vocabulary via
+  `_GATEWAY_TO_EQUIPMENT`. The fallback is what makes this useful on day one —
+  almost no gateway has capabilities bound yet, and a dependency that
+  contributed nothing until someone wired the gear would be inert. A required
+  gateway with *no* opinion counts toward `required_unvalidated`, so it reads
+  as a hole rather than disappearing.
+- **`ready` → `up`.** The one judgment call. A gateway on PACE standby is a
+  path that works and simply is not carrying traffic. Anything worse defeats
+  the case the groups exist for: primary down, sat phone ready should read as a
+  live alternate, not an outage. (`setup` → `maintenance`, matching how
+  `_REPORTED_RANK` already scores both at 4.)
+- **One level deep, always.** Gateways depend on capabilities, never on other
+  gateways. The chain cannot recurse or cycle.
+- **Cascade.** `refresh_derived` now pulls in every delivery depending on a
+  touched gateway, so a capability bound only to the gateway still moves the
+  deliveries that declared they need it.
+- **API.** `GET/PUT/DELETE /services/{id}/gateway-dependencies[/{gateway_id}]`.
+  Deliberately *not* restricted to same-site gateways — a delivery at an
+  extension reaching back through the primary's transport is the case this
+  exists for, and it is the same cross-site reasoning that lets the far end of
+  a shot back a near-end service.
+- **UI.** `webui/components/services/gateway-dependency-editor.tsx` on the
+  service settings tab; `derived-status-badge.tsx` renders the transport paths
+  and marks superseded capabilities "via gateway".
+
+Still deferred: collapsing Gateway into Service (above), and there is no
+migration of existing double-counted bindings — nothing to migrate, since
+declaring a dependency is what triggers suppression.
 
 ---
 

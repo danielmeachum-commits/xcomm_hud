@@ -2260,6 +2260,57 @@ class CapabilityGatewayLink(Base):
     )
 
 
+class DeliveryGatewayDependency(Base):
+    """This delivery depends on that gateway — §7 of the redesign doc.
+
+    The point is the double count. A capability can bind to both a delivery
+    (`capability_service_link`) and a gateway (`capability_gateway_link`), which
+    is correct — a satcom terminal really is both transport and endpoint. But
+    the delivery then counted that one radio twice: once directly, once through
+    the gateway. Harmless under worst-of, which is idempotent. A live bug under
+    redundancy groups, where it lets the model claim two independent paths that
+    share a component.
+
+    Declaring the dependency on the GATEWAY instead lets the delivery stop
+    reaching past it to the equipment. `load_backing_for_services` suppresses
+    any direct capability binding that also backs a depended-on gateway, so the
+    shared radio is counted exactly once, at the gateway.
+
+    Two concrete tables rather than one polymorphic `(target_kind, target_id)`,
+    following the choice recorded at CapabilityServiceLink — real FKs, real
+    cascades. `capability_service_link` is the capability half; it already
+    carries `required`/`group_key` and was not renamed, since the rename would
+    have churned every call site for no behavioural gain.
+    """
+
+    __tablename__ = "delivery_gateway_dependency"
+
+    service_delivery_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("service_delivery.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    gateway_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("gateway.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    # Defaults True, unlike the capability binding's False. That column had to
+    # default False because 0056 added it to rows that already existed as
+    # advisory context. This table starts empty: every row is created by
+    # someone deliberately saying "this delivery needs this path", so the
+    # low-commitment reading has no rows to protect.
+    required: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # Same OR-within / AND-across semantics as the capability binding. This is
+    # where PACE finally becomes expressible: put Primary ISP and Sat Phone in
+    # one group and losing the primary is degraded, not down.
+    group_key: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
 class EquipmentLink(Base):
     """A physical/RF connection between two pieces of gear.
 

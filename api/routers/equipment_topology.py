@@ -25,6 +25,7 @@ from equipment_status import (
     derive_utc_role,
     load_backing_for_gateways,
     load_backing_for_services,
+    load_gateway_backing_for_services,
 )
 from models import (
     Equipment,
@@ -407,6 +408,7 @@ def network_topology(
         .all()
     )
     svc_backing = load_backing_for_services(db, [s.id for s in services])
+    svc_gw_backing = load_gateway_backing_for_services(db, [s.id for s in services])
     gw_backing = load_backing_for_gateways(db, [g.id for g in gateways])
 
     link_cache = {e.id: e for e in equipment}
@@ -428,7 +430,10 @@ def network_topology(
             for p in positions
         ],
         service_derived={
-            s.id: build_derived(s.status, svc_backing.get(s.id, [])) for s in services
+            s.id: build_derived(
+                s.status, svc_backing.get(s.id, []), svc_gw_backing.get(s.id, [])
+            )
+            for s in services
         },
         gateway_derived={
             g.id: build_derived(g.status, gw_backing.get(g.id, [])) for g in gateways

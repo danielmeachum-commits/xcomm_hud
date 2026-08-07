@@ -18,6 +18,7 @@ from effective import (
     materialize_cells,
 )
 from models import (
+    DeliveryGatewayDependency,
     Gateway,
     Service,
     ServiceDelivery,
@@ -30,6 +31,7 @@ from models import (
 from pubsub import notify
 from rules_engine import emit_trigger
 from schemas import (
+    DeliveryGatewayDependencyOut,
     ServiceGatewayStatusOut,
     ServiceIn,
     ServiceOut,
@@ -498,3 +500,130 @@ def set_service_status_mode(
     db.flush()
     notify(background_tasks)
     return _service_out(db, delivery)
+
+
+# ---------- gateway dependencies (§7) ----------
+#
+# These live on the delivery rather than beside the capability bindings in
+# equipment.py because no capability is involved: this is the delivery saying
+# which transport paths it needs. Declaring one also stops the delivery
+# counting the gateway's own equipment a second time — see
+# `_shadowed_capabilities` in equipment_status.py.
+
+
+@router.get(
+    "/{service_id}/gateway-dependencies",
+    response_model=list[DeliveryGatewayDependencyOut],
+)
+def list_gateway_dependencies(
+    service_id: int,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("viewer")),
+):
+    delivery = _service_in_workspace(db, service_id, workspace)
+    rows = (
+        db.query(DeliveryGatewayDependency, Gateway)
+        .join(Gateway, Gateway.id == DeliveryGatewayDependency.gateway_id)
+        .filter(DeliveryGatewayDependency.service_delivery_id == delivery.id)
+        .all()
+    )
+    return [
+        DeliveryGatewayDependencyOut(
+            service_delivery_id=dep.service_delivery_id,
+            gateway_id=dep.gateway_id,
+            gateway_name=gateway.name,
+            gateway_pace=gateway.pace,
+            gateway_status=gateway.status,
+            required=dep.required,
+            group_key=dep.group_key,
+        )
+        for dep, gateway in rows
+    ]
+
+
+@router.put(
+    "/{service_id}/gateway-dependencies/{gateway_id}",
+    response_model=DeliveryGatewayDependencyOut,
+)
+def set_gateway_dependency(
+    service_id: int,
+    gateway_id: int,
+    background_tasks: BackgroundTasks,
+    # Defaults True, unlike the capability binding. Nothing in this table
+    # predates the dependency chain, so there is no "I only meant related"
+    # reading to protect — creating the row IS the declaration.
+    required: bool = Query(default=True),
+    # Dependencies sharing a key are OR'd. This is where PACE becomes
+    # expressible: primary and alternate in one group means losing the primary
+    # is degraded rather than down.
+    group_key: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    delivery = _service_in_workspace(db, service_id, workspace)
+    gateway = db.get(Gateway, gateway_id)
+    if gateway is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    site = db.get(Site, gateway.site_id)
+    if site is None or site.workspace_id != workspace.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gateway not found")
+    # Deliberately NOT requiring the gateway to be at the delivery's own site.
+    # A delivery at an extension site reaching back through the primary's
+    # transport is the case this exists for, and it is the same cross-site
+    # reasoning that lets the far end of a shot back a near-end service.
+
+    existing = db.get(DeliveryGatewayDependency, (delivery.id, gateway_id))
+    if existing is None:
+        db.add(
+            DeliveryGatewayDependency(
+                service_delivery_id=delivery.id,
+                gateway_id=gateway_id,
+                required=required,
+                group_key=group_key,
+            )
+        )
+    else:
+        existing.required = required
+        existing.group_key = group_key
+    db.flush()
+    # Adding the dependency can change the answer immediately — both by adding
+    # the gateway's vote and by withdrawing the votes of any capability it
+    # supersedes.
+    refresh_derived(db, [delivery.id], [], _now())
+    db.flush()
+    notify(background_tasks)
+    return DeliveryGatewayDependencyOut(
+        service_delivery_id=delivery.id,
+        gateway_id=gateway_id,
+        gateway_name=gateway.name,
+        gateway_pace=gateway.pace,
+        gateway_status=gateway.status,
+        required=required,
+        group_key=group_key,
+    )
+
+
+@router.delete(
+    "/{service_id}/gateway-dependencies/{gateway_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def clear_gateway_dependency(
+    service_id: int,
+    gateway_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    delivery = _service_in_workspace(db, service_id, workspace)
+    row = db.get(DeliveryGatewayDependency, (delivery.id, gateway_id))
+    if row is not None:
+        db.delete(row)
+        db.flush()
+        # Removing it hands the vote back to any capability it was
+        # superseding, so the chain has to be recomputed here too.
+        refresh_derived(db, [delivery.id], [], _now())
+        db.flush()
+    notify(background_tasks)

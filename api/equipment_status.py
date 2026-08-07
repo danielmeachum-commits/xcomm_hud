@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 from models import (
     CapabilityGatewayLink,
     CapabilityServiceLink,
+    DeliveryGatewayDependency,
     Equipment,
     EquipmentCapability,
 )
@@ -138,9 +139,14 @@ def load_backing_for_services(
         .filter(CapabilityServiceLink.service_delivery_id.in_(service_ids))
         .all()
     )
+    # Which capabilities does each delivery already reach through a declared
+    # gateway dependency? Those must not ALSO count directly — see
+    # _shadowed_capabilities for why this is a correctness fix and not tidying.
+    shadowed = _shadowed_capabilities(db, service_ids)
     out: dict[int, list[dict]] = {}
     for link, capability, equipment in rows:
-        out.setdefault(link.service_delivery_id, []).append(
+        delivery_id = link.service_delivery_id
+        out.setdefault(delivery_id, []).append(
             {
                 "capability_id": capability.id,
                 "equipment_id": equipment.id,
@@ -148,9 +154,132 @@ def load_backing_for_services(
                 "label": capability.label,
                 "kind": capability.kind,
                 "status": capability.status,
+                # Where the gear physically is. A capability backing a
+                # delivery from ANOTHER site is the signature of an extension
+                # — the far end of a shot backing the near end's service —
+                # and the site matrix reads this to show that reach.
+                "site_id": equipment.site_id,
                 "role": link.role,
                 "required": link.required,
                 "group_key": link.group_key,
+                "superseded_by_gateway_id": shadowed.get(delivery_id, {}).get(
+                    capability.id
+                ),
+            }
+        )
+    return out
+
+
+def _shadowed_capabilities(
+    db: Session, service_ids: list[int]
+) -> dict[int, dict[int, int]]:
+    """`{delivery_id: {capability_id: gateway_id}}` — the §7 double count.
+
+    A capability that backs a gateway a delivery depends on is already
+    accounted for at that gateway. Counting it a second time directly against
+    the delivery was harmless under whole-set worst-of, which is idempotent,
+    but redundancy groups made it a real bug: the shared radio lands in two
+    groups, best-of clears each one independently, and the chain claims two
+    resilient paths where one component sits under both.
+
+    So the direct binding loses its vote and keeps its visibility. It stays in
+    `backing` carrying the gateway that took over, which is the honest thing to
+    show an operator — the dependency did not disappear, it moved up a level.
+    """
+    if not service_ids:
+        return {}
+    rows = (
+        db.query(
+            DeliveryGatewayDependency.service_delivery_id,
+            CapabilityGatewayLink.equipment_capability_id,
+            CapabilityGatewayLink.gateway_id,
+        )
+        .join(
+            CapabilityGatewayLink,
+            CapabilityGatewayLink.gateway_id == DeliveryGatewayDependency.gateway_id,
+        )
+        .filter(DeliveryGatewayDependency.service_delivery_id.in_(service_ids))
+        .all()
+    )
+    out: dict[int, dict[int, int]] = {}
+    for delivery_id, capability_id, gateway_id in rows:
+        # First gateway wins if a capability somehow backs two depended-on
+        # gateways. Which one is arbitrary; that it is counted once is not.
+        out.setdefault(delivery_id, {}).setdefault(capability_id, gateway_id)
+    return out
+
+
+# Gateways speak active/ready/…, equipment speaks up/degraded/…. The chain is
+# computed entirely in equipment vocabulary, so a gateway dependency has to be
+# translated on the way in. The design doc flagged moving this mapping
+# server-side as a correctness concern rather than a display convenience;
+# this is that move for the dependency direction.
+#
+# `ready` → `up` is the one real judgment call. A gateway on PACE standby is a
+# path that works and simply isn't carrying traffic, and treating it as
+# anything worse defeats the case redundancy groups exist for: "Primary ISP or
+# Sat Phone", primary down, sat phone ready, should read as a live alternate
+# rather than an outage. `setup` → `maintenance` because both mean
+# deliberately off the line, which is also how _REPORTED_RANK already scores
+# them (both 4).
+_GATEWAY_TO_EQUIPMENT: dict[str, str] = {
+    "active": "up",
+    "ready": "up",
+    "degraded": "degraded",
+    "setup": "maintenance",
+    "down": "down",
+    "offline": "offline",
+}
+
+
+def load_gateway_backing_for_services(
+    db: Session, service_ids: list[int]
+) -> dict[int, list[dict]]:
+    """`{delivery_id: [backing gateway dicts]}` — the §7 dependency edge.
+
+    Each depended-on gateway contributes its OWN capability-derived value when
+    it has one, and its reported status mapped into equipment vocabulary when
+    it does not. The fallback is what makes the feature useful on day one:
+    almost no gateway has capabilities bound to it yet, and a dependency that
+    contributed nothing until someone wired up the gear would be inert.
+
+    One level deep, always. Gateways depend on capabilities, never on other
+    gateways, so this never recurses and the chain cannot cycle.
+    """
+    if not service_ids:
+        return {}
+    from models import Gateway  # local: avoid an import cycle
+
+    deps = (
+        db.query(DeliveryGatewayDependency, Gateway)
+        .join(Gateway, Gateway.id == DeliveryGatewayDependency.gateway_id)
+        .filter(DeliveryGatewayDependency.service_delivery_id.in_(service_ids))
+        .all()
+    )
+    if not deps:
+        return {}
+
+    # Resolve every depended-on gateway's own chain in one pass, rather than
+    # per delivery — a site's deliveries mostly point at the same few gateways.
+    gateway_ids = sorted({gw.id for _dep, gw in deps})
+    gateway_backing = load_backing_for_gateways(db, gateway_ids)
+
+    out: dict[int, list[dict]] = {}
+    for dep, gateway in deps:
+        from_chain = build_derived(
+            gateway.status, gateway_backing.get(gateway.id, [])
+        )["derived"]
+        contributed = from_chain or _GATEWAY_TO_EQUIPMENT.get(gateway.status)
+        out.setdefault(dep.service_delivery_id, []).append(
+            {
+                "gateway_id": gateway.id,
+                "name": gateway.name,
+                "pace": gateway.pace,
+                "reported_status": gateway.status,
+                "contributed_status": contributed,
+                "from_chain": from_chain is not None,
+                "required": dep.required,
+                "group_key": dep.group_key,
             }
         )
     return out
@@ -182,6 +311,7 @@ def load_backing_for_gateways(
                 "label": capability.label,
                 "kind": capability.kind,
                 "status": capability.status,
+                "site_id": equipment.site_id,
                 "role": None,
             }
         )
@@ -203,7 +333,21 @@ def best_status(statuses: Iterable[str]) -> Optional[str]:
     return best
 
 
-def derive_from_chain(backing: list[dict]) -> Optional[str]:
+def gates(item: dict) -> bool:
+    """Does this backing item actually move the number?
+
+    Two ways to be present without voting. Not `required` — the binding is
+    context, and saying "this is related" must never be the same act as saying
+    "this must be up". Or superseded — the capability backs a gateway this
+    delivery already depends on, so its vote is cast there instead; counting it
+    here as well is the §7 double count.
+    """
+    return bool(item.get("required")) and item.get("superseded_by_gateway_id") is None
+
+
+def derive_from_chain(
+    backing: list[dict], gateway_backing: Optional[list[dict]] = None
+) -> Optional[str]:
     """Worst-of across groups, best-of within a group.
 
     Only `required` bindings gate. Everything else stays in `backing` for the
@@ -215,17 +359,32 @@ def derive_from_chain(backing: list[dict]) -> Optional[str]:
     boolean would have reported down and taught people to ignore the badge.
     A null key means the binding is its own group, which is the common case.
 
+    Gateway dependencies (§7) join the same group namespace, so a group can mix
+    "this radio" with "the Starlink path" and still mean one live member is
+    enough. They contribute an already-translated equipment status — see
+    `load_gateway_backing_for_services`.
+
     Returns None when nothing required has anything to say — the caller
     renders that as no opinion rather than as a problem.
     """
     groups: dict[object, list[str]] = {}
     for index, item in enumerate(backing):
-        if not item.get("required"):
+        if not gates(item):
             continue
         # Null key → its own group, keyed by position so it cannot collide
         # with a real group name.
         key = item.get("group_key") or ("__solo__", index)
         groups.setdefault(key, []).append(item["status"])
+    for index, item in enumerate(gateway_backing or []):
+        if not item.get("required"):
+            continue
+        status = item.get("contributed_status")
+        if status is None:
+            continue
+        # Offset the solo key so a gateway and a capability at the same index
+        # land in different groups.
+        key = item.get("group_key") or ("__solo_gw__", index)
+        groups.setdefault(key, []).append(status)
     if not groups:
         return None
     # Each group contributes its BEST (redundancy satisfied by any one member);
@@ -235,7 +394,11 @@ def derive_from_chain(backing: list[dict]) -> Optional[str]:
     )
 
 
-def build_derived(reported: str, backing: list[dict]) -> dict:
+def build_derived(
+    reported: str,
+    backing: list[dict],
+    gateway_backing: Optional[list[dict]] = None,
+) -> dict:
     """Assemble the advisory payload for one service or gateway.
 
     Shape matches schemas.DerivedStatus.
@@ -247,26 +410,43 @@ def build_derived(reported: str, backing: list[dict]) -> dict:
     folding it into the status vocabulary is what produced the carve-outs this
     module and effective.py both had to write.
     """
-    gated = [b for b in backing if b.get("required")]
+    gateway_backing = gateway_backing or []
+    gated = [b for b in backing if gates(b)]
+    gated_gateways = [g for g in gateway_backing if g.get("required")]
     # Fall back to the old whole-set worst-of when nothing has been marked
     # required, so a workspace that never touches the checkboxes keeps exactly
-    # the advisory it had before.
+    # the advisory it had before. A superseded binding is excluded even from
+    # this fallback: worst-of is idempotent, so it changes no value today, but
+    # letting it back in would reintroduce the double count the moment someone
+    # ticks a box.
     derived = (
-        derive_from_chain(backing)
-        if gated
-        else worst_status(item["status"] for item in backing)
+        derive_from_chain(backing, gateway_backing)
+        if gated or gated_gateways
+        else worst_status(
+            item["status"]
+            for item in backing
+            if item.get("superseded_by_gateway_id") is None
+        )
     )
     unvalidated = [b for b in gated if _rank(b["status"]) == 0]
+    # A required gateway with nothing to say is a hole in the chain too — it
+    # would otherwise vanish silently, which is exactly the failure the
+    # unvalidated count exists to prevent.
+    silent_gateways = [
+        g for g in gated_gateways if g.get("contributed_status") is None
+    ]
     return {
         "reported": reported,
         "derived": derived,
         "disagrees": disagrees(reported, derived),
         "backing": backing,
-        "required_total": len(gated),
-        "required_unvalidated": len(unvalidated),
+        "backing_gateways": gateway_backing,
+        "required_total": len(gated) + len(gated_gateways),
+        "required_unvalidated": len(unvalidated) + len(silent_gateways),
         "unvalidated_labels": [
             f"{b['equipment_code']} {b['label']}" for b in unvalidated
-        ],
+        ]
+        + [f"{g['name']} (gateway)" for g in silent_gateways],
     }
 
 
@@ -382,16 +562,10 @@ def refresh_derived(db: Session, delivery_ids: list[int], gateway_ids: list[int]
     from models import Gateway, ServiceDelivery  # local: avoid an import cycle
 
     changed = []
-    if delivery_ids:
-        backing = load_backing_for_services(db, delivery_ids)
-        for row in db.query(ServiceDelivery).filter(
-            ServiceDelivery.id.in_(delivery_ids)
-        ):
-            value = build_derived(row.status, backing.get(row.id, []))["derived"]
-            if value != row.derived_status:
-                row.derived_status = value
-                row.derived_changed_at = now
-                changed.append(("delivery", row.id, value))
+    # Gateways first, so `changed` reads in dependency order. Correctness does
+    # not rest on it: load_gateway_backing_for_services recomputes each
+    # gateway's chain from its capabilities rather than reading the stored
+    # derived_status, so a delivery cannot pick up a stale value either way.
     if gateway_ids:
         backing = load_backing_for_gateways(db, gateway_ids)
         for row in db.query(Gateway).filter(Gateway.id.in_(gateway_ids)):
@@ -400,4 +574,37 @@ def refresh_derived(db: Session, delivery_ids: list[int], gateway_ids: list[int]
                 row.derived_status = value
                 row.derived_changed_at = now
                 changed.append(("gateway", row.id, value))
+
+    # Pull in every delivery that depends on one of the touched gateways, even
+    # if the caller never named it. The capability that was just edited may be
+    # bound only to the gateway, and the delivery's dependency is precisely the
+    # claim that this should reach it.
+    delivery_ids = list(delivery_ids)
+    if gateway_ids:
+        dependents = (
+            db.query(DeliveryGatewayDependency.service_delivery_id)
+            .filter(DeliveryGatewayDependency.gateway_id.in_(gateway_ids))
+            .distinct()
+        )
+        seen = set(delivery_ids)
+        for (delivery_id,) in dependents:
+            if delivery_id not in seen:
+                seen.add(delivery_id)
+                delivery_ids.append(delivery_id)
+
+    if delivery_ids:
+        backing = load_backing_for_services(db, delivery_ids)
+        gateway_backing = load_gateway_backing_for_services(db, delivery_ids)
+        for row in db.query(ServiceDelivery).filter(
+            ServiceDelivery.id.in_(delivery_ids)
+        ):
+            value = build_derived(
+                row.status,
+                backing.get(row.id, []),
+                gateway_backing.get(row.id, []),
+            )["derived"]
+            if value != row.derived_status:
+                row.derived_status = value
+                row.derived_changed_at = now
+                changed.append(("delivery", row.id, value))
     return changed

@@ -2305,12 +2305,64 @@ class BackingCapability(BaseModel):
     label: str
     kind: CapabilityKind
     status: EquipmentStatusValue
+    # Where the gear physically sits. Differs from the delivery's site exactly
+    # when an extension is backing this service from the far end of a shot.
+    site_id: Optional[int] = None
     role: Optional[CapabilityBindRole] = None
     # Does this gate the service, or just stand behind it? Only `required`
     # bindings move the derived value.
     required: bool = False
     # Required bindings sharing a key are OR'd (one live path is enough);
     # groups AND together. Null = its own group.
+    group_key: Optional[str] = None
+    # Set when this capability also backs a gateway the delivery depends on.
+    # The binding is then shown but NOT counted — the capability gates the
+    # delivery through that gateway instead, which is the whole point of §7.
+    # Without this the shared radio lands in two redundancy groups and they
+    # stop being independent.
+    superseded_by_gateway_id: Optional[int] = None
+
+
+class BackingGateway(BaseModel):
+    """One gateway standing behind a delivery.
+
+    Carried separately from `backing` rather than flattened into it because a
+    gateway is not a capability and has no equipment_id/kind to report. It
+    shares `required`/`group_key` semantics exactly, though, and its group keys
+    live in the SAME namespace as the capability bindings' — so "Primary ISP or
+    that one radio" is expressible as a single redundancy group.
+    """
+
+    gateway_id: int
+    name: str
+    pace: str
+    # The gateway's own status as reported by an operator, in gateway
+    # vocabulary (active/ready/…).
+    reported_status: str
+    # What it contributes to the delivery's chain, in equipment vocabulary.
+    # Its own capability-derived value when it has one, else its reported
+    # status mapped across. None when it has nothing to say.
+    contributed_status: Optional[EquipmentStatusValue] = None
+    # True when contributed_status came from the gateway's own equipment chain
+    # rather than from an operator's reported value.
+    from_chain: bool = False
+    required: bool = True
+    group_key: Optional[str] = None
+
+
+class DeliveryGatewayDependencyOut(BaseModel):
+    """A delivery's declared dependency on a transport path (§7).
+
+    Denormalizes the gateway's name/pace/status so the editor can render the
+    list without a second round trip.
+    """
+
+    service_delivery_id: int
+    gateway_id: int
+    gateway_name: str
+    gateway_pace: str
+    gateway_status: str
+    required: bool = True
     group_key: Optional[str] = None
 
 
@@ -2331,6 +2383,10 @@ class DerivedStatus(BaseModel):
     # badges and what the advisory rule fires on.
     disagrees: bool = False
     backing: list[BackingCapability] = Field(default_factory=list)
+    # Gateways this delivery declares a dependency on. Always empty for a
+    # gateway's own DerivedStatus — gateways depend on capabilities only, which
+    # is what keeps the chain one level deep and non-recursive.
+    backing_gateways: list[BackingGateway] = Field(default_factory=list)
     # --- the hole in the chain, carried BESIDE the status, never inside it ---
     # `derived` skips unvalidated capabilities when computing a value, because
     # a chain that returned `unvalidated` for one unchecked port would be

@@ -6,6 +6,7 @@ import { ClipboardList, Settings } from "lucide-react"
 
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { EnclaveChip } from "@/components/enclaves/enclaves-client"
+import { GatewayDependencyEditor } from "@/components/services/gateway-dependency-editor"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { ValidationHistory } from "@/components/services/validation-history"
 import { Button } from "@/components/ui/button"
@@ -396,6 +397,13 @@ export function ServiceDetailClient({
               </p>
             </div>
           )}
+          {/* Sits under the PACE tiers because the two answer adjacent
+              questions: which gateways this service *rides*, and which of
+              them it actually *depends* on. */}
+          <GatewayDependencyEditor
+            serviceId={service.id}
+            siteId={service.site_id}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="notes">Notes</Label>
             <Textarea

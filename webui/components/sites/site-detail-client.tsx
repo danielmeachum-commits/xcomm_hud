@@ -345,7 +345,13 @@ function ServicesTab({
       </div>
 
       {view === "matrix" ? (
-        <SiteMatrix services={services} gateways={gateways} userRole={userRole} />
+        <SiteMatrix
+          services={services}
+          gateways={gateways}
+          userRole={userRole}
+          sites={sites}
+          serviceDerived={advisory.service_derived}
+        />
       ) : view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />
       ) : (

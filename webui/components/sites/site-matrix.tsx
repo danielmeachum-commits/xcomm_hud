@@ -12,11 +12,14 @@ import {
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Cpu,
   MapPin,
   Plus,
+  Waypoints,
 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import { DerivedStatusDialog } from "@/components/equipment/derived-status-dialog"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { MatrixCellPill } from "@/components/services/matrix-cell-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
@@ -37,13 +40,16 @@ import { statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
   AnyStatus,
+  BackingCapability,
   CellStatus,
+  DerivedStatus,
   Gateway,
   GatewayPace,
   GatewayStatus,
   Role,
   Service,
   ServiceGatewayStatus,
+  Site,
 } from "@/lib/types"
 import { useWorkspace } from "@/lib/workspace"
 
@@ -200,6 +206,12 @@ interface Props {
   services: Service[]
   gateways: Gateway[]
   userRole?: Role
+  /** Workspace sites, for naming the far end of an extension. */
+  sites?: Site[]
+  /** Equipment-derived status per delivery, so a cell showing a DERIVED
+   *  status can explain where that number came from. Only read for services
+   *  in derived mode — the matrix itself gains no new visual weight. */
+  serviceDerived?: Record<number, DerivedStatus>
 }
 
 function isTierOverridden(gws: Gateway[]): boolean {
@@ -285,9 +297,19 @@ function bestCellForTier(
   return best
 }
 
-export function SiteMatrix({ services, gateways, userRole }: Props) {
+export function SiteMatrix({
+  services,
+  gateways,
+  userRole,
+  sites,
+  serviceDerived,
+}: Props) {
   const isOperator = userRole === "operator" || userRole === "admin"
   const [density] = useState<Density>("full")
+  const siteNameById = useMemo(
+    () => new Map((sites ?? []).map((s) => [s.id, s.name])),
+    [sites],
+  )
 
   const {
     corePace,
@@ -360,6 +382,8 @@ export function SiteMatrix({ services, gateways, userRole }: Props) {
           density={density}
           siteId={siteId}
           isOperator={isOperator}
+          siteNameById={siteNameById}
+          serviceDerived={serviceDerived}
         />
       )}
       {coreLocal.length > 0 && (
@@ -392,6 +416,14 @@ interface SectionProps {
   density: Density
   siteId: number
   isOperator?: boolean
+  siteNameById: Map<number, string>
+  serviceDerived?: Record<number, DerivedStatus>
+}
+
+/** One remote site a service reaches, and the far-end capabilities doing it. */
+interface ExtensionReach {
+  siteId: number
+  capabilities: BackingCapability[]
 }
 
 interface GatewayLine {
@@ -414,6 +446,7 @@ const ALL_COLUMN_KEYS: ColumnKey[] = ["local", ...GATEWAY_PACE_VALUES]
 const COLLAPSED_TRACK = "72px"
 const LOCAL_TRACK = "110px"
 const PACE_TRACK = "minmax(180px, 280px)"
+const EXT_TRACK = "minmax(150px, 220px)"
 const COLUMN_TRANSITION_MS = 220
 
 const DEFAULT_COLLAPSED: Record<ColumnKey, boolean> = Object.fromEntries(
@@ -436,6 +469,8 @@ function MatrixGridSection({
   density,
   siteId,
   isOperator,
+  siteNameById,
+  serviceDerived,
 }: SectionProps) {
   const [hover, setHover] = useState<{
     col: number | null
@@ -522,13 +557,40 @@ function MatrixGridSection({
   // shrink to a fixed narrow track so the tile shows just its status dot;
   // the gutter track always sits between Local and the PACE group so the
   // two read as distinct reachability columns.
+  // Which remote sites does each service reach, and through what? A backing
+  // capability sitting at another site IS the extension — the far end of a
+  // shot backing the near end's service. Nothing else has to be modelled.
+  const extensionsByService = useMemo(() => {
+    const out = new Map<number, ExtensionReach[]>()
+    for (const svc of services) {
+      const backing = serviceDerived?.[svc.id]?.backing ?? []
+      const bySite = new Map<number, ExtensionReach>()
+      for (const b of backing) {
+        if (b.site_id == null || b.site_id === siteId) continue
+        const existing = bySite.get(b.site_id)
+        if (existing) {
+          existing.capabilities.push(b)
+        } else {
+          bySite.set(b.site_id, { siteId: b.site_id, capabilities: [b] })
+        }
+      }
+      if (bySite.size > 0) out.set(svc.id, [...bySite.values()])
+    }
+    return out
+  }, [services, serviceDerived, siteId])
+
+  const anyExtension = extensionsByService.size > 0
+
   const gridTemplateColumns = useMemo(() => {
     const localTrack = collapsed.local ? COLLAPSED_TRACK : LOCAL_TRACK
     const paceTracks = GATEWAY_PACE_VALUES.map((p) =>
       collapsed[p] ? COLLAPSED_TRACK : PACE_TRACK,
     ).join(" ")
-    return `200px ${localTrack} 16px ${paceTracks}`
-  }, [collapsed])
+    // Trailing gutter + track only when something reaches off-site, so a
+    // single-site deployment sees the matrix exactly as before.
+    const extTrack = anyExtension ? ` 16px ${EXT_TRACK}` : ""
+    return `200px ${localTrack} 16px ${paceTracks}${extTrack}`
+  }, [collapsed, anyExtension])
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const gatewayRefs = useRef(new Map<number, HTMLDivElement | null>())
@@ -763,6 +825,20 @@ function MatrixGridSection({
                   registerRef={registerPaceHeader}
                 />
               ))}
+              {anyExtension && (
+                <>
+                  {/* Gutter cell — the template adds a 16px track before the
+                      extension column, so every row must emit one too or the
+                      whole grid shifts. */}
+                  <div />
+                  <div className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-border px-2 py-1">
+                    <Waypoints className="size-3 text-muted-foreground" />
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Extends to
+                    </span>
+                  </div>
+                </>
+              )}
 
               {/* Service rows */}
               {services.map((svc, rowIdx) => (
@@ -775,6 +851,7 @@ function MatrixGridSection({
                   />
                   <LocalTile
                     service={svc}
+                    derived={serviceDerived?.[svc.id]}
                     dotOnly={collapsed.local || density === "min"}
                     density={density}
                     row={rowIdx}
@@ -799,6 +876,18 @@ function MatrixGridSection({
                       isOperator={isOperator}
                     />
                   ))}
+                  {anyExtension && (
+                    <>
+                      <div />
+                      <ExtensionTile
+                        reaches={extensionsByService.get(svc.id) ?? []}
+                        siteNameById={siteNameById}
+                        row={rowIdx}
+                        col={GATEWAY_PACE_VALUES.length + 4}
+                        hover={hover}
+                      />
+                    </>
+                  )}
                 </Fragment>
               ))}
             </div>
@@ -806,6 +895,71 @@ function MatrixGridSection({
         </div>
       </div>
     </section>
+  )
+}
+
+/** What this service reaches at other sites.
+ *
+ *  Sits to the right of the PACE tiers because it is the same kind of fact —
+ *  another way this service gets where it is going — but it is emphatically
+ *  NOT a PACE tier, so it is separated by the same gutter and drawn without a
+ *  status of its own. An extension's health already shows up in the local
+ *  status through its backing capabilities; repeating it here as a second
+ *  status would be the double count all over again. */
+function ExtensionTile({
+  reaches,
+  siteNameById,
+  row,
+  col,
+  hover,
+}: {
+  reaches: ExtensionReach[]
+  siteNameById: Map<number, string>
+  row: number
+  col: number
+  hover: Hover
+}) {
+  const { w } = useWorkspace()
+  return (
+    <div
+      data-col={col}
+      data-row={row}
+      className={cn(
+        activeTileClass(row, col, hover, "", ""),
+        "min-w-0 px-2 py-2",
+      )}
+    >
+      {reaches.length === 0 ? (
+        <div className="flex items-center justify-center text-muted-foreground/40">
+          {CELL_DASH}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {reaches.map((r) => (
+            <a
+              key={r.siteId}
+              href={w(`/sites/${r.siteId}`)}
+              className="flex flex-col gap-0.5 rounded-md border border-border px-1.5 py-1 hover:bg-muted/50"
+            >
+              <span className="flex items-center gap-1 text-[11px] font-medium">
+                <Waypoints className="size-2.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">
+                  {siteNameById.get(r.siteId) ?? `Site ${r.siteId}`}
+                </span>
+              </span>
+              <span
+                className="truncate text-[10px] text-muted-foreground"
+                title={r.capabilities
+                  .map((c) => `${c.equipment_code} ${c.label}`)
+                  .join(", ")}
+              >
+                {r.capabilities.map((c) => c.equipment_code).join(", ")}
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1203,6 +1357,7 @@ function reachTypeFor(service: Service) {
 
 function LocalTile({
   service,
+  derived,
   dotOnly,
   row,
   col,
@@ -1210,6 +1365,7 @@ function LocalTile({
   isOperator,
 }: {
   service: Service
+  derived?: DerivedStatus
   /** True when this column is collapsed OR density is min — collapses the
    *  tile to just the centered status dot regardless of the global density
    *  setting. */
@@ -1220,10 +1376,16 @@ function LocalTile({
   hover: Hover
   isOperator?: boolean
 }) {
+  const [explaining, setExplaining] = useState(false)
   const softTint = dotOnly
     ? tileTintStrong(service.status)
     : tileTintSoft(service.status)
   const emphasisTint = tileTintStrong(service.status)
+  // In derived mode the "validated N ago" line is misleading — the status did
+  // not come from that validation, it came from the equipment chain. Swap the
+  // line rather than adding one, so the cell gains an explanation without
+  // gaining any height.
+  const isDerived = service.status_mode === "derived" && !!derived
   return (
     <div
       data-col={col}
@@ -1257,7 +1419,17 @@ function LocalTile({
             allowedStatuses={service.allowed_statuses}
             className={CELL_PILL_CLASS}
           />
-          {service.validated_at ? (
+          {isDerived ? (
+            <button
+              type="button"
+              onClick={() => setExplaining(true)}
+              title="Status computed from equipment — click to see the chain"
+              className="flex items-center gap-1 text-left text-[10px] text-muted-foreground hover:underline"
+            >
+              <Cpu className="size-2.5 shrink-0" />
+              from equipment
+            </button>
+          ) : service.validated_at ? (
             <ValidationDetailsPopover
               validatedAt={service.validated_at}
               status={service.status}
@@ -1276,6 +1448,20 @@ function LocalTile({
             </span>
           )}
         </div>
+      )}
+
+      {/* Only reachable from the full-density line above; a collapsed column
+          is deliberately just the dot. */}
+      {isDerived && !dotOnly && (
+        <DerivedStatusDialog
+          open={explaining}
+          onOpenChange={setExplaining}
+          derived={derived}
+          target="service"
+          targetId={service.id}
+          targetName={service.name}
+          canApply={false}
+        />
       )}
     </div>
   )

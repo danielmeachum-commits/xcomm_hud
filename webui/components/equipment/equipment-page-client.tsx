@@ -8,7 +8,11 @@ import { useMemo, useState } from "react"
 import { DeployUtcWizard } from "@/components/equipment/deploy-utc-wizard"
 import { EquipmentStatusPill } from "@/components/equipment/equipment-status-pill"
 import { NetworkCanvas } from "@/components/equipment/network-canvas"
-import { EnclaveChip } from "@/components/enclaves/enclaves-client"
+import {
+  enclaveHeadingClass,
+  enclaveHeadingStyle,
+  enclaveLabel,
+} from "@/lib/enclave-meta"
 import { UtcCompletenessPanel } from "@/components/equipment/utc-completeness-panel"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import {
@@ -464,8 +468,13 @@ export function EquipmentPageClient({
 
               <div className="flex flex-col gap-4">
                 {siteGroup.utcGroups.map((utcGroup) => (
-                  <div key={utcGroup.key} className="flex flex-col gap-2">
-                    <div className="flex flex-wrap items-center gap-2 border-l-2 border-border pl-2">
+                  <div key={utcGroup.key} className="flex flex-col gap-3">
+                    {/* Header reads as a line of prose rather than a row of
+                        widgets: name, then the def code and package as plain
+                        secondary text. The pill and the left rule were both
+                        decoration that made three unrelated things look like
+                        one control group. */}
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       {utcGroup.utc ? (
                         <>
                           <Link
@@ -475,13 +484,19 @@ export function EquipmentPageClient({
                             {utcGroup.utc.name}
                           </Link>
                           {utcGroup.utc.utc_def_code && (
-                            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                            <span className="font-mono text-[11px] text-muted-foreground">
                               {utcGroup.utc.utc_def_code}
                             </span>
                           )}
+                          {/* The package this UTC belongs to — FCP-1, SCP,
+                              CFK. Free text on PackageInstance, so labelled
+                              rather than left to stand on its own. */}
                           {utcGroup.utc.package_name && (
                             <span className="text-xs text-muted-foreground">
-                              {utcGroup.utc.package_name}
+                              Package{" "}
+                              <span className="font-medium text-foreground">
+                                {utcGroup.utc.package_name}
+                              </span>
                             </span>
                           )}
                         </>
@@ -491,7 +506,8 @@ export function EquipmentPageClient({
                         </span>
                       )}
                       <span className="text-xs text-muted-foreground">
-                        · {utcGroup.count}
+                        {utcGroup.count} serialized{" "}
+                        {utcGroup.count === 1 ? "item" : "items"}
                       </span>
                     </div>
 
@@ -500,19 +516,48 @@ export function EquipmentPageClient({
                         key={enclaveGroup.key}
                         className="flex flex-col gap-2 pl-4"
                       >
+                        {/* Heading, not a tag. The chip is right for labelling
+                            one item; as the header of every group it turned
+                            the page into a field of pills. Same hue, carried
+                            by the text and a rule instead of a filled box. */}
                         <div className="flex items-center gap-2">
                           {enclaveGroup.enclave ? (
-                            <EnclaveChip enclave={enclaveGroup.enclave} />
+                            <span
+                              className={cn(
+                                "text-[11px] font-semibold uppercase tracking-wide",
+                                enclaveHeadingClass(enclaveGroup.enclave.color),
+                              )}
+                              style={enclaveHeadingStyle(
+                                enclaveGroup.enclave.color,
+                              )}
+                            >
+                              {enclaveLabel(enclaveGroup.enclave)}
+                            </span>
                           ) : (
-                            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                               No enclave
                             </span>
                           )}
                           <span className="text-[11px] text-muted-foreground">
-                            · {enclaveGroup.items.length}
+                            {enclaveGroup.items.length}
                           </span>
+                          <span
+                            aria-hidden
+                            className="h-px flex-1 bg-current opacity-20"
+                            style={
+                              enclaveGroup.enclave
+                                ? enclaveHeadingStyle(enclaveGroup.enclave.color)
+                                : undefined
+                            }
+                          />
                         </div>
-                        <ul className="flex flex-col gap-2">
+                        {/* Grid rather than a stack. Full-width rows pushed the
+                            capability pills to the far right edge, so a card's
+                            own two halves ended up further apart than adjacent
+                            cards were — the eye had to cross the whole page to
+                            read one item. Narrow columns keep each card's
+                            information together. */}
+                        <ul className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
                           {enclaveGroup.items.map((e) => {
                             const Icon = equipmentIcon(e.type_category)
                             const rollup = equipmentRollup(e)
@@ -520,13 +565,13 @@ export function EquipmentPageClient({
                               <li
                                 key={e.id}
                                 className={cn(
-                                  "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
+                                  "flex flex-col gap-2 rounded-lg border p-3",
                                   statusBadgeClass(rollup),
                                 )}
                               >
                                 <Link
                                   href={w(`/equipment/${e.id}`)}
-                                  className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
+                                  className="flex min-w-0 items-center gap-3 hover:underline"
                                 >
                                   <Icon className="size-5 shrink-0 text-muted-foreground" />
                                   <div className="min-w-0">
@@ -563,7 +608,7 @@ export function EquipmentPageClient({
                                   </div>
                                 </Link>
 
-                                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                                <div className="mt-auto flex flex-wrap items-center gap-1.5">
                                   {e.capabilities.map((c) => (
                                     <EquipmentStatusPill
                                       key={c.id}

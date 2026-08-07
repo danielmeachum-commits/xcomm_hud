@@ -1,19 +1,10 @@
 "use client"
 
 import { CircleHelp, TriangleAlert } from "lucide-react"
-import { useRouter } from "next/navigation"
 import { useState } from "react"
 
-import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { statusLabel, statusToIndicatorState } from "@/lib/status"
+import { DerivedStatusDialog } from "@/components/equipment/derived-status-dialog"
+import { statusLabel } from "@/lib/status"
 import type { DerivedStatus } from "@/lib/types"
 
 interface Props {
@@ -25,24 +16,15 @@ interface Props {
   targetName: string
 }
 
-/** Maps an equipment status onto the vocabulary the target actually accepts.
- *  Gateways say "active" where equipment says "up", and neither service nor
- *  gateway has a "maintenance" state — the closest honest answer is
- *  "degraded", not silence. */
-function toTargetStatus(
-  derived: string,
-  target: "service" | "gateway",
-): string {
-  if (derived === "up") return target === "gateway" ? "active" : "up"
-  if (derived === "maintenance") return "degraded"
-  return derived
-}
-
 /**
  * Shows equipment-derived status beside the reported one, and offers to apply
  * it. Deliberately never writes on its own — see api/equipment_status.py for
  * why the human stays in the loop. Renders nothing when there's no
  * disagreement, so the UI stays quiet in the normal case.
+ *
+ * The explanation itself lives in DerivedStatusDialog, which a status cell can
+ * also open directly — this component is only the badge and the rule for when
+ * it should appear.
  */
 export function DerivedStatusBadge({
   derived,
@@ -50,10 +32,7 @@ export function DerivedStatusBadge({
   targetId,
   targetName,
 }: Props) {
-  const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   if (!derived) return null
 
@@ -64,61 +43,41 @@ export function DerivedStatusBadge({
   const hole = derived.required_unvalidated > 0
   if ((!derived.disagrees || !derived.derived) && !hole) return null
 
-  const backing = derived.backing
-  const bad = backing.filter((b) => b.status !== "up" && b.status !== "unvalidated")
-  // Safe: the hole-only branch below returns before this is read, and the
-  // disagreement branch cannot be reached with a null derived.
-  const next = derived.derived ? toTargetStatus(derived.derived, target) : ""
-
-  async function apply() {
-    setPending(true)
-    setError(null)
-    try {
-      // Goes through the normal validation endpoint so the change is
-      // attributed to whoever clicked, not to the system.
-      const path =
-        target === "service"
-          ? `/api/be/services/${targetId}/validate`
-          : `/api/be/gateways/${targetId}/validate`
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: next,
-          note: `Applied from equipment: ${bad
-            .map((b) => `${b.equipment_code} ${b.label} ${b.status}`)
-            .join(", ")}`,
-        }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        throw new Error(body?.detail ?? `Request failed (${res.status})`)
-      }
-      setOpen(false)
-      router.refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong")
-    } finally {
-      setPending(false)
-    }
-  }
-
-  // Nothing to apply, but a gap worth showing.
+  // Nothing to apply, but a gap worth showing. Clickable now, because the
+  // labels alone don't say WHICH dependencies are unvalidated once there is
+  // more than one.
   if (!derived.disagrees || !derived.derived) {
     return (
-      <span
-        title={`Not validated: ${derived.unvalidated_labels.join(", ")}`}
-        className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-      >
-        <CircleHelp className="size-3" />
-        {derived.required_unvalidated} of {derived.required_total} unvalidated
-      </span>
+      <>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            setOpen(true)
+          }}
+          title={`Not validated: ${derived.unvalidated_labels.join(", ")}`}
+          className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted"
+        >
+          <CircleHelp className="size-3" />
+          {derived.required_unvalidated} of {derived.required_total} unvalidated
+        </button>
+        <DerivedStatusDialog
+          open={open}
+          onOpenChange={setOpen}
+          derived={derived}
+          target={target}
+          targetId={targetId}
+          targetName={targetName}
+        />
+      </>
     )
   }
 
   return (
     <>
       <button
+        type="button"
         onClick={(e) => {
           e.stopPropagation()
           e.preventDefault()
@@ -131,110 +90,14 @@ export function DerivedStatusBadge({
         Gear says {statusLabel(derived.derived)}
       </button>
 
-      <Dialog open={open} onOpenChange={setOpen} disablePointerDismissal>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{targetName}</DialogTitle>
-          </DialogHeader>
-
-          <div className="flex items-center gap-6 rounded-lg border border-border p-3">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                Reported
-              </div>
-              <div className="mt-1 flex items-center gap-1.5 text-sm">
-                <StatusIndicator
-                  state={statusToIndicatorState(derived.reported as never)}
-                />
-                {statusLabel(derived.reported as never)}
-              </div>
-            </div>
-            <div className="text-muted-foreground">→</div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                Equipment says
-              </div>
-              <div className="mt-1 flex items-center gap-1.5 text-sm">
-                <StatusIndicator state={statusToIndicatorState(derived.derived)} />
-                {statusLabel(derived.derived)}
-              </div>
-            </div>
-          </div>
-
-          {hole && (
-            <p className="rounded-md border border-muted-foreground/30 bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
-              <strong>
-                {derived.required_unvalidated} of {derived.required_total}
-              </strong>{" "}
-              required {derived.required_unvalidated === 1 ? "capability has" : "capabilities have"}{" "}
-              never been validated, so this comparison is made on incomplete
-              information: {derived.unvalidated_labels.join(", ")}.
-            </p>
-          )}
-
-          <div>
-            <div className="mb-1.5 text-xs font-medium">
-              {backing.length - bad.length} of {backing.length} backing{" "}
-              {backing.length === 1 ? "capability" : "capabilities"} healthy
-              {derived.required_total > 0 && (
-                <span className="ml-1 font-normal text-muted-foreground">
-                  · {derived.required_total} required
-                </span>
-              )}
-            </div>
-            <ul className="flex flex-col gap-1">
-              {backing.map((b) => (
-                <li
-                  key={b.capability_id}
-                  className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1 text-xs"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <StatusIndicator state={statusToIndicatorState(b.status)} />
-                    <span className="font-mono">{b.equipment_code}</span>
-                    <span className="text-muted-foreground">{b.label}</span>
-                    {b.required && (
-                      <span
-                        title={
-                          b.group_key
-                            ? `Required — redundant with others in "${b.group_key}"`
-                            : "Required"
-                        }
-                        className="rounded-full border border-border px-1 py-px text-[9px] uppercase tracking-wide"
-                      >
-                        {b.group_key ? `req · ${b.group_key}` : "req"}
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {statusLabel(b.status)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            Nothing has been changed. Applying records{" "}
-            <strong>{statusLabel(next as never)}</strong> as a normal
-            validation, attributed to you.
-          </p>
-          {error && <p className="text-xs text-destructive">{error}</p>}
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={pending}
-            >
-              Leave as reported
-            </Button>
-            <Button type="button" onClick={apply} disabled={pending}>
-              {pending ? "Applying…" : `Apply ${statusLabel(next as never)}`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DerivedStatusDialog
+        open={open}
+        onOpenChange={setOpen}
+        derived={derived}
+        target={target}
+        targetId={targetId}
+        targetName={targetName}
+      />
     </>
   )
 }

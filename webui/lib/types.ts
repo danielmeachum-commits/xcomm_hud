@@ -1086,7 +1086,47 @@ export interface BackingCapability {
   label: string
   kind: CapabilityKind
   status: EquipmentStatus
+  /** Where the gear physically sits. Differs from the delivery's site exactly
+   *  when an extension backs this service from the far end of a shot — which
+   *  is what the matrix's "Extends to" column reads. */
+  site_id: number | null
   role: CapabilityBindRole | null
+  /** Set when this capability also backs a gateway the delivery depends on.
+   *  Shown but not counted — it gates the delivery through that gateway
+   *  instead. Without this the shared component sits in two redundancy
+   *  groups and they stop being independent. */
+  superseded_by_gateway_id: number | null
+}
+
+/** A gateway standing behind a delivery. Separate from BackingCapability
+ *  because a gateway has no equipment_id or kind — but the `required` /
+ *  `group_key` semantics are identical, and the group keys share one
+ *  namespace, so a capability and a gateway can sit in the same group. */
+export interface BackingGateway {
+  gateway_id: number
+  name: string
+  pace: GatewayPace
+  /** The operator's value, in gateway vocabulary. */
+  reported_status: GatewayStatus
+  /** What it contributes to the chain, in equipment vocabulary. Null when it
+   *  has nothing to say. */
+  contributed_status: EquipmentStatus | null
+  /** True when it came from the gateway's own equipment chain rather than
+   *  from the reported status. */
+  from_chain: boolean
+  required: boolean
+  group_key: string | null
+}
+
+/** A delivery's declared dependency on a transport path. */
+export interface DeliveryGatewayDependency {
+  service_delivery_id: number
+  gateway_id: number
+  gateway_name: string
+  gateway_pace: GatewayPace
+  gateway_status: GatewayStatus
+  required: boolean
+  group_key: string | null
 }
 
 /** Advisory comparison of reported vs equipment-derived status.
@@ -1100,6 +1140,10 @@ export interface DerivedStatus {
   /** True only when equipment says things are meaningfully *worse*. */
   disagrees: boolean
   backing: BackingCapability[]
+  /** Gateways this delivery depends on. Always empty for a gateway's own
+   *  DerivedStatus — gateways depend on capabilities only, which keeps the
+   *  chain one level deep. */
+  backing_gateways: BackingGateway[]
   required_total: number
   required_unvalidated: number
   unvalidated_labels: string[]

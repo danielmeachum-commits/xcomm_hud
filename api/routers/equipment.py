@@ -859,7 +859,7 @@ def site_equipment_advisory(
     capabilities up" badge and the Apply button, which posts to the existing
     service/gateway validation endpoints under the operator's own name.
     """
-    from equipment_status import build_derived
+    from equipment_status import build_derived, load_gateway_backing_for_services
 
     _site_in_workspace(db, site_id, workspace)
     services = (
@@ -869,10 +869,14 @@ def site_equipment_advisory(
     )
     gateways = db.query(Gateway).filter(Gateway.site_id == site_id).all()
     svc_backing = load_backing_for_services(db, [s.id for s in services])
+    svc_gw_backing = load_gateway_backing_for_services(db, [s.id for s in services])
     gw_backing = load_backing_for_gateways(db, [g.id for g in gateways])
     return {
         "service_derived": {
-            s.id: build_derived(s.status, svc_backing.get(s.id, [])) for s in services
+            s.id: build_derived(
+                s.status, svc_backing.get(s.id, []), svc_gw_backing.get(s.id, [])
+            )
+            for s in services
         },
         "gateway_derived": {
             g.id: build_derived(g.status, gw_backing.get(g.id, [])) for g in gateways
