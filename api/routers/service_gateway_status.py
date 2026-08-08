@@ -20,6 +20,7 @@ from effective import STATUS_RANK, effective_cell_status
 from rules_engine import emit_trigger
 from models import (
     Gateway,
+    Service,
     ServiceDelivery,
     ServiceGatewayStatus,
     Site,
@@ -139,6 +140,12 @@ def validate_cell(
 ):
     service, gw = _resolve_pair(db, service_id, gateway_id, workspace)
     _reject_invalid_write(body.status, service, gw)
+    # `service` is a DELIVERY — the per-site row. Its display name lives on the
+    # identity it belongs to, because 0054 moved `name` there. Reading
+    # `service.name` here raised AttributeError and 500'd every cell
+    # validation; the same lookup is already done this way in events.py and
+    # equipment.py.
+    identity = db.get(Service, service.service_id)
 
     cell = (
         db.query(ServiceGatewayStatus)
@@ -157,7 +164,7 @@ def validate_cell(
         {
             "service_id": service.id,
             "gateway_id": gw.id,
-            "service_name": service.name,
+            "service_name": identity.name if identity else None,
             "gateway_name": gw.name,
             "prev_status": prev,
             "new_status": body.status,

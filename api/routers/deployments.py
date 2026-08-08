@@ -956,8 +956,14 @@ def deploy_utc(
             if db.get(CapabilityServiceLink, (cap.id, svc.id)) is None:
                 db.add(
                     CapabilityServiceLink(
+                        # `service_delivery_id`, not `service_id`: the column
+                        # was renamed in 0054 and this was the one construction
+                        # site the split missed. Every deploy carrying wiring
+                        # 500'd on it, and the wizard proposes wiring by
+                        # default — so deploying a UTC was broken outright,
+                        # while the post-deploy bind endpoint kept working.
                         equipment_capability_id=cap.id,
-                        service_id=svc.id,
+                        service_delivery_id=svc.id,
                         role=wire.role,
                     )
                 )
