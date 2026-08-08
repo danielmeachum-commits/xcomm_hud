@@ -98,6 +98,8 @@ SubjectKind = Literal[
     "equipment_link",
     "utc_instance",
     "package_instance",
+    "equipment_kit",
+    "equipment_asset",
 ]
 # Runtime view of the Literal above. `SubjectKind` stays the single declaration
 # of what a kind may be; anything needing membership at runtime derives it here
@@ -140,6 +142,8 @@ class SubjectKinds:
     EQUIPMENT_LINK: SubjectKind = "equipment_link"
     UTC_INSTANCE: SubjectKind = "utc_instance"
     PACKAGE_INSTANCE: SubjectKind = "package_instance"
+    EQUIPMENT_KIT: SubjectKind = "equipment_kit"
+    EQUIPMENT_ASSET: SubjectKind = "equipment_asset"
 
 
 # Adding a kind means adding it to the Literal and to the class above; this
@@ -189,6 +193,12 @@ GENERAL_SUBJECT_KINDS = {
     SubjectKinds.EQUIPMENT_LINK,
     SubjectKinds.UTC_INSTANCE,
     SubjectKinds.PACKAGE_INSTANCE,
+    # A kit is a saved plan, not a status: saving or deleting one is news on
+    # the general feed, never a validation.
+    SubjectKinds.EQUIPMENT_KIT,
+    # The property book is structural too: adding or striking a box is news,
+    # not a status validation.
+    SubjectKinds.EQUIPMENT_ASSET,
 }
 # Free-text scopes — general events on these ride on subject_label alone and
 # have no row to resolve.
@@ -830,6 +840,11 @@ class MapBundle(BaseModel):
     services: list[ServiceOut]
     gateways: list[GatewayOut]
     annotations: list[CanvasAnnotationOut]
+    # Cross-site equipment links only — the shots that make one site an
+    # extension of another, which is what the map draws as edges. Same-site
+    # wiring is deliberately excluded: it is internal to a site and already
+    # belongs to that site's own canvas.
+    links: list["EquipmentLinkOut"] = Field(default_factory=list)
 
 
 # --- Status / rollup ---
@@ -2133,6 +2148,9 @@ class EquipmentOut(_ORM):
     id: int
     workspace_id: int
     equipment_type_id: int
+    # The property-book asset this row was materialized from, when it came
+    # from one. Null for gear registered by hand in this workspace.
+    asset_id: Optional[int] = None
     utc_instance_id: Optional[int] = None
     site_id: int
     enclave_id: Optional[int] = None
@@ -2263,7 +2281,9 @@ class EquipmentLinkIn(BaseModel):
     kind: EquipmentLinkKind = "other"
     direction: EquipmentLinkDirection = "bidirectional"
     label: Optional[str] = None
-    status: EquipmentStatusValue = "unvalidated"
+    # No `status` here on purpose: a link's status is derived from the gear at
+    # its two ends (routers.equipment_topology.derived_link_status), so there
+    # is nothing for a caller to set.
     notes: Optional[str] = None
 
 
@@ -2273,7 +2293,7 @@ class EquipmentLinkPatch(BaseModel):
     kind: Optional[EquipmentLinkKind] = None
     direction: Optional[EquipmentLinkDirection] = None
     label: Optional[str] = None
-    status: Optional[EquipmentStatusValue] = None
+    # Derived — see EquipmentLinkIn.
     notes: Optional[str] = None
 
 
@@ -2287,6 +2307,8 @@ class EquipmentLinkOut(_ORM):
     kind: EquipmentLinkKind
     direction: EquipmentLinkDirection
     label: Optional[str] = None
+    # DERIVED from the gear at both ends, not the stored column — worst of the
+    # two, with `unvalidated` meaning neither end has anything to say.
     status: EquipmentStatusValue
     notes: Optional[str] = None
     # Denormalized so the canvas can label and group edges in one pass.
@@ -2411,9 +2433,31 @@ class CapabilityWiringIn(BaseModel):
 
 
 class UtcDeployItemIn(BaseModel):
-    """One serialized item being registered as part of the deploy."""
+    """One serialized item in the deploy — either newly registered, or claimed
+    from the gear the workspace already owns.
+
+    Set `equipment_id` to claim an existing row. That is the finite-pool case
+    and it is the normal one: a unit deploys the same radios over and over, and
+    before this the wizard could only ever create, so the second deployment of
+    a radio was a 409 on its serial.
+
+    When `equipment_id` is set, `serial_number`, `equipment_code`, `status`, and
+    `capability_kinds` are all ignored — the row already has them, and its
+    capabilities are already materialized. Re-deriving capabilities from the
+    type would silently undo an operator's edit, like the `los_rf` deleted from
+    a kit that shipped without its antenna. `enclave_id` and `notes` DO apply:
+    where a box sits in the network is a property of this deployment.
+    """
 
     equipment_type_id: int
+    # Materialize this workspace's copy of a global property-book asset. The
+    # normal path when deploying from a kit: serial and equipment ID come from
+    # the asset, so nobody retypes them. If this workspace already has a row for
+    # the asset, that row is reused rather than duplicated.
+    asset_id: Optional[int] = None
+    # Claim gear already registered in THIS workspace. The type must still match
+    # — the wizard sends it either way, and a mismatch means a stale draft.
+    equipment_id: Optional[int] = None
     serial_number: Optional[str] = None
     equipment_code: Optional[str] = None
     # The enclave this kit serves, carried from the UTC line it came from.
@@ -2446,11 +2490,237 @@ class UtcDeployIn(BaseModel):
     wiring: list[CapabilityWiringIn] = Field(default_factory=list)
 
 
+class ReassignedEquipmentOut(BaseModel):
+    """Gear this deploy took from a UTC that was already holding it.
+
+    Reported rather than prevented. `equipment.utc_instance_id` is a single FK,
+    so a radio is in exactly one UTC or none — claiming it *moves* it, and the
+    UTC that lost it drops below its own `utc_instance_line` snapshot and reads
+    as a shortfall immediately. The accounting stays honest without a gate, so
+    what's owed to the operator is disclosure: here is what you just took, and
+    from where.
+    """
+
+    equipment_id: int
+    equipment_code: str
+    serial_number: Optional[str] = None
+    previous_utc_instance_id: int
+    previous_utc_name: str
+    previous_site_id: Optional[int] = None
+    previous_site_name: Optional[str] = None
+
+
 class UtcDeployOut(BaseModel):
     utc_instance: UtcInstanceOut
     equipment: list[EquipmentOut] = Field(default_factory=list)
     holdings: list[EquipmentHoldingOut] = Field(default_factory=list)
     bindings_created: int = 0
+    # Empty on a deploy that only registered new gear.
+    reassigned: list[ReassignedEquipmentOut] = Field(default_factory=list)
+
+
+# ===================== Equipment: the property book =====================
+
+
+class EquipmentAssetIn(BaseModel):
+    equipment_type_id: int
+    equipment_code: Optional[str] = None
+    serial_number: Optional[str] = None
+    notes: Optional[str] = None
+    # Which capabilities this particular box has. Defaults to the type's
+    # materialize-by-default set when omitted.
+    capability_kinds: Optional[list[str]] = None
+
+
+class EquipmentAssetPatch(BaseModel):
+    equipment_code: Optional[str] = None
+    serial_number: Optional[str] = None
+    notes: Optional[str] = None
+    capability_kinds: Optional[list[str]] = None
+    retired: Optional[bool] = None
+
+
+class AssetCommitment(BaseModel):
+    """Where a workspace has this asset in play right now.
+
+    Plural by design: planning next month's exercise while this month's is live
+    means the same radio legitimately appears in two pictures. This is a report,
+    never a gate.
+    """
+
+    workspace_id: int
+    workspace_name: str
+    equipment_id: int
+    utc_instance_id: Optional[int] = None
+    utc_name: Optional[str] = None
+    site_name: Optional[str] = None
+
+
+class EquipmentAssetOut(_ORM):
+    id: int
+    equipment_type_id: int
+    equipment_code: str
+    serial_number: Optional[str] = None
+    notes: Optional[str] = None
+    retired_at: Optional[datetime.datetime] = None
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+    nsn: Optional[str] = None
+    capability_kinds: list[str] = Field(default_factory=list)
+    commitments: list[AssetCommitment] = Field(default_factory=list)
+
+
+class AssetImportIn(BaseModel):
+    """Promote a workspace's registered gear into the property book.
+
+    The bridge from what exists today to the global tier: a workspace that has
+    already typed its serials shouldn't have to type them again. Matching is by
+    serial where present, else by equipment ID.
+    """
+
+    # Omit to sweep the whole workspace.
+    equipment_ids: Optional[list[int]] = None
+
+
+class AssetImportOut(BaseModel):
+    created: list[EquipmentAssetOut] = Field(default_factory=list)
+    linked: int = 0
+    skipped: list[str] = Field(default_factory=list)
+
+
+# ===================== Equipment: saved kits =====================
+
+
+class EquipmentKitItemIn(BaseModel):
+    asset_id: int
+    display_order: int = 0
+
+
+class EquipmentKitItemOut(_ORM):
+    """A pinned asset, fattened with everything the picker needs to be read
+    without a second call.
+
+    `commitments` is the disclosure that makes the shared pool workable: the
+    operator sees which pictures already have this box in play before choosing
+    it. An empty list means nobody is using it. Note this never blocks
+    anything — two exercises listing the same radio is expected.
+    """
+
+    id: int
+    kit_utc_id: int
+    asset_id: int
+    display_order: int = 0
+    equipment_code: Optional[str] = None
+    serial_number: Optional[str] = None
+    equipment_type_id: Optional[int] = None
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+    capability_kinds: list[str] = Field(default_factory=list)
+    retired: bool = False
+    commitments: list[AssetCommitment] = Field(default_factory=list)
+    # Whether THIS workspace already has a row materialized from the asset —
+    # the case where deploying reuses it rather than creating another.
+    in_this_workspace: bool = False
+
+
+class EquipmentKitBulkIn(BaseModel):
+    equipment_type_id: int
+    quantity: int = 1
+    enclave_id: Optional[int] = None
+
+
+class EquipmentKitBulkOut(_ORM):
+    id: int
+    kit_utc_id: int
+    equipment_type_id: int
+    quantity: int
+    enclave_id: Optional[int] = None
+    type_title: Optional[str] = None
+    type_short_name: Optional[str] = None
+
+
+class EquipmentKitUtcIn(BaseModel):
+    utc_def_id: Optional[int] = None
+    name: str
+    role_hint: UtcRoleHint = "either"
+    notes: Optional[str] = None
+    display_order: int = 0
+    items: list[EquipmentKitItemIn] = Field(default_factory=list)
+    bulk: list[EquipmentKitBulkIn] = Field(default_factory=list)
+
+
+class EquipmentKitUtcOut(_ORM):
+    id: int
+    kit_id: int
+    utc_def_id: Optional[int] = None
+    name: str
+    role_hint: UtcRoleHint = "either"
+    notes: Optional[str] = None
+    display_order: int = 0
+    utc_def_code: Optional[str] = None
+    utc_def_name: Optional[str] = None
+    items: list[EquipmentKitItemOut] = Field(default_factory=list)
+    bulk: list[EquipmentKitBulkOut] = Field(default_factory=list)
+
+
+class EquipmentKitIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    package_def_id: Optional[int] = None
+    utcs: list[EquipmentKitUtcIn] = Field(default_factory=list)
+
+
+class EquipmentKitPatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    package_def_id: Optional[int] = None
+    retired: Optional[bool] = None
+
+
+class EquipmentKitOut(_ORM):
+    id: int
+    workspace_id: Optional[int] = None
+    is_global: bool = False
+    package_def_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    retired_at: Optional[datetime.datetime] = None
+    package_def_code: Optional[str] = None
+    utcs: list[EquipmentKitUtcOut] = Field(default_factory=list)
+    # Rolled up for the list view, which shows kits as cards and would
+    # otherwise need every kit's full tree to print "9 items".
+    item_count: int = 0
+    bulk_count: int = 0
+    # How many pinned assets some workspace already has in play. Context, not
+    # a shortage: the gear is still deployable here.
+    committed_count: int = 0
+    # Pins whose asset has been struck from the property book.
+    retired_count: int = 0
+
+
+class KitCaptureIn(BaseModel):
+    """Save a live package as a reusable kit.
+
+    The path that matters: configure the FCP once by hand — unavoidable the
+    first time — then keep it. Authoring a kit from an empty form uses the same
+    tables but nobody will do it.
+    """
+
+    package_instance_id: int
+    name: str
+    description: Optional[str] = None
+    # Carry the package's own definition across unless told otherwise.
+    package_def_id: Optional[int] = None
+
+
+class KitRefreshIn(BaseModel):
+    """Re-pin an existing kit from a live package, replacing its contents.
+
+    Cheaper than editing pin-by-pin after the real-world set changes — a radio
+    goes to depot and a replacement arrives, and the kit should follow.
+    """
+
+    package_instance_id: int
 
 
 class TopologySiteNode(BaseModel):

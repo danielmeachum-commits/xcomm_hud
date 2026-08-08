@@ -75,6 +75,14 @@ ACTIONS: dict[str, Action] = {
     "equipment.registered": Action(
         record_class="log", severity="info", kinds=(SubjectKinds.EQUIPMENT,)
     ),
+    # Distinct from `equipment.registered` on purpose: a radio pulled from the
+    # pool into a new deployment is not new, and a feed that claimed it was
+    # would make the inventory look like it keeps growing. Carries both the
+    # previous and the new UTC, since "where did it come from" is the question
+    # this record exists to answer.
+    "equipment.reassigned": Action(
+        record_class="log", severity="info", kinds=(SubjectKinds.EQUIPMENT,)
+    ),
     # The advisory record: a capability went bad while the service or gateway
     # it backs is still reported healthy. Deliberately a warning-severity
     # `event`, not a log — it exists to be noticed, because nothing in the
@@ -117,6 +125,32 @@ ACTIONS: dict[str, Action] = {
         severity="info",
         event_type="general",
         kinds=(SubjectKinds.PACKAGE_INSTANCE,),
+    ),
+    # ---------- Property book ----------
+    "asset.registered": Action(
+        record_class="log",
+        severity="info",
+        event_type="general",
+        kinds=(SubjectKinds.EQUIPMENT_ASSET,),
+    ),
+    "asset.retired": Action(
+        record_class="log",
+        severity="info",
+        event_type="general",
+        kinds=(SubjectKinds.EQUIPMENT_ASSET,),
+    ),
+    # ---------- Kits ----------
+    "kit.saved": Action(
+        record_class="log",
+        severity="info",
+        event_type="general",
+        kinds=(SubjectKinds.EQUIPMENT_KIT,),
+    ),
+    "kit.deleted": Action(
+        record_class="log",
+        severity="info",
+        event_type="general",
+        kinds=(SubjectKinds.EQUIPMENT_KIT,),
     ),
 }
 

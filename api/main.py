@@ -24,7 +24,9 @@ from routers import (
     documents,
     enclaves,
     equipment,
+    equipment_assets,
     equipment_catalog,
+    equipment_kits,
     equipment_topology,
     event_types,
     events,
@@ -167,9 +169,11 @@ app.include_router(personnel.router)
 app.include_router(enclaves.router)
 # Equipment tier. Catalog first, then instances, then topology — the order
 # only matters for how routes group in the OpenAPI docs.
+app.include_router(equipment_assets.router)
 app.include_router(equipment_catalog.router)
 app.include_router(equipment.router)
 app.include_router(deployments.router)
+app.include_router(equipment_kits.router)
 app.include_router(equipment_topology.router)
 
 

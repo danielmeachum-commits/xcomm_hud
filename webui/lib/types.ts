@@ -282,6 +282,9 @@ export interface MapBundle {
   services: Service[]
   gateways: Gateway[]
   annotations: CanvasAnnotation[]
+  /** Cross-site links only — the shots the map draws as edges between site
+   *  nodes. Same-site wiring is filtered out by the API. */
+  links: EquipmentLink[]
 }
 
 export interface SiteRollup {
@@ -1018,6 +1021,8 @@ export interface Equipment {
   id: number
   workspace_id: number
   equipment_type_id: number
+  /** The property-book asset this row was materialized from, if any. */
+  asset_id: number | null
   utc_instance_id: number | null
   site_id: number
   /** One piece of gear, one enclave. Null for gear common to all of them —
@@ -1181,6 +1186,17 @@ export interface SiteEquipmentAdvisory {
 
 export interface UtcDeployItem {
   equipment_type_id: number
+  /** Materialize this workspace's copy of a global property-book asset. The
+   *  normal path when deploying from a kit: serial and equipment ID come from
+   *  the asset, so nobody retypes them. If this workspace already has a row
+   *  for the asset, that row is reused rather than duplicated. */
+  asset_id?: number | null
+  /** Claim gear the workspace already owns instead of registering new. When
+   *  set, the serial, ID, status, and capability fields are ignored — the row
+   *  already has them. This is the finite-pool path: a unit deploys the same
+   *  radios over and over, and before it existed the second deployment of a
+   *  radio was a 409 on its serial. */
+  equipment_id?: number | null
   enclave_id?: number | null
   serial_number?: string | null
   equipment_code?: string | null
@@ -1221,9 +1237,133 @@ export interface UtcDeployPayload {
   wiring: CapabilityWiring[]
 }
 
+/** Gear this deploy took off a UTC that was already holding it.
+ *
+ *  Reported, not prevented. `equipment.utc_instance_id` is a single FK, so a
+ *  radio is in exactly one UTC or none — claiming it MOVES it, and the UTC
+ *  that lost it reads as a shortfall from that moment. Nothing double-counts,
+ *  so what is owed to the operator is disclosure rather than a gate. */
+export interface ReassignedEquipment {
+  equipment_id: number
+  equipment_code: string
+  serial_number: string | null
+  previous_utc_instance_id: number
+  previous_utc_name: string
+  previous_site_id: number | null
+  previous_site_name: string | null
+}
+
 export interface UtcDeployResult {
   utc_instance: UtcInstance
   equipment: Equipment[]
   holdings: EquipmentHolding[]
   bindings_created: number
+  /** Empty on a deploy that only registered new gear. */
+  reassigned: ReassignedEquipment[]
+}
+
+// --- the property book ---
+
+/** Where a workspace has this asset in play. Plural by design: planning next
+ *  month's exercise while this month's is live means the same radio
+ *  legitimately appears in two pictures. A report, never a gate. */
+export interface AssetCommitment {
+  workspace_id: number
+  workspace_name: string
+  equipment_id: number
+  utc_instance_id: number | null
+  utc_name: string | null
+  site_name: string | null
+}
+
+/** One physical box the unit owns — globally, once. Workspace `Equipment` rows
+ *  are per-picture materializations of these. */
+export interface EquipmentAsset {
+  id: number
+  equipment_type_id: number
+  equipment_code: string
+  serial_number: string | null
+  notes: string | null
+  retired_at: string | null
+  type_title: string | null
+  type_short_name: string | null
+  nsn: string | null
+  capability_kinds: string[]
+  commitments: AssetCommitment[]
+}
+
+export interface AssetImportResult {
+  created: EquipmentAsset[]
+  linked: number
+  skipped: string[]
+}
+
+// --- saved kits ---
+
+/** A pinned item, carrying everything the picker needs to be read without a
+ *  second call. `current_utc_*` is the disclosure that makes taking gear from
+ *  another deployment workable: the operator sees "held by FCP-2 (Site Bravo)"
+ *  before choosing, not after. Null means it is idle in the pool. */
+export interface EquipmentKitItem {
+  id: number
+  kit_utc_id: number
+  /** The property-book asset this pin points at. */
+  asset_id: number
+  display_order: number
+  equipment_code: string | null
+  serial_number: string | null
+  equipment_type_id: number | null
+  type_title: string | null
+  type_short_name: string | null
+  capability_kinds: string[]
+  /** The asset has been struck from the property book. */
+  retired: boolean
+  commitments: AssetCommitment[]
+  /** This workspace already has a row materialized from the asset, so
+   *  deploying reuses it rather than creating another. */
+  in_this_workspace: boolean
+}
+
+export interface EquipmentKitBulk {
+  id: number
+  kit_utc_id: number
+  equipment_type_id: number
+  quantity: number
+  enclave_id: number | null
+  type_title: string | null
+  type_short_name: string | null
+}
+
+export interface EquipmentKitUtc {
+  id: number
+  kit_id: number
+  utc_def_id: number | null
+  name: string
+  role_hint: UtcRoleHint
+  notes: string | null
+  display_order: number
+  utc_def_code: string | null
+  utc_def_name: string | null
+  items: EquipmentKitItem[]
+  bulk: EquipmentKitBulk[]
+}
+
+export interface EquipmentKit {
+  id: number
+  /** Null for a global kit — the normal case. */
+  workspace_id: number | null
+  is_global: boolean
+  package_def_id: number | null
+  name: string
+  description: string | null
+  retired_at: string | null
+  package_def_code: string | null
+  utcs: EquipmentKitUtc[]
+  item_count: number
+  bulk_count: number
+  /** How many pinned assets some picture already has in play. Context, not a
+   *  shortage — the gear is still deployable here. */
+  committed_count: number
+  /** Pins whose asset has been struck from the property book. */
+  retired_count: number
 }

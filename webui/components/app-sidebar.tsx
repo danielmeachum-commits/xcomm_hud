@@ -19,6 +19,7 @@ import {
   LogOut,
   MapPin,
   Network,
+  Package,
   Radio,
   Settings,
   Shapes,
@@ -85,6 +86,9 @@ const WORKSPACE_ADMIN_ITEMS = [
   { path: "/settings/rules", label: "Rules", icon: Workflow },
   { path: "/admin/gateways", label: "Gateways", icon: Network },
   { path: "/admin/equipment-catalog", label: "Equipment catalog", icon: Boxes },
+  // The catalog says what a TACLANE is; the property book says which ones we
+  // own. Adjacent on purpose.
+  { path: "/admin/property-book", label: "Property book", icon: Package },
   { path: "/admin/enclaves", label: "Enclaves", icon: Layers },
   { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
   { path: "/admin/work-centers", label: "Work centers", icon: Users },

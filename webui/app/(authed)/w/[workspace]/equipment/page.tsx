@@ -5,6 +5,8 @@ import { EquipmentPageClient } from "@/components/equipment/equipment-page-clien
 import type {
   Enclave,
   Equipment,
+  EquipmentAsset,
+  EquipmentKit,
   EquipmentType,
   Gateway,
   NetworkTopology,
@@ -36,6 +38,8 @@ export default async function EquipmentPage({
     services,
     gateways,
     topology,
+    kits,
+    assets,
   ] = await Promise.all([
     apiGet<Equipment[]>("/equipment").catch(() => [] as Equipment[]),
     apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
@@ -59,6 +63,8 @@ export default async function EquipmentPage({
           gateway_derived: {},
         }) as NetworkTopology,
     ),
+    apiGet<EquipmentKit[]>("/kits").catch(() => [] as EquipmentKit[]),
+    apiGet<EquipmentAsset[]>("/assets").catch(() => [] as EquipmentAsset[]),
   ])
 
   return (
@@ -73,6 +79,8 @@ export default async function EquipmentPage({
         types={types}
         utcDefs={utcDefs}
         packageDefs={packageDefs}
+        kits={kits}
+        assets={assets}
         services={services}
         gateways={gateways}
         topology={topology}

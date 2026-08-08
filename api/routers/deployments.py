@@ -24,6 +24,7 @@ from models import (
     CapabilityGatewayLink,
     CapabilityServiceLink,
     Equipment,
+    EquipmentAsset,
     EquipmentCapability,
     EquipmentHolding,
     EquipmentLink,
@@ -47,6 +48,7 @@ from routers.equipment import (
     equipment_out_bulk,
     materialize_capabilities,
 )
+from routers.equipment_assets import materialize_asset
 from rules_engine import emit_trigger
 from schemas import (
     EquipmentHoldingIn,
@@ -55,6 +57,7 @@ from schemas import (
     PackageInstanceIn,
     PackageInstanceOut,
     PackageInstancePatch,
+    ReassignedEquipmentOut,
     SubjectKinds,
     UtcCompletenessLine,
     UtcCompletenessOut,
@@ -771,9 +774,21 @@ def deploy_utc(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "UTC definition not found")
 
     # --- pre-validate all serialized items before writing anything ---
-    resolved: list[tuple[EquipmentType, str, object]] = []
+    # Each entry is (type, equipment ID, payload item, existing row or None).
+    # The fourth slot is what splits the two paths: None means register a new
+    # `Equipment`, a row means claim gear the workspace already owns and move
+    # it here.
+    # Each entry is (type, equipment ID, payload item, existing row, asset).
+    # The last two slots pick the path: an asset means materialize this
+    # workspace's copy of a globally-owned box, an existing row means claim
+    # gear already registered here, neither means register something new.
+    resolved: list[
+        tuple[EquipmentType, str, object, Equipment | None, EquipmentAsset | None]
+    ] = []
     seen_codes: set[str] = set()
     seen_serials: set[str] = set()
+    seen_equipment_ids: set[int] = set()
+    seen_asset_ids: set[int] = set()
     for index, item in enumerate(body.items):
         eq_type = _load_type(db, item.equipment_type_id, workspace)
         if not eq_type.serialized:
@@ -782,6 +797,108 @@ def deploy_utc(
                 f"Item {index + 1}: '{eq_type.title}' is unserialized — "
                 "record it under holdings, not as a serialized item.",
             )
+
+        # --- materializing a global property-book asset ---
+        # Resolved here rather than in the write pass so a bad asset fails
+        # before anything is written, like every other item check.
+        if item.asset_id is not None:
+            asset = db.get(EquipmentAsset, item.asset_id)
+            if asset is None:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    {
+                        "message": f"Item {index + 1}: asset not found in the "
+                        "property book.",
+                        "item_index": index,
+                    },
+                )
+            if asset.equipment_type_id != eq_type.id:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "message": f"Item {index + 1}: '{asset.equipment_code}' "
+                        f"is not a '{eq_type.title}'.",
+                        "item_index": index,
+                    },
+                )
+            if asset.id in seen_asset_ids:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "message": f"Item {index + 1}: '{asset.equipment_code}' "
+                        "is claimed twice in this deployment.",
+                        "item_index": index,
+                    },
+                )
+            # A retired asset is gear the unit no longer has. Deploying it
+            # would put a box on the map that does not exist.
+            if asset.retired_at is not None:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "message": f"Item {index + 1}: '{asset.equipment_code}' "
+                        "has been struck from the property book.",
+                        "item_index": index,
+                    },
+                )
+            # Deliberately NOT rejected when another workspace already holds
+            # it: workspaces are separate operating pictures, and planning one
+            # exercise while another is live is the ordinary case.
+            seen_asset_ids.add(asset.id)
+            seen_codes.add(asset.equipment_code)
+            if asset.serial_number:
+                seen_serials.add(asset.serial_number)
+            resolved.append((eq_type, asset.equipment_code, item, None, asset))
+            continue
+
+        # --- claiming gear already registered in this workspace ---
+        if item.equipment_id is not None:
+            existing_eq = db.get(Equipment, item.equipment_id)
+            if existing_eq is None or existing_eq.workspace_id != workspace.id:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    {
+                        "message": f"Item {index + 1}: equipment not found.",
+                        "item_index": index,
+                    },
+                )
+            # A stale draft is the realistic cause: the kit pinned a radio that
+            # has since been re-typed. Better to say so than to silently deploy
+            # the wrong box against a line that called for something else.
+            if existing_eq.equipment_type_id != eq_type.id:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "message": f"Item {index + 1}: '{existing_eq.equipment_code}' "
+                        f"is not a '{eq_type.title}'.",
+                        "item_index": index,
+                    },
+                )
+            if existing_eq.id in seen_equipment_ids:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "message": f"Item {index + 1}: '{existing_eq.equipment_code}' "
+                        "is claimed twice in this deployment.",
+                        "item_index": index,
+                    },
+                )
+            # Deliberately NOT rejected when another UTC holds it: taking gear
+            # from last week's deployment is the normal workflow for a unit
+            # with one of something. `utc_instance_id` is a single FK, so the
+            # claim moves the radio rather than duplicating it, and the UTC
+            # that lost it reads as a shortfall from that moment. The response
+            # reports every move — see `reassigned` below.
+            seen_equipment_ids.add(existing_eq.id)
+            seen_codes.add(existing_eq.equipment_code)
+            if existing_eq.serial_number:
+                seen_serials.add(existing_eq.serial_number)
+            resolved.append(
+                (eq_type, existing_eq.equipment_code, item, existing_eq, None)
+            )
+            continue
+
+        # --- registering new gear ---
         code, conflict = resolve_code(
             db, workspace.id, eq_type, item.serial_number, item.equipment_code
         )
@@ -826,7 +943,7 @@ def deploy_utc(
                 )
             seen_serials.add(item.serial_number)
         seen_codes.add(code)
-        resolved.append((eq_type, code, item))
+        resolved.append((eq_type, code, item, None, None))
 
     # --- everything validated; now write ---
     utc = UtcInstance(
@@ -842,11 +959,95 @@ def deploy_utc(
     db.flush()
 
     created: list[Equipment] = []
+    reassigned: list[ReassignedEquipmentOut] = []
     # item_index → {capability kind: capability row}, so the wiring step can
     # find the capability the wizard proposed without a second round-trip.
     caps_by_item: dict[int, dict[str, EquipmentCapability]] = {}
-    for index, (eq_type, code, item) in enumerate(resolved):
+    for index, (eq_type, code, item, existing_eq, asset) in enumerate(resolved):
         check_enclave_allowed(db, eq_type, item.enclave_id)
+
+        if asset is not None:
+            # This workspace's copy of a globally-owned box. Find-or-create:
+            # redeploying the same kit into the same picture moves the row it
+            # already made rather than registering the radio twice.
+            eq, created_new = materialize_asset(
+                db, asset, workspace, site, utc.id, item.enclave_id
+            )
+            caps_by_item[index] = {c.kind: c for c in eq.capabilities}
+            created.append(eq)
+            emit_trigger(
+                db,
+                "equipment.registered" if created_new else "equipment.reassigned",
+                {
+                    "equipment_id": eq.id,
+                    "equipment_code": eq.equipment_code,
+                    "equipment_title": eq_type.title,
+                    "serial_number": eq.serial_number,
+                    "site_id": site.id,
+                    "site_name": site.name,
+                    "utc_instance_id": utc.id,
+                    "utc_name": utc.name,
+                    "previous_utc_instance_id": None,
+                    "previous_utc_name": None,
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "occurred_at": _now(),
+                },
+                workspace_id=workspace.id,
+            )
+            continue
+
+        if existing_eq is not None:
+            # Capture where it came from before overwriting it — that is the
+            # whole content of the disclosure, and one statement later it's
+            # gone.
+            prior_utc_id = existing_eq.utc_instance_id
+            prior_utc = db.get(UtcInstance, prior_utc_id) if prior_utc_id else None
+            if prior_utc is not None and prior_utc.id != utc.id:
+                prior_site = db.get(Site, prior_utc.site_id)
+                reassigned.append(
+                    ReassignedEquipmentOut(
+                        equipment_id=existing_eq.id,
+                        equipment_code=existing_eq.equipment_code,
+                        serial_number=existing_eq.serial_number,
+                        previous_utc_instance_id=prior_utc.id,
+                        previous_utc_name=prior_utc.name,
+                        previous_site_id=prior_site.id if prior_site else None,
+                        previous_site_name=prior_site.name if prior_site else None,
+                    )
+                )
+            existing_eq.utc_instance_id = utc.id
+            existing_eq.site_id = site.id
+            existing_eq.enclave_id = item.enclave_id
+            if item.notes:
+                existing_eq.notes = item.notes
+            db.flush()
+            # Capabilities are already materialized and may have been edited
+            # since — re-deriving them from the type would undo that silently.
+            caps_by_item[index] = {c.kind: c for c in existing_eq.capabilities}
+            created.append(existing_eq)
+            emit_trigger(
+                db,
+                "equipment.reassigned",
+                {
+                    "equipment_id": existing_eq.id,
+                    "equipment_code": existing_eq.equipment_code,
+                    "equipment_title": eq_type.title,
+                    "serial_number": existing_eq.serial_number,
+                    "site_id": site.id,
+                    "site_name": site.name,
+                    "utc_instance_id": utc.id,
+                    "utc_name": utc.name,
+                    "previous_utc_instance_id": prior_utc.id if prior_utc else None,
+                    "previous_utc_name": prior_utc.name if prior_utc else None,
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "occurred_at": _now(),
+                },
+                workspace_id=workspace.id,
+            )
+            continue
+
         eq = Equipment(
             workspace_id=workspace.id,
             equipment_type_id=eq_type.id,
@@ -915,7 +1116,7 @@ def deploy_utc(
     # them as two lines. Collapsing to one would make "leave the SIPR stack
     # home" unrepresentable in the snapshot the completeness check reads.
     expected: dict[tuple[int, int | None], int] = {}
-    for eq_type, _code, item in resolved:
+    for eq_type, _code, item, _existing, _asset in resolved:
         key = (eq_type.id, item.enclave_id)
         expected[key] = expected.get(key, 0) + 1
     for holding in body.holdings:
@@ -1013,4 +1214,5 @@ def deploy_utc(
         equipment=equipment_out_bulk(db, created),
         holdings=[_holding_out(db, h) for h in holdings],
         bindings_created=bindings_created,
+        reassigned=reassigned,
     )

@@ -2069,6 +2069,16 @@ class Equipment(Base):
     enclave_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
     )
+    # The global property-book row this was materialized from, when it came
+    # from one. Nullable because gear registered by hand in a workspace answers
+    # to no asset — and SET NULL rather than CASCADE, because deleting an asset
+    # from the property book must not delete the operating picture that used it.
+    asset_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_asset.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     equipment_code: Mapped[str] = mapped_column(String(32), nullable=False)
     serial_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="unvalidated")
@@ -2371,4 +2381,304 @@ class EquipmentLink(Base):
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+# ===================== Equipment: the property book =====================
+
+
+class EquipmentAsset(Base):
+    """One physical piece of gear the unit owns — globally, once.
+
+    A workspace is an operating picture, not a tenant ("Duplicate a workspace
+    to seed the next exercise"), so the radio in the rack is a fact about the
+    unit and not about any one exercise. This table is that fact: serial,
+    equipment ID, and which capabilities the box actually has.
+
+    `equipment` rows are then *materialized* from an asset per workspace. That
+    indirection is deliberate. Planning next month's exercise while this
+    month's is live means two workspaces legitimately list the same radio, so
+    the pool cannot be a single assignment — it is a shared source that each
+    picture draws from, and "committed in N workspaces" is a report rather than
+    a conflict.
+
+    Deliberately NOT workspace-scoped and admin-managed, matching the rest of
+    the global tier (enclaves, equipment types, UTC and package definitions).
+    """
+
+    __tablename__ = "equipment_asset"
+    __table_args__ = (
+        UniqueConstraint("equipment_code", name="uq_equipment_asset_code"),
+        Index(
+            "uq_equipment_asset_serial",
+            "serial_number",
+            unique=True,
+            postgresql_where=text("serial_number IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    equipment_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    serial_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Written down, sold off, or sent to depot for good. Soft, because past
+    # deployments still point here and must stay resolvable.
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    capabilities: Mapped[list["EquipmentAssetCapability"]] = relationship(
+        "EquipmentAssetCapability",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        order_by="EquipmentAssetCapability.display_order",
+    )
+
+
+class EquipmentAssetCapability(Base):
+    """Which capabilities this particular box actually has.
+
+    Carries no status, unlike `equipment_capability`. Status is a fact about a
+    deployment ("the data port is down at Bravo"), not about the property book
+    — the same radio can be healthy in one picture and degraded in another.
+    What belongs here is only the shape of the box: a kit that shipped without
+    its antenna has no `los_rf`, and materializing it into a workspace should
+    not invent one.
+    """
+
+    __tablename__ = "equipment_asset_capability"
+    __table_args__ = (
+        UniqueConstraint("asset_id", "kind", name="uq_equipment_asset_capability"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_asset.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    asset: Mapped["EquipmentAsset"] = relationship(
+        "EquipmentAsset", back_populates="capabilities"
+    )
+
+
+# ===================== Equipment: saved kits =====================
+
+
+class EquipmentKit(Base):
+    """A reusable roster: the UTCs a package brings, and the *specific* gear
+    that goes in them.
+
+    The fourth layer between doctrine and deployment. `package_def` says a
+    Flyaway Comms Package carries two AN/TSC-198s; a kit says ours are the ones
+    with these serials — by pinning `equipment_asset` rows from the property
+    book.
+
+    Global by default (`workspace_id IS NULL`), like enclaves and the equipment
+    catalog: the kit describes the unit's gear, and the unit's gear outlives
+    any one operating picture. A workspace may still own a local kit, and reads
+    merge both — the same global-or-workspace shape used everywhere else.
+
+    Kits pin no site and no workspace contents. Where the gear went, which
+    enclaves were supported, and what it was wired to are all per-deployment
+    facts settled in the wizard against the target workspace.
+    """
+
+    __tablename__ = "equipment_kit"
+    __table_args__ = (
+        Index(
+            "uq_equipment_kit_global_name",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
+        UniqueConstraint("workspace_id", "name", name="uq_equipment_kit_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # The doctrine this kit realizes, when there is one. Nullable because a kit
+    # captured from a hand-built deployment answers to no package definition.
+    package_def_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("package_def.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Retire rather than delete, matching `package_def`: a kit that fielded a
+    # past deployment is part of how that deployment is explained.
+    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    utcs: Mapped[list["EquipmentKitUtc"]] = relationship(
+        "EquipmentKitUtc",
+        back_populates="kit",
+        cascade="all, delete-orphan",
+        order_by="EquipmentKitUtc.display_order",
+    )
+
+
+class EquipmentKitUtc(Base):
+    """One UTC slot in a kit.
+
+    There is no `quantity` here, unlike `package_def_utc`. A package definition
+    can say "two extensions" because it is talking about types; a kit is
+    talking about specific boxes, and the two extensions carry different
+    radios. Quantity is expressed as repeated rows so each slot owns its own
+    pinned gear.
+
+    `utc_def_id` is nullable: building a UTC by hand is a first-class path in
+    the deploy wizard, and a kit captured from one has no definition to point
+    at.
+    """
+
+    __tablename__ = "equipment_kit_utc"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kit_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_kit.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    utc_def_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("utc_def.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    role_hint: Mapped[str] = mapped_column(String(16), nullable=False, default="either")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    kit: Mapped["EquipmentKit"] = relationship("EquipmentKit", back_populates="utcs")
+    items: Mapped[list["EquipmentKitItem"]] = relationship(
+        "EquipmentKitItem",
+        back_populates="kit_utc",
+        cascade="all, delete-orphan",
+        order_by="EquipmentKitItem.display_order",
+    )
+    bulk: Mapped[list["EquipmentKitBulk"]] = relationship(
+        "EquipmentKitBulk",
+        back_populates="kit_utc",
+        cascade="all, delete-orphan",
+    )
+
+
+class EquipmentKitItem(Base):
+    """One pinned asset from the property book.
+
+    Points at `equipment_asset`, not at a workspace's `equipment` row — that is
+    what lets a kit be global. A workspace row is an operating picture's copy
+    of a box; the asset is the box.
+
+    CASCADE on `asset_id`: gear struck from the property book leaves every kit
+    that listed it, rather than leaving the kit promising a radio the unit no
+    longer owns.
+
+    Pinning is deliberately non-exclusive, in two directions. The same TACLANE
+    belongs to the FCP kit and the JIP kit because the unit owns one and both
+    packages would use it; and the same asset may be materialized into several
+    workspaces at once, because planning next month's exercise while this
+    month's is live is normal. Cross-workspace commitment is reported, never
+    blocked.
+
+    No `enclave_id`: which network a box serves is a property of the deployment,
+    settled in the wizard against the target workspace's enclaves.
+    """
+
+    __tablename__ = "equipment_kit_item"
+    __table_args__ = (
+        UniqueConstraint("kit_utc_id", "asset_id", name="uq_equipment_kit_item_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kit_utc_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_kit_utc.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    asset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_asset.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    kit_utc: Mapped["EquipmentKitUtc"] = relationship(
+        "EquipmentKitUtc", back_populates="items"
+    )
+
+
+class EquipmentKitBulk(Base):
+    """Bulk gear a kit slot expects. Counted, never pinned — there is no such
+    thing as a specific cable.
+
+    Unlike `equipment_holding`, this keeps `enclave_id` in its uniqueness: the
+    holding folds per-enclave lines together because a deployed box of cables
+    serves everything, but a kit is a plan, and "six SIPR patch cables and six
+    NIPR" is a meaningful thing to plan.
+    """
+
+    __tablename__ = "equipment_kit_bulk"
+    __table_args__ = (
+        UniqueConstraint(
+            "kit_utc_id",
+            "equipment_type_id",
+            "enclave_id",
+            name="uq_equipment_kit_bulk_type_enclave",
+        ),
+        Index(
+            "uq_equipment_kit_bulk_type_no_enclave",
+            "kit_utc_id",
+            "equipment_type_id",
+            unique=True,
+            postgresql_where=text("enclave_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kit_utc_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("equipment_kit_utc.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Enclaves are themselves global-or-workspace, so a global kit can only
+    # safely reference a global one. The router enforces that; SET NULL keeps a
+    # retired enclave from taking the line with it.
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
+
+    kit_utc: Mapped["EquipmentKitUtc"] = relationship(
+        "EquipmentKitUtc", back_populates="bulk"
     )

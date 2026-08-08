@@ -597,6 +597,29 @@ TRIGGERS: dict[str, TriggerDef] = {
             },
         ),
         TriggerDef(
+            "equipment.reassigned",
+            "Equipment moved between UTCs",
+            [
+                _f("equipment_code", "Equipment ID"),
+                _f("equipment_title", "Equipment type"),
+                _f("serial_number", "Serial number"),
+                _f("site_name", "Site name"),
+                _f("utc_name", "Moved to UTC"),
+                # Null when the gear was idle in the pool rather than taken
+                # from a live deployment — which is the unremarkable case, and
+                # the one a rule watching for "who lost a radio" wants to skip.
+                _f("previous_utc_name", "Taken from UTC"),
+                *_COMMON_FIELDS,
+            ],
+            ("site_context",),
+            lambda ctx: {
+                "subject_kind": SubjectKinds.EQUIPMENT,
+                "subject_id": ctx.get("equipment_id"),
+                "second_subject_id": ctx.get("utc_instance_id"),
+                "subject_label": ctx.get("equipment_code"),
+            },
+        ),
+        TriggerDef(
             "equipment.link_changed",
             "Equipment link changed",
             [
