@@ -9,10 +9,12 @@ import {
   BackgroundVariant,
   Controls,
   type Edge,
+  Handle,
   type Node,
   type NodeChange,
   type NodeProps,
   Panel,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
@@ -32,6 +34,8 @@ import { fpconClasses } from "@/lib/threat-level"
 import { cn } from "@/lib/utils"
 import type {
   CanvasAnnotation,
+  EquipmentLink,
+  EquipmentStatus,
   Gateway,
   MapBundle,
   Service,
@@ -53,6 +57,71 @@ interface AnnotationNodeData extends Record<string, unknown> {
 
 const SITE_NODE_WIDTH = 300
 
+/** Stroke treatment for a site-to-site link, keyed on the link's own status.
+ *  Deliberately the same color vocabulary the rest of the app uses for
+ *  equipment status (emerald up / amber degraded / red down), and dashed for
+ *  anything not actively carrying traffic so a healthy shot is the only thing
+ *  that reads as a solid line. `unvalidated` is absence, not badness, so it
+ *  renders muted and dotted rather than alarming. */
+function linkEdgeStyle(status: EquipmentStatus): {
+  stroke: string
+  strokeWidth: number
+  strokeDasharray?: string
+} {
+  switch (status) {
+    case "up":
+      return { stroke: "rgb(16 185 129)", strokeWidth: 2.5 }
+    case "degraded":
+      return { stroke: "rgb(245 158 11)", strokeWidth: 2, strokeDasharray: "8 4" }
+    case "down":
+      return { stroke: "rgb(239 68 68)", strokeWidth: 2, strokeDasharray: "6 3" }
+    case "maintenance":
+      return { stroke: "rgb(14 165 233)", strokeWidth: 2, strokeDasharray: "4 3" }
+    case "offline":
+      return { stroke: "rgb(100 116 139)", strokeWidth: 1.5, strokeDasharray: "2 3" }
+    case "unvalidated":
+    default:
+      return { stroke: "rgb(148 163 184)", strokeWidth: 1.5, strokeDasharray: "2 4" }
+  }
+}
+
+/** One map edge per cross-site link. Each link is drawn separately rather
+ *  than collapsed per site-pair: two sites joined by both a healthy fiber run
+ *  and a down RF shot are telling you two different things, and merging them
+ *  into a single worst-of line would hide the working path. */
+function buildLinkEdges(links: EquipmentLink[], siteIds: Set<number>): Edge[] {
+  const out: Edge[] = []
+  for (const l of links) {
+    if (l.a_site_id === null || l.b_site_id === null) continue
+    // The far end may be missing from the map when a site was removed
+    // between the bundle's queries — skip rather than emit a dangling edge.
+    if (!siteIds.has(l.a_site_id) || !siteIds.has(l.b_site_id)) continue
+    const style = linkEdgeStyle(l.status)
+    const ends = [l.a_equipment_code, l.b_equipment_code].filter(Boolean)
+    out.push({
+      id: `link-${l.id}`,
+      source: `site-${l.a_site_id}`,
+      target: `site-${l.b_site_id}`,
+      sourceHandle: "c",
+      targetHandle: "c",
+      label: l.label ?? (ends.length === 2 ? ends.join(" ↔ ") : l.kind),
+      labelShowBg: true,
+      labelBgPadding: [6, 2],
+      labelBgBorderRadius: 4,
+      labelStyle: { fontSize: 10, fill: "currentColor" },
+      labelBgStyle: { fill: "var(--background)", fillOpacity: 0.85 },
+      style,
+      // Bidirectional shots get no arrowhead — an arrow would claim a
+      // direction the data does not have.
+      markerEnd:
+        l.direction === "bidirectional"
+          ? undefined
+          : { type: "arrowclosed" as const, color: style.stroke },
+    })
+  }
+  return out
+}
+
 function SiteMapNode({ data }: NodeProps) {
   const { site, services, gateways } = data as SiteNodeData
   const { w } = useWorkspace()
@@ -70,11 +139,30 @@ function SiteMapNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-xl border bg-background p-3 shadow-md ring-4",
+        "relative flex flex-col gap-2 rounded-xl border bg-background p-3 shadow-md ring-4",
         fpconRing,
       )}
       style={{ width: SITE_NODE_WIDTH }}
     >
+      {/* Link edges anchor to the node's CENTER, not an edge, so a shot
+       *  between two sites draws as a straight line whichever way the
+       *  operator has dragged them. Both handles share one id and are
+       *  invisible + non-connectable: they exist to anchor rendered edges,
+       *  never to let anyone draw a link by hand on the map. */}
+      <Handle
+        type="target"
+        id="c"
+        position={Position.Left}
+        isConnectable={false}
+        className="!left-1/2 !top-1/2 !size-0 !min-w-0 !border-0 !bg-transparent"
+      />
+      <Handle
+        type="source"
+        id="c"
+        position={Position.Right}
+        isConnectable={false}
+        className="!left-1/2 !top-1/2 !size-0 !min-w-0 !border-0 !bg-transparent"
+      />
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <StatusIndicator
@@ -353,7 +441,14 @@ function MapCanvasInner({ bundle }: Props) {
     [scheduleSave],
   )
 
-  const edges: Edge[] = []
+  const edges = useMemo(
+    () =>
+      buildLinkEdges(
+        bundle.links ?? [],
+        new Set(bundle.sites.map((s) => s.id)),
+      ),
+    [bundle.links, bundle.sites],
+  )
 
   return (
     <ReactFlow

@@ -26,6 +26,7 @@ from equipment_status import (
     load_backing_for_gateways,
     load_backing_for_services,
     load_gateway_backing_for_services,
+    worst_status,
 )
 from models import (
     Equipment,
@@ -76,11 +77,63 @@ def _load_link(db: Session, link_id: int, workspace: Workspace) -> EquipmentLink
     return row
 
 
+def _endpoint_status(
+    db: Session,
+    equipment: Equipment | None,
+    capability_id: int | None,
+    cap_cache: dict[int, EquipmentCapability],
+) -> str | None:
+    """Status of ONE end of a link.
+
+    When the link names the port carrying it (`a_capability_id`) that
+    capability IS the end, and its status is the precise answer. Most links
+    don't name one — the model's own docstring says as much — and then the
+    gear's own status is the best available statement about that end.
+    """
+    if capability_id is not None:
+        cap = cap_cache.get(capability_id)
+        if cap is None:
+            found = db.get(EquipmentCapability, capability_id)
+            if found is not None:
+                cap_cache[capability_id] = found
+                cap = found
+        if cap is not None:
+            return cap.status
+    return equipment.status if equipment is not None else None
+
+
+def derived_link_status(
+    db: Session,
+    row: EquipmentLink,
+    a: Equipment | None,
+    b: Equipment | None,
+    cap_cache: dict[int, EquipmentCapability] | None = None,
+) -> str:
+    """A link's status, derived from the gear at its two ends.
+
+    A link is not a thing anyone validates on its own — it is only as good as
+    the two ends carrying it, so this is the worst of the two rather than a
+    stored human judgement. `worst_status` skips `unvalidated` (absence, not
+    badness), so a link reads `unvalidated` only when NEITHER end has anything
+    to say; one silent end never drags down a known-good other.
+    """
+    cap_cache = cap_cache if cap_cache is not None else {}
+    ends = [
+        _endpoint_status(db, a, row.a_capability_id, cap_cache),
+        _endpoint_status(db, b, row.b_capability_id, cap_cache),
+    ]
+    return worst_status([s for s in ends if s is not None]) or "unvalidated"
+
+
 def _link_out(
-    db: Session, row: EquipmentLink, cache: dict[int, Equipment] | None = None
+    db: Session,
+    row: EquipmentLink,
+    cache: dict[int, Equipment] | None = None,
+    cap_cache: dict[int, EquipmentCapability] | None = None,
 ) -> EquipmentLinkOut:
     out = EquipmentLinkOut.model_validate(row)
     cache = cache if cache is not None else {}
+    cap_cache = cap_cache if cap_cache is not None else {}
 
     def _get(eq_id: int) -> Equipment | None:
         if eq_id not in cache:
@@ -98,6 +151,8 @@ def _link_out(
     if b is not None:
         out.b_equipment_code = b.equipment_code
         out.b_site_id = b.site_id
+    # Derived, never read off the stored column — see derived_link_status.
+    out.status = derived_link_status(db, row, a, b, cap_cache)
     return out
 
 
@@ -197,7 +252,7 @@ def create_link(
             "b_equipment_code": b.equipment_code,
             "link_kind": row.kind,
             "prev_status": None,
-            "new_status": row.status,
+            "new_status": derived_link_status(db, row, a, b),
             "source_flow": "create",
             "crosses_sites": a.site_id != b.site_id,
             "user_id": current_user.id,
@@ -226,14 +281,24 @@ def patch_link(
         _validate_capability_end(db, data["a_capability_id"], row.a_equipment_id)
     if "b_capability_id" in data:
         _validate_capability_end(db, data["b_capability_id"], row.b_equipment_id)
-    prev_status = row.status
+
+    a = db.get(Equipment, row.a_equipment_id)
+    b = db.get(Equipment, row.b_equipment_id)
+    # Status is derived now, so "did the status change?" has to be measured
+    # around the edit rather than read off the payload. Re-pointing a link at
+    # a different capability genuinely moves it — that is the rewiring this
+    # rule was written for ("Append a feed record when the physical/RF
+    # topology changes"), and it is the only way a PATCH can move it.
+    prev_status = derived_link_status(db, row, a, b)
     for k, v in data.items():
         setattr(row, k, v)
     db.flush()
 
-    a = db.get(Equipment, row.a_equipment_id)
-    b = db.get(Equipment, row.b_equipment_id)
-    if "status" in data and data["status"] != prev_status:
+    new_status = derived_link_status(db, row, a, b)
+    rewired = any(
+        k in data for k in ("a_capability_id", "b_capability_id", "kind", "direction")
+    )
+    if rewired or new_status != prev_status:
         emit_trigger(
             db,
             "equipment.link_changed",
@@ -243,7 +308,7 @@ def patch_link(
                 "b_equipment_code": b.equipment_code if b else None,
                 "link_kind": row.kind,
                 "prev_status": prev_status,
-                "new_status": row.status,
+                "new_status": new_status,
                 "source_flow": "update",
                 "crosses_sites": bool(a and b and a.site_id != b.site_id),
                 "user_id": current_user.id,

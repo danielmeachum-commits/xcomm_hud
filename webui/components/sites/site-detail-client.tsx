@@ -80,6 +80,7 @@ import type {
   SiteProperty,
   Equipment,
   EquipmentHolding,
+  EquipmentLink,
   SiteEquipmentAdvisory,
   UtcInstance,
   SitePropertyTemplate,
@@ -111,6 +112,9 @@ interface Props {
   utcs: UtcInstance[]
   holdings: EquipmentHolding[]
   advisory: SiteEquipmentAdvisory
+  /** Workspace links — the matrix reads the cross-site ones to status its
+   *  "Extends to" tiles. */
+  links: EquipmentLink[]
 }
 
 type Tab =
@@ -155,6 +159,7 @@ export function SiteDetailClient({
   utcs,
   holdings,
   advisory,
+  links,
 }: Props) {
   const { w } = useWorkspace()
   const router = useRouter()
@@ -247,6 +252,7 @@ export function SiteDetailClient({
           enclaves={enclaves}
           userRole={userRole}
           advisory={advisory}
+          links={links}
         />
       ) : tab === "personnel" ? (
         <SitePersonnelTab
@@ -301,6 +307,7 @@ function ServicesTab({
   enclaves,
   userRole,
   advisory,
+  links,
 }: {
   site: Site
   sites: Site[]
@@ -310,6 +317,7 @@ function ServicesTab({
   enclaves: Enclave[]
   userRole?: Role
   advisory: SiteEquipmentAdvisory
+  links: EquipmentLink[]
 }) {
   const [view, setView] = useState<"list" | "graph" | "matrix">("matrix")
   const { w } = useWorkspace()
@@ -351,6 +359,7 @@ function ServicesTab({
           userRole={userRole}
           sites={sites}
           serviceDerived={advisory.service_derived}
+          links={links}
         />
       ) : view === "graph" ? (
         <SiteCanvas services={services} gateways={gateways} />

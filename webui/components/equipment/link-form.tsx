@@ -18,16 +18,13 @@ import {
   CAPABILITY_LABELS,
   EQUIPMENT_LINK_DIRECTIONS,
   EQUIPMENT_LINK_KINDS,
-  EQUIPMENT_STATUS_VALUES,
   LINK_KIND_LABELS,
 } from "@/lib/equipment-meta"
-import { statusLabel } from "@/lib/status"
 import type {
   Equipment,
   EquipmentLink,
   EquipmentLinkDirection,
   EquipmentLinkKind,
-  EquipmentStatus,
 } from "@/lib/types"
 
 interface Props {
@@ -56,7 +53,6 @@ interface Draft {
   bCapId: number | null
   kind: EquipmentLinkKind
   direction: EquipmentLinkDirection
-  status: EquipmentStatus
   label: string
   notes: string
 }
@@ -73,7 +69,6 @@ function draftFrom(
     bCapId: link?.b_capability_id ?? null,
     kind: link?.kind ?? "cable",
     direction: link?.direction ?? "bidirectional",
-    status: link?.status ?? "unvalidated",
     label: link?.label ?? "",
     notes: link?.notes ?? "",
   }
@@ -144,7 +139,6 @@ export function LinkForm({
         b_capability_id: draft.bCapId,
         kind: draft.kind,
         direction: draft.direction,
-        status: draft.status,
         label: draft.label.trim() || null,
         notes: draft.notes.trim() || null,
       }
@@ -272,27 +266,9 @@ export function LinkForm({
                 ))}
               </select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="link-status">Status</Label>
-              <select
-                id="link-status"
-                value={draft.status}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    status: e.target.value as EquipmentStatus,
-                  })
-                }
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                disabled={pending}
-              >
-                {EQUIPMENT_STATUS_VALUES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* No status control: a link's status is DERIVED from the gear
+              * at its two ends (worst of the two), so there is nothing here
+              * to set. See api/routers/equipment_topology.derived_link_status. */}
           </div>
 
           <div className="space-y-1.5">

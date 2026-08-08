@@ -36,13 +36,15 @@ import {
   paceShort,
   serviceIcon,
 } from "@/lib/service-meta"
-import { statusToIndicatorState } from "@/lib/status"
+import { statusLabel, statusToIndicatorState } from "@/lib/status"
 import { cn } from "@/lib/utils"
 import type {
   AnyStatus,
   BackingCapability,
   CellStatus,
   DerivedStatus,
+  EquipmentLink,
+  EquipmentStatus,
   Gateway,
   GatewayPace,
   GatewayStatus,
@@ -212,6 +214,9 @@ interface Props {
    *  status can explain where that number came from. Only read for services
    *  in derived mode — the matrix itself gains no new visual weight. */
   serviceDerived?: Record<number, DerivedStatus>
+  /** Workspace equipment links. Only the cross-site ones matter here — they
+   *  carry the status shown on each "Extends to" tile. */
+  links?: EquipmentLink[]
 }
 
 function isTierOverridden(gws: Gateway[]): boolean {
@@ -303,6 +308,7 @@ export function SiteMatrix({
   userRole,
   sites,
   serviceDerived,
+  links,
 }: Props) {
   const isOperator = userRole === "operator" || userRole === "admin"
   const [density] = useState<Density>("full")
@@ -384,6 +390,7 @@ export function SiteMatrix({
           isOperator={isOperator}
           siteNameById={siteNameById}
           serviceDerived={serviceDerived}
+          links={links}
         />
       )}
       {coreLocal.length > 0 && (
@@ -418,6 +425,7 @@ interface SectionProps {
   isOperator?: boolean
   siteNameById: Map<number, string>
   serviceDerived?: Record<number, DerivedStatus>
+  links?: EquipmentLink[]
 }
 
 /** One remote site a service reaches, and the far-end capabilities doing it. */
@@ -471,6 +479,7 @@ function MatrixGridSection({
   isOperator,
   siteNameById,
   serviceDerived,
+  links,
 }: SectionProps) {
   const [hover, setHover] = useState<{
     col: number | null
@@ -882,6 +891,8 @@ function MatrixGridSection({
                       <ExtensionTile
                         reaches={extensionsByService.get(svc.id) ?? []}
                         siteNameById={siteNameById}
+                        links={links ?? []}
+                        siteId={siteId}
                         row={rowIdx}
                         col={GATEWAY_PACE_VALUES.length + 4}
                         hover={hover}
@@ -898,23 +909,88 @@ function MatrixGridSection({
   )
 }
 
+/** Worst-of ordering for equipment status, mirroring
+ *  api/equipment_status.py's EQUIPMENT_STATUS_RANK. `unvalidated` is absent
+ *  on purpose — it means "no information", not "worst case", so it never
+ *  wins a comparison. */
+const EQUIPMENT_STATUS_RANK: Record<string, number> = {
+  up: 1,
+  degraded: 2,
+  maintenance: 3,
+  down: 4,
+  offline: 5,
+}
+
+/** Worst of the given statuses, ignoring `unvalidated`. Null when nothing has
+ *  an opinion — every input unvalidated, or none given. */
+function worstEquipmentStatus(
+  statuses: EquipmentStatus[],
+): EquipmentStatus | null {
+  let worst: EquipmentStatus | null = null
+  for (const s of statuses) {
+    const rank = EQUIPMENT_STATUS_RANK[s] ?? 0
+    if (rank === 0) continue
+    if (worst === null || rank > (EQUIPMENT_STATUS_RANK[worst] ?? 0)) worst = s
+  }
+  return worst
+}
+
+/** Status of the SHOT to a remote site — read off the links themselves, not
+ *  off the far-end capabilities.
+ *
+ *  Those are different facts: a capability's status describes one radio,
+ *  while the link's covers both ends (the API derives it as the worst of the
+ *  two), so a link catches "our end is down" that a far-end-only reading
+ *  would miss. Matching is by equipment, not by site pair: two sites can be
+ *  joined by several links and only the ones carrying THIS service's gear
+ *  belong on this tile. */
+function reachLinkStatus(
+  links: EquipmentLink[],
+  siteId: number,
+  reach: ExtensionReach,
+): EquipmentStatus | null {
+  const farEquipment = new Set(reach.capabilities.map((c) => c.equipment_id))
+  const matched = links.filter((l) => {
+    const aFar = l.a_site_id === reach.siteId && farEquipment.has(l.a_equipment_id)
+    const bFar = l.b_site_id === reach.siteId && farEquipment.has(l.b_equipment_id)
+    // The other end has to be OUR site, else this is a link between two
+    // third-party sites that merely happens to touch the same gear.
+    if (aFar) return l.b_site_id === siteId
+    if (bFar) return l.a_site_id === siteId
+    return false
+  })
+  if (matched.length === 0) return null
+  // A matched link always gets a dot. Null here would mean "no link recorded",
+  // which is a different statement from "a link exists and nobody has said
+  // anything about it" — the API collapses the latter to `unvalidated` for
+  // the same reason, so the tile and the map edge agree.
+  return worstEquipmentStatus(matched.map((l) => l.status)) ?? "unvalidated"
+}
+
 /** What this service reaches at other sites.
  *
  *  Sits to the right of the PACE tiers because it is the same kind of fact —
  *  another way this service gets where it is going — but it is emphatically
- *  NOT a PACE tier, so it is separated by the same gutter and drawn without a
- *  status of its own. An extension's health already shows up in the local
- *  status through its backing capabilities; repeating it here as a second
- *  status would be the double count all over again. */
+ *  NOT a PACE tier, so it is separated by the same gutter.
+ *
+ *  The tile carries the LINK's own status. That is deliberately a second
+ *  status on the row: the local status answers "is this service up here?",
+ *  while this answers "is the shot to the far end healthy?" — and an
+ *  extension can be degraded while the local service still reads up. Read
+ *  them as two different questions, not one repeated. */
 function ExtensionTile({
   reaches,
   siteNameById,
+  links,
+  siteId,
   row,
   col,
   hover,
 }: {
   reaches: ExtensionReach[]
   siteNameById: Map<number, string>
+  links: EquipmentLink[]
+  siteId: number
   row: number
   col: number
   hover: Hover
@@ -935,28 +1011,42 @@ function ExtensionTile({
         </div>
       ) : (
         <div className="flex flex-col gap-1">
-          {reaches.map((r) => (
-            <a
-              key={r.siteId}
-              href={w(`/sites/${r.siteId}`)}
-              className="flex flex-col gap-0.5 rounded-md border border-border px-1.5 py-1 hover:bg-muted/50"
-            >
-              <span className="flex items-center gap-1 text-[11px] font-medium">
-                <Waypoints className="size-2.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">
-                  {siteNameById.get(r.siteId) ?? `Site ${r.siteId}`}
-                </span>
-              </span>
-              <span
-                className="truncate text-[10px] text-muted-foreground"
-                title={r.capabilities
-                  .map((c) => `${c.equipment_code} ${c.label}`)
-                  .join(", ")}
+          {reaches.map((r) => {
+            const link = reachLinkStatus(links, siteId, r)
+            return (
+              <a
+                key={r.siteId}
+                href={w(`/sites/${r.siteId}`)}
+                className="flex flex-col gap-0.5 rounded-md border border-border px-1.5 py-1 hover:bg-muted/50"
               >
-                {r.capabilities.map((c) => c.equipment_code).join(", ")}
-              </span>
-            </a>
-          ))}
+                <span className="flex items-center gap-1 text-[11px] font-medium">
+                  <Waypoints className="size-2.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">
+                    {siteNameById.get(r.siteId) ?? `Site ${r.siteId}`}
+                  </span>
+                </span>
+                <span
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground"
+                  title={r.capabilities
+                    .map(
+                      (c) =>
+                        `${c.equipment_code} ${c.label} — ${statusLabel(c.status)}`,
+                    )
+                    .join(", ")}
+                >
+                  {link && (
+                    <StatusIndicator
+                      state={statusToIndicatorState(link)}
+                      size="sm"
+                    />
+                  )}
+                  <span className="truncate">
+                    {r.capabilities.map((c) => c.equipment_code).join(", ")}
+                  </span>
+                </span>
+              </a>
+            )
+          })}
         </div>
       )}
     </div>
@@ -1305,7 +1395,10 @@ function IdentityTile({
         // the service is locally overridden we signal it with a red left
         // border instead of a tint (transparent tints would let the
         // scrolled content bleed through the sticky bg).
-        "sticky left-0 z-20 bg-background border-r border-border/60",
+        // z-5 stays above the unlayered cells it pins over but below the
+        // fixed sidebar's z-10 — at z-20 it painted over the nav when the
+        // page scrolled horizontally.
+        "sticky left-0 z-5 bg-background border-r border-border/60",
         localOverride && "border-l-2 border-l-red-500/60",
       )}
     >

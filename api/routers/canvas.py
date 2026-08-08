@@ -11,6 +11,8 @@ from deps import get_current_workspace, requires
 from effective import effective_service_status
 from models import (
     CanvasAnnotation,
+    Equipment,
+    EquipmentLink,
     Gateway,
     Service,
     ServiceDelivery,
@@ -22,12 +24,14 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from routers.equipment_topology import _link_out
 from schemas import (
     CanvasAnnotationIn,
     CanvasAnnotationOut,
     CanvasAnnotationPatch,
     CanvasPositionIn,
     CanvasPositionOut,
+    EquipmentLinkOut,
     GatewayOut,
     MapBundle,
     ServiceOut,
@@ -171,6 +175,32 @@ def map_bundle(
             go.validated_by_username = uname
         gateway_outs.append(go)
 
+    # Cross-site equipment links become the map's edges. An EquipmentLink row
+    # is the topology truth (models.EquipmentLink) — "an RFK at Site A
+    # shooting to an RFK at Site B is what makes B an extension of A" — so the
+    # map reads those rows directly rather than inferring reach from services.
+    # Same-site links are dropped: they are internal wiring with no two site
+    # nodes to span. Links pointing at a site outside this workspace are
+    # dropped too, since there would be no node on the far end to attach to.
+    link_outs: list[EquipmentLinkOut] = []
+    if site_ids:
+        site_id_set = set(site_ids)
+        eq_cache: dict[int, Equipment] = {}
+        for link in (
+            db.query(EquipmentLink)
+            .filter(EquipmentLink.workspace_id == workspace.id)
+            .order_by(EquipmentLink.id)
+            .all()
+        ):
+            lo = _link_out(db, link, eq_cache)
+            if lo.a_site_id is None or lo.b_site_id is None:
+                continue
+            if lo.a_site_id == lo.b_site_id:
+                continue
+            if lo.a_site_id not in site_id_set or lo.b_site_id not in site_id_set:
+                continue
+            link_outs.append(lo)
+
     return MapBundle(
         sites=site_outs,
         positions=[
@@ -179,6 +209,7 @@ def map_bundle(
         services=service_outs,
         gateways=gateway_outs,
         annotations=[CanvasAnnotationOut.model_validate(a) for a in annotations],
+        links=link_outs,
     )
 
 

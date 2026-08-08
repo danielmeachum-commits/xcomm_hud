@@ -7,6 +7,7 @@ import type {
   Enclave,
   Equipment,
   EquipmentHolding,
+  EquipmentLink,
   SiteEquipmentAdvisory,
   UtcInstance,
   Document,
@@ -63,6 +64,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
     equipment,
     utcs,
     advisory,
+    links,
   ] = await Promise.all([
     apiGet<Service[]>(`/services`).catch(() => [] as Service[]),
     apiGet<Site[]>(`/sites`).catch(() => [] as Site[]),
@@ -99,6 +101,9 @@ export default async function SiteDetailPage({ params }: PageProps) {
     apiGet<SiteEquipmentAdvisory>(`/sites/${siteId}/equipment-advisory`).catch(
       () => ({ service_derived: {}, gateway_derived: {} }) as SiteEquipmentAdvisory,
     ),
+    // Workspace-wide: an extension's link has its far end at ANOTHER site, so
+    // filtering to this site here would drop exactly the rows the matrix needs.
+    apiGet<EquipmentLink[]>(`/topology/links`).catch(() => [] as EquipmentLink[]),
   ])
 
   // Holdings hang off each UTC rather than off the site, so they need one
@@ -140,6 +145,7 @@ export default async function SiteDetailPage({ params }: PageProps) {
       utcs={utcs}
       holdings={holdings}
       advisory={advisory}
+      links={links}
     />
   )
 }

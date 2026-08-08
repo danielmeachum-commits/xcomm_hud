@@ -15,6 +15,7 @@ export default async function SitesPage() {
     services: [],
     gateways: [],
     annotations: [],
+    links: [],
   }
   try {
     ;[sites, bundle] = await Promise.all([
