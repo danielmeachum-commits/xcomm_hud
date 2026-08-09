@@ -2,13 +2,17 @@
 
 import "@xyflow/react/dist/style.css"
 
+import type { CSSProperties } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
   type Edge,
+  EdgeLabelRenderer,
+  type EdgeProps,
   Handle,
   type Node,
   type NodeChange,
@@ -18,18 +22,25 @@ import {
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
+  getBezierPath,
 } from "@xyflow/react"
 import { ExternalLink, Plus, StickyNote, Trash2 } from "lucide-react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import TransportBadge from "@/components/8starlabs-ui/transport-badge"
 import { Button } from "@/components/ui/button"
+import { LINK_KIND_LABELS, worstEquipmentStatus } from "@/lib/equipment-meta"
 import {
   categoryAccentClass,
   gatewayIcon,
   serviceIcon,
 } from "@/lib/service-meta"
-import { statusToIndicatorState } from "@/lib/status"
+import {
+  statusBadgeClass,
+  statusEdgeStroke,
+  statusLabel,
+  statusToIndicatorState,
+} from "@/lib/status"
 import { fpconClasses } from "@/lib/threat-level"
 import { cn } from "@/lib/utils"
 import type {
@@ -47,6 +58,128 @@ interface SiteNodeData extends Record<string, unknown> {
   site: Site
   services: Service[]
   gateways: Gateway[]
+  ports: SitePort[]
+}
+
+/** One piece of gear at a site that terminates a cross-site shot. These are
+ *  the site node's handles: an edge docks on the radio actually carrying it
+ *  rather than on an anonymous point in the middle of the site, so a node with
+ *  three shots shows which three boxes are doing the work — and each one's own
+ *  status, which is what makes a link down. */
+interface SitePort {
+  equipmentId: number
+  /** What the chip reads: the gear's type short name ("117G"). The code
+   *  ("K1") is an identifier nobody recognizes at a glance, so it lives in
+   *  the tooltip instead. */
+  name: string
+  code: string | null
+  status: EquipmentStatus
+  /** How this port's shots read, for the tooltip. */
+  shots: string[]
+}
+
+function portHandleId(equipmentId: number): string {
+  return `eq-${equipmentId}`
+}
+
+/** Group the cross-site links into per-site ports. Built from the same list
+ *  and the same site filter as buildLinkEdges, so every edge is guaranteed a
+ *  handle to land on at both ends. */
+function buildSitePorts(
+  links: EquipmentLink[],
+  siteIds: Set<number>,
+): Map<number, SitePort[]> {
+  const bySite = new Map<
+    number,
+    Map<number, SitePort & { seen: EquipmentStatus[] }>
+  >()
+
+  function add(
+    siteId: number,
+    equipmentId: number,
+    name: string | null,
+    code: string | null,
+    status: EquipmentStatus,
+    shot: string,
+  ) {
+    let ports = bySite.get(siteId)
+    if (!ports) {
+      ports = new Map()
+      bySite.set(siteId, ports)
+    }
+    const existing = ports.get(equipmentId)
+    if (existing) {
+      existing.seen.push(status)
+      existing.shots.push(shot)
+      return
+    }
+    ports.set(equipmentId, {
+      equipmentId,
+      // The code is the last resort, not the first: an untyped piece of gear
+      // is better labeled "K1" than "#37".
+      name: name ?? code ?? `#${equipmentId}`,
+      code,
+      status,
+      seen: [status],
+      shots: [shot],
+    })
+  }
+
+  for (const l of links) {
+    if (l.a_site_id === null || l.b_site_id === null) continue
+    if (!siteIds.has(l.a_site_id) || !siteIds.has(l.b_site_id)) continue
+    const shot = linkShotLabel(l)
+    add(
+      l.a_site_id,
+      l.a_equipment_id,
+      l.a_equipment_label,
+      l.a_equipment_code,
+      l.a_status,
+      shot,
+    )
+    add(
+      l.b_site_id,
+      l.b_equipment_id,
+      l.b_equipment_label,
+      l.b_equipment_code,
+      l.b_status,
+      shot,
+    )
+  }
+
+  const out = new Map<number, SitePort[]>()
+  for (const [siteId, ports] of bySite) {
+    const resolved = Array.from(ports.values())
+      // One radio can carry several shots, and naming a capability per end
+      // means those ends can disagree — the port shows the worst of them.
+      .map(({ seen, ...p }) => ({
+        ...p,
+        status: worstEquipmentStatus(seen) ?? p.status,
+      }))
+    // Two RFKs at one site would otherwise render as two chips both reading
+    // "RFK" — the code is the only thing that tells them apart, so it comes
+    // back out of the tooltip exactly when it has to.
+    const nameCounts = new Map<string, number>()
+    for (const p of resolved) {
+      nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1)
+    }
+    out.set(
+      siteId,
+      resolved
+        .map((p) =>
+          (nameCounts.get(p.name) ?? 0) > 1 && p.code
+            ? { ...p, name: `${p.name} ${p.code}` }
+            : p,
+        )
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    )
+  }
+  return out
+}
+
+/** How one shot reads in a port's tooltip: what it is, then how it's doing. */
+function linkShotLabel(l: EquipmentLink): string {
+  return `${l.label ?? LINK_KIND_LABELS[l.kind]} · ${statusLabel(l.status)}`
 }
 
 interface AnnotationNodeData extends Record<string, unknown> {
@@ -85,6 +218,57 @@ function linkEdgeStyle(status: EquipmentStatus): {
   }
 }
 
+interface LinkEdgeData extends Record<string, unknown> {
+  label: string
+  /** The link's DERIVED status — worst of the gear at its two ends. A link is
+   *  never validated on its own, so there is nothing else it could be. */
+  status: EquipmentStatus
+  title: string
+}
+
+/** A link edge whose label carries a status dot. React Flow's built-in label
+ *  is SVG text, which can't hold the app's StatusIndicator — so the edge is
+ *  drawn by hand and the label rendered as real DOM in the label layer. */
+function LinkEdge({
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps) {
+  const d = data as LinkEdgeData
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
+  return (
+    <>
+      <BaseEdge path={path} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          title={d.title}
+          className="nodrag nopan absolute inline-flex items-center gap-1 rounded border border-border bg-background/85 px-1.5 py-0.5 text-[10px]"
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: "all",
+          }}
+        >
+          <StatusIndicator state={statusToIndicatorState(d.status)} size="sm" />
+          <span>{d.label}</span>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
+
 /** One map edge per cross-site link. Each link is drawn separately rather
  *  than collapsed per site-pair: two sites joined by both a healthy fiber run
  *  and a down RF shot are telling you two different things, and merging them
@@ -97,19 +281,26 @@ function buildLinkEdges(links: EquipmentLink[], siteIds: Set<number>): Edge[] {
     // between the bundle's queries — skip rather than emit a dangling edge.
     if (!siteIds.has(l.a_site_id) || !siteIds.has(l.b_site_id)) continue
     const style = linkEdgeStyle(l.status)
-    const ends = [l.a_equipment_code, l.b_equipment_code].filter(Boolean)
     out.push({
       id: `link-${l.id}`,
       source: `site-${l.a_site_id}`,
       target: `site-${l.b_site_id}`,
-      sourceHandle: "c",
-      targetHandle: "c",
-      label: l.label ?? (ends.length === 2 ? ends.join(" ↔ ") : l.kind),
-      labelShowBg: true,
-      labelBgPadding: [6, 2],
-      labelBgBorderRadius: 4,
-      labelStyle: { fontSize: 10, fill: "currentColor" },
-      labelBgStyle: { fill: "var(--background)", fillOpacity: 0.85 },
+      // Dock on the gear at each end, not the site's center. The ports name
+      // the equipment, so the edge label no longer has to.
+      sourceHandle: portHandleId(l.a_equipment_id),
+      targetHandle: portHandleId(l.b_equipment_id),
+      type: "link",
+      data: {
+        label: l.label ?? LINK_KIND_LABELS[l.kind],
+        status: l.status,
+        title: [
+          l.label ?? LINK_KIND_LABELS[l.kind],
+          `${LINK_KIND_LABELS[l.kind]} · ${statusLabel(l.status)}`,
+          `${l.a_equipment_label ?? l.a_equipment_code ?? "?"} ↔ ${
+            l.b_equipment_label ?? l.b_equipment_code ?? "?"
+          }`,
+        ].join("\n"),
+      } satisfies LinkEdgeData,
       style,
       // Bidirectional shots get no arrowhead — an arrow would claim a
       // direction the data does not have.
@@ -123,7 +314,7 @@ function buildLinkEdges(links: EquipmentLink[], siteIds: Set<number>): Edge[] {
 }
 
 function SiteMapNode({ data }: NodeProps) {
-  const { site, services, gateways } = data as SiteNodeData
+  const { site, services, gateways, ports } = data as SiteNodeData
   const { w } = useWorkspace()
   const fpconRing = site.show_fpcon
     ? fpconClasses(site.fpcon).ring
@@ -144,25 +335,6 @@ function SiteMapNode({ data }: NodeProps) {
       )}
       style={{ width: SITE_NODE_WIDTH }}
     >
-      {/* Link edges anchor to the node's CENTER, not an edge, so a shot
-       *  between two sites draws as a straight line whichever way the
-       *  operator has dragged them. Both handles share one id and are
-       *  invisible + non-connectable: they exist to anchor rendered edges,
-       *  never to let anyone draw a link by hand on the map. */}
-      <Handle
-        type="target"
-        id="c"
-        position={Position.Left}
-        isConnectable={false}
-        className="!left-1/2 !top-1/2 !size-0 !min-w-0 !border-0 !bg-transparent"
-      />
-      <Handle
-        type="source"
-        id="c"
-        position={Position.Right}
-        isConnectable={false}
-        className="!left-1/2 !top-1/2 !size-0 !min-w-0 !border-0 !bg-transparent"
-      />
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <StatusIndicator
@@ -249,6 +421,69 @@ function SiteMapNode({ data }: NodeProps) {
           </div>
         )}
       </div>
+
+      {ports.length > 0 && (
+        <div className="flex flex-wrap gap-1 border-t border-border pt-1.5">
+          {ports.map((p) => (
+            <SitePortHandle key={p.equipmentId} port={p} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The handle IS the chip: a real React Flow handle stretched over the whole
+ *  pill, so edges dock at the chip's center while the operator sees the piece
+ *  of gear and its status instead of a bare dot. Source and target share the
+ *  id — an end can be either, and neither is connectable, since links are
+ *  authored on the topology page, never drawn by hand here. */
+function SitePortHandle({ port }: { port: SitePort }) {
+  // Inline rather than utility classes: React Flow ships its own
+  // `.react-flow__handle-bottom` offset and transform, and an inline style is
+  // the only override that doesn't turn into a pile of `!important`.
+  const handleStyle: CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    minWidth: 0,
+    minHeight: 0,
+    transform: "none",
+    border: 0,
+    borderRadius: 6,
+    background: "transparent",
+  }
+  return (
+    <div
+      title={[
+        `${port.name}${port.code ? ` · ${port.code}` : ""} · ${statusLabel(port.status)}`,
+        ...port.shots,
+      ].join("\n")}
+      className={cn(
+        "relative inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]",
+        statusBadgeClass(port.status),
+      )}
+    >
+      <Handle
+        type="target"
+        id={portHandleId(port.equipmentId)}
+        position={Position.Bottom}
+        isConnectable={false}
+        style={handleStyle}
+      />
+      <Handle
+        type="source"
+        id={portHandleId(port.equipmentId)}
+        position={Position.Bottom}
+        isConnectable={false}
+        style={handleStyle}
+      />
+      <span
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: statusEdgeStroke(port.status) }}
+      />
+      <span className="max-w-[92px] truncate">{port.name}</span>
     </div>
   )
 }
@@ -306,6 +541,10 @@ function AnnotationNode({ data }: NodeProps) {
 const NODE_TYPES = {
   site: SiteMapNode,
   annotation: AnnotationNode,
+}
+
+const EDGE_TYPES = {
+  link: LinkEdge,
 }
 
 interface Props {
@@ -367,6 +606,15 @@ function MapCanvasInner({ bundle }: Props) {
     router.refresh()
   }
 
+  const portsBySite = useMemo(
+    () =>
+      buildSitePorts(
+        bundle.links ?? [],
+        new Set(bundle.sites.map((s) => s.id)),
+      ),
+    [bundle.links, bundle.sites],
+  )
+
   const initialNodes = useMemo<Node[]>(() => {
     const built: Node[] = []
     bundle.sites.forEach((site, i) => {
@@ -379,6 +627,7 @@ function MapCanvasInner({ bundle }: Props) {
           site,
           services: servicesBySite.get(site.id) ?? [],
           gateways: gatewaysBySite.get(site.id) ?? [],
+          ports: portsBySite.get(site.id) ?? [],
         },
       })
     })
@@ -396,7 +645,7 @@ function MapCanvasInner({ bundle }: Props) {
     }
     return built
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle, positionMap, servicesBySite, gatewaysBySite])
+  }, [bundle, positionMap, servicesBySite, gatewaysBySite, portsBySite])
 
   const [nodes, setNodes] = useState<Node[]>(initialNodes)
   useEffect(() => setNodes(initialNodes), [initialNodes])
@@ -456,6 +705,7 @@ function MapCanvasInner({ bundle }: Props) {
       edges={edges}
       onNodesChange={onNodesChange}
       nodeTypes={NODE_TYPES}
+      edgeTypes={EDGE_TYPES}
       fitView={initialNodes.length > 0}
       fitViewOptions={{ padding: 0.3 }}
       panOnDrag

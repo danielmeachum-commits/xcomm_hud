@@ -1074,8 +1074,16 @@ export interface EquipmentLink {
   notes: string | null
   a_equipment_code: string | null
   b_equipment_code: string | null
+  /** What to call the gear on a canvas — the type's short name ("117G"),
+   *  falling back to its title. The code is an identifier, not a name. */
+  a_equipment_label: string | null
+  b_equipment_label: string | null
   a_site_id: number | null
   b_site_id: number | null
+  /** Each end's own status, before `status` collapses them to the worst of
+   *  the two. The map's per-equipment ports read these. */
+  a_status: EquipmentStatus
+  b_status: EquipmentStatus
 }
 
 export interface BackingCapability {

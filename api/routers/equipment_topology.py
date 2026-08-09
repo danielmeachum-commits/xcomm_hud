@@ -33,6 +33,7 @@ from models import (
     EquipmentCanvasPosition,
     EquipmentCapability,
     EquipmentLink,
+    EquipmentType,
     Gateway,
     Service,
     ServiceDelivery,
@@ -143,15 +144,32 @@ def _link_out(
             cache[eq_id] = found
         return cache[eq_id]
 
+    def _label(eq: Equipment) -> str | None:
+        """What to call this gear on a canvas — its type's short name, falling
+        back to the full title. `db.get` rides the identity map, so the same
+        type across many links costs one query."""
+        et = db.get(EquipmentType, eq.equipment_type_id)
+        if et is None:
+            return None
+        return et.short_name or et.title
+
     a = _get(row.a_equipment_id)
     b = _get(row.b_equipment_id)
     if a is not None:
         out.a_equipment_code = a.equipment_code
+        out.a_equipment_label = _label(a)
         out.a_site_id = a.site_id
     if b is not None:
         out.b_equipment_code = b.equipment_code
+        out.b_equipment_label = _label(b)
         out.b_site_id = b.site_id
     # Derived, never read off the stored column — see derived_link_status.
+    out.a_status = (
+        _endpoint_status(db, a, row.a_capability_id, cap_cache) or "unvalidated"
+    )
+    out.b_status = (
+        _endpoint_status(db, b, row.b_capability_id, cap_cache) or "unvalidated"
+    )
     out.status = derived_link_status(db, row, a, b, cap_cache)
     return out
 

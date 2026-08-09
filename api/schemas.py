@@ -2314,8 +2314,18 @@ class EquipmentLinkOut(_ORM):
     # Denormalized so the canvas can label and group edges in one pass.
     a_equipment_code: Optional[str] = None
     b_equipment_code: Optional[str] = None
+    # What to CALL the gear on a canvas. The code ("K1") is an identifier, not
+    # a name — nobody reading a map knows what a K1 is, so the type's short
+    # name ("117G") leads and the code stays for the tooltip.
+    a_equipment_label: Optional[str] = None
+    b_equipment_label: Optional[str] = None
     a_site_id: Optional[int] = None
     b_site_id: Optional[int] = None
+    # Each END's own status, before the worst-of above collapses them. The map
+    # draws a port per piece of gear and colors it from these, so a shot that
+    # is down because of ONE end says which end.
+    a_status: EquipmentStatusValue = "unvalidated"
+    b_status: EquipmentStatusValue = "unvalidated"
 
 
 class BackingCapability(BaseModel):
