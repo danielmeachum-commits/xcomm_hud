@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 
-import { formatLocal, formatLocalTime, timeAgo } from "@/lib/time"
+import { durationSince, formatLocal, formatLocalTime, timeAgo } from "@/lib/time"
 
 interface Props {
   iso: string | null | undefined
@@ -29,6 +29,20 @@ export function LocalClock({ iso, placeholder = "—", className }: Props) {
   useEffect(() => {
     setText(formatLocalTime(iso))
   }, [iso])
+  return <span className={className}>{text}</span>
+}
+
+/** Running elapsed counter "4h 12m" — how long something has been in its
+ *  current state. Ticks every 10s so the sub-minute reading of a fresh
+ *  outage actually moves. Hydration-safe like its siblings. */
+export function ElapsedSince({ iso, placeholder = "—", className }: Props) {
+  const [text, setText] = useState(placeholder)
+  useEffect(() => {
+    const tick = () => setText(durationSince(iso) ?? placeholder)
+    tick()
+    const t = setInterval(tick, 10_000)
+    return () => clearInterval(t)
+  }, [iso, placeholder])
   return <span className={className}>{text}</span>
 }
 

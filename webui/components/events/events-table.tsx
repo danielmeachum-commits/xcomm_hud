@@ -42,6 +42,11 @@ import {
   severityDotClass,
   severityRank,
 } from "@/lib/severity"
+import {
+  buildEventOrgIndex,
+  matchesOrgFilter,
+  orgFilterOptions,
+} from "@/lib/event-org-filter"
 import { formatZulu, formatZuluTime, zuluDayGroup } from "@/lib/time"
 import {
   emconClasses,
@@ -58,6 +63,7 @@ import type {
   Fpcon,
   Gateway,
   Me,
+  Personnel,
   PersonnelStatus,
   RecordClass,
   Service,
@@ -85,6 +91,7 @@ import {
 import { downloadCsv, toCsv } from "./events-csv"
 import { FloatingActionBar } from "./floating-action-bar"
 import {
+  FilterBar,
   FilterChips,
   HeaderFilter,
   type FilterBankItem,
@@ -254,6 +261,8 @@ interface Props {
   teams: Team[]
   units: Unit[]
   workCenters: WorkCenter[]
+  /** Roster, for resolving which team / work center an event touches. */
+  personnel: Personnel[]
   workspace: Workspace
   /** Lock the view to one record class (e.g. "log"). */
   fixedRecordClass?: RecordClass
@@ -275,6 +284,7 @@ export function EventsTable({
   teams,
   units,
   workCenters,
+  personnel,
   workspace,
   fixedRecordClass,
   showHidden = false,
@@ -290,6 +300,8 @@ export function EventsTable({
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set())
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
+  const [teamFilter, setTeamFilter] = useState<Set<string>>(new Set())
+  const [workCenterFilter, setWorkCenterFilter] = useState<Set<string>>(new Set())
   const [sortKey, setSortKey] = useState<SortKey>("validated_at")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -343,6 +355,28 @@ export function EventsTable({
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [events, typeLabels])
 
+  // Team / work-center reach — resolved through the roster, since an event
+  // row has no org column. See lib/event-org-filter.
+  const orgIndex = useMemo(() => buildEventOrgIndex(personnel), [personnel])
+  const teamOptions: MultiSelectOption[] = useMemo(
+    () =>
+      orgFilterOptions(
+        events,
+        orgIndex.teamsFor,
+        new Map(teams.map((t) => [t.id, t.name])),
+      ),
+    [events, orgIndex, teams],
+  )
+  const workCenterOptions: MultiSelectOption[] = useMemo(
+    () =>
+      orgFilterOptions(
+        events,
+        orgIndex.workCentersFor,
+        new Map(workCenters.map((w) => [w.id, w.name])),
+      ),
+    [events, orgIndex, workCenters],
+  )
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     let rows = events
@@ -366,6 +400,14 @@ export function EventsTable({
     }
     if (typeFilter.size > 0) {
       rows = rows.filter((v) => v.type_slug != null && typeFilter.has(v.type_slug))
+    }
+    if (teamFilter.size > 0) {
+      rows = rows.filter((v) => matchesOrgFilter(orgIndex.teamsFor(v), teamFilter))
+    }
+    if (workCenterFilter.size > 0) {
+      rows = rows.filter((v) =>
+        matchesOrgFilter(orgIndex.workCentersFor(v), workCenterFilter),
+      )
     }
     if (q) {
       rows = rows.filter((v) => {
@@ -420,6 +462,9 @@ export function EventsTable({
     statusFilter,
     severityFilter,
     typeFilter,
+    teamFilter,
+    workCenterFilter,
+    orgIndex,
     sortKey,
     sortDir,
   ])
@@ -524,6 +569,18 @@ export function EventsTable({
   const totalCols = orderedVisibleCols.length + 5
   const grouped = sortKey === "validated_at"
 
+  // Org dimensions, kept separate because they get their own toolbar buttons
+  // (no column to hang a header funnel on). Only offered when the roster
+  // actually places someone — an empty funnel is worse than no funnel.
+  const orgFilterBank: FilterBankItem[] = [
+    ...(teamOptions.length > 0
+      ? [{ key: "team", label: "Team", options: teamOptions, searchable: true, selected: teamFilter, onChange: setTeamFilter } as FilterBankItem]
+      : []),
+    ...(workCenterOptions.length > 0
+      ? [{ key: "work_center", label: "Work center", options: workCenterOptions, searchable: true, selected: workCenterFilter, onChange: setWorkCenterFilter } as FilterBankItem]
+      : []),
+  ]
+
   // Inline column filters — each filterable column exposes a funnel in its
   // header; the same sets drive the active-filter chips below the toolbar.
   const filterBank: FilterBankItem[] = [
@@ -532,6 +589,7 @@ export function EventsTable({
     { key: "type", label: "Type", options: typeOptions, searchable: true, selected: typeFilter, onChange: setTypeFilter },
     { key: "kind", label: "Kind", options: KIND_OPTIONS, groups: KIND_GROUPS, selected: kindFilter, onChange: setKindFilter },
     { key: "status", label: "Status", options: STATUS_OPTIONS, groups: STATUS_GROUPS, selected: statusFilter, onChange: setStatusFilter },
+    ...orgFilterBank,
   ]
 
   // Which configurable column each bank sits under (gutter columns render
@@ -830,6 +888,10 @@ export function EventsTable({
               className="pl-7"
             />
           </div>
+          {/* Team / work center have no column of their own, so they can't
+           *  live in a column header funnel like the other dimensions —
+           *  they get explicit buttons here instead. */}
+          <FilterBar bank={orgFilterBank} />
           <ColumnsPopover
             visible={visibleCols}
             order={colOrder}

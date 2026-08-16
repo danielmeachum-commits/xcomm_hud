@@ -11,6 +11,7 @@ import type {
   EventTypeDef,
   Gateway,
   Me,
+  Personnel,
   Service,
   Site,
   Team,
@@ -40,6 +41,7 @@ interface Props {
   teams: Team[]
   units: Unit[]
   workCenters: WorkCenter[]
+  personnel: Personnel[]
 }
 
 /** Site-scoped events: same timeline/table as the global page, locked to
@@ -55,6 +57,7 @@ export function SiteEventsTab({
   teams,
   units,
   workCenters,
+  personnel,
 }: Props) {
   const router = useRouter()
   const [view, setView] = useState<View>("timeline")
@@ -83,6 +86,9 @@ export function SiteEventsTab({
           me={me}
           events={events}
           eventTypes={eventTypes}
+          teams={teams}
+          workCenters={workCenters}
+          personnel={personnel}
           siteId={site.id}
           logsView="Log Table"
         />
@@ -97,6 +103,7 @@ export function SiteEventsTab({
           teams={teams}
           units={units}
           workCenters={workCenters}
+          personnel={personnel}
           workspace={me.current_workspace}
           defaultSiteId={site.id}
         />

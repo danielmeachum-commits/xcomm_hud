@@ -25,7 +25,7 @@ import { MatrixCellPill } from "@/components/services/matrix-cell-pill"
 import { ServiceStatusPill } from "@/components/services/service-status-pill"
 import { ValidationDetailsPopover } from "@/components/services/validation-details-popover"
 import { GatewayForm } from "@/components/sites/gateway-form"
-import { TimeAgo } from "@/components/time-display"
+import { ElapsedSince, TimeAgo } from "@/components/time-display"
 import { Button } from "@/components/ui/button"
 import {
   categoryLabel,
@@ -1277,6 +1277,10 @@ function GatewayCard({
   collapsed: boolean
 }) {
   const Icon = gatewayIcon(gateway.kind)
+  const gatewayDownSince =
+    gateway.status === "down" || gateway.status === "offline"
+      ? gateway.validated_at
+      : null
   return (
     <div
       ref={(el) => registerRef(gateway.id, el)}
@@ -1330,6 +1334,15 @@ function GatewayCard({
           className={collapsed ? MIN_PILL_CLASS : CELL_PILL_CLASS}
           indicatorSize={collapsed ? "xl" : "sm"}
         />
+        {/* Same outage clock the cells carry — a down tier is the thing the
+         *  floor watches longest, so the elapsed time belongs on the gateway
+         *  itself, not only on the cells below it. Hidden when collapsed,
+         *  where the card is a dot. */}
+        {!collapsed && gatewayDownSince && (
+          <div className="pt-1 text-[10px] text-muted-foreground">
+            down <ElapsedSince iso={gatewayDownSince} />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1721,6 +1734,14 @@ function PaceTile({
     ? tileTintStrong(cellEffective)
     : tileTintSoft(cellEffective)
   const emphasisTint = tileTintStrong(cellEffective)
+  // Outage clock: for a down/offline path the operator wants elapsed time,
+  // not "validated 4h ago". Prefer the cell's own timestamp; fall back to the
+  // gateway's, which is what a cascaded (never-validated) cell inherited its
+  // status from. Null when neither is known — no clock beats a wrong one.
+  const downSince =
+    best && (cellEffective === "down" || cellEffective === "offline")
+      ? best.cell.validated_at ?? best.gateway.validated_at ?? null
+      : null
 
   return (
     <div
@@ -1780,9 +1801,23 @@ function PaceTile({
               isOperator={isOperator}
             >
               <span className="text-[10px] text-muted-foreground hover:underline cursor-pointer">
-                validated <TimeAgo iso={best.cell.validated_at} />
+                {downSince ? (
+                  <>
+                    down <ElapsedSince iso={downSince} />
+                  </>
+                ) : (
+                  <>
+                    validated <TimeAgo iso={best.cell.validated_at} />
+                  </>
+                )}
               </span>
             </ValidationDetailsPopover>
+          ) : downSince ? (
+            // Never validated at the cell, but the path is down — the clock
+            // that matters is the gateway's, since that's what put it here.
+            <span className="text-[10px] text-muted-foreground">
+              down <ElapsedSince iso={downSince} />
+            </span>
           ) : (
             <span className="text-[10px] text-muted-foreground italic">
               never validated

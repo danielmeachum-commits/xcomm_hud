@@ -8,6 +8,7 @@ import type {
   EventTypeDef,
   Gateway,
   Service,
+  Personnel,
   Site,
   Team,
   Unit,
@@ -27,6 +28,7 @@ export default async function EventsPage() {
     teams,
     units,
     workCenters,
+    personnel,
   ] = await Promise.all([
     apiGet<EventSummary>("/events/summary").catch(() => null),
     apiGet<Event[]>("/events?limit=500&include_hidden=true").catch(
@@ -39,6 +41,7 @@ export default async function EventsPage() {
     apiGet<Team[]>("/teams").catch(() => [] as Team[]),
     apiGet<Unit[]>("/units").catch(() => [] as Unit[]),
     apiGet<WorkCenter[]>("/work-centers").catch(() => [] as WorkCenter[]),
+    apiGet<Personnel[]>("/personnel").catch(() => [] as Personnel[]),
   ])
 
   return (
@@ -55,6 +58,7 @@ export default async function EventsPage() {
         teams={teams}
         units={units}
         workCenters={workCenters}
+        personnel={personnel}
       />
     </div>
   )

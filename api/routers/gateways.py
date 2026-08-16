@@ -13,7 +13,7 @@ from db import get_db
 from deps import get_current_workspace, requires
 from effective import reset_cells_for_gateway
 from equipment_status import refresh_derived, resolve_status
-from models import Gateway, Service, Site, User, Workspace
+from models import Gateway, Service, ServiceDelivery, Site, User, Workspace
 from pubsub import notify
 from rules_engine import emit_trigger
 from schemas import (

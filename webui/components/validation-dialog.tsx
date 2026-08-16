@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import { ValidationHistory } from "@/components/services/validation-history"
@@ -93,6 +93,11 @@ export function ValidationDialog({
   const [history, setHistory] = useState<Event[] | null>(null)
   const [historyPending, setHistoryPending] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  // In-flight guard for the history fetch. Deliberately a ref, not the
+  // `historyPending` state: as a dependency, flipping pending re-ran this
+  // effect, whose cleanup cancelled the fetch that had just started — the
+  // spinner then hung forever because nothing resolved it.
+  const historyInFlight = useRef(false)
 
   // Reset when the dialog opens so the previewed time is current and any
   // prior selection doesn't bleed across sessions.
@@ -106,6 +111,8 @@ export function ValidationDialog({
       setCascade(true)
       setHistory(null)
       setHistoryError(null)
+      setHistoryPending(false)
+      historyInFlight.current = false
     }
   }, [open, currentStatus])
 
@@ -113,8 +120,10 @@ export function ValidationDialog({
   // given session — keeps the common "just record it" path free of an extra
   // round trip.
   useEffect(() => {
-    if (!open || tab !== "history" || history !== null || historyPending) return
+    if (!open || tab !== "history" || history !== null || historyInFlight.current)
+      return
     let cancelled = false
+    historyInFlight.current = true
     setHistoryPending(true)
     setHistoryError(null)
     const params = new URLSearchParams({
@@ -141,12 +150,13 @@ export function ValidationDialog({
         }
       })
       .finally(() => {
+        historyInFlight.current = false
         if (!cancelled) setHistoryPending(false)
       })
     return () => {
       cancelled = true
     }
-  }, [open, tab, kind, subjectId, secondSubjectId, history, historyPending])
+  }, [open, tab, kind, subjectId, secondSubjectId, history])
 
   // For the live preview boxes — show what the user is about to record.
   const whenIso = (() => {
@@ -193,7 +203,12 @@ export function ValidationDialog({
       })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
-        throw new Error(j.detail ?? "Validation failed")
+        // Server errors often carry no `detail` at all (a 500 isn't JSON), so
+        // fall back to the status rather than a bare "Validation failed" that
+        // gives the operator nothing to report.
+        const detail =
+          typeof j.detail === "string" ? j.detail : j.detail ? JSON.stringify(j.detail) : null
+        throw new Error(detail ?? `Validation failed (HTTP ${res.status})`)
       }
       onOpenChange(false)
       router.refresh()

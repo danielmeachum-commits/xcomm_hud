@@ -12,6 +12,7 @@ import type {
   EventTypeDef,
   Gateway,
   Me,
+  Personnel,
   Service,
   Site,
   Team,
@@ -42,6 +43,7 @@ interface Props {
   teams: Team[]
   units: Unit[]
   workCenters: WorkCenter[]
+  personnel: Personnel[]
 }
 
 /** Global events page body: widget row, Timeline | Table | Audit views. */
@@ -56,6 +58,7 @@ export function EventsPageClient({
   teams,
   units,
   workCenters,
+  personnel,
 }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -86,6 +89,7 @@ export function EventsPageClient({
     teams,
     units,
     workCenters,
+    personnel,
     workspace: me.current_workspace,
   }
 
@@ -137,6 +141,9 @@ export function EventsPageClient({
           me={me}
           events={events}
           eventTypes={eventTypes}
+          teams={teams}
+          workCenters={workCenters}
+          personnel={personnel}
           showHidden={showHidden}
         />
       )}

@@ -292,6 +292,7 @@ export function SiteDetailClient({
           teams={teams}
           units={units}
           workCenters={workCenters}
+          personnel={personnel}
         />
       )}
     </div>

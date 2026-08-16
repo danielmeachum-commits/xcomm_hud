@@ -25,6 +25,11 @@ import {
 } from "@/lib/event-type-labels"
 import { eventTypeIcon } from "@/lib/event-type-meta"
 import {
+  buildEventOrgIndex,
+  matchesOrgFilter,
+  orgFilterOptions,
+} from "@/lib/event-org-filter"
+import {
   SEVERITY_LABELS,
   SEVERITY_ORDER,
   severityDotClass,
@@ -40,8 +45,11 @@ import type {
   EventTypeDef,
   Fpcon,
   Me,
+  Personnel,
   Severity,
   SubjectKind,
+  Team,
+  WorkCenter,
 } from "@/lib/types"
 
 import { EventEditNoteDialog } from "./event-edit-note-dialog"
@@ -105,6 +113,10 @@ interface Props {
   me: Me
   events: Event[]
   eventTypes: EventTypeDef[]
+  teams: Team[]
+  workCenters: WorkCenter[]
+  /** Roster, for resolving which team / work center an event touches. */
+  personnel: Personnel[]
   /** Lock the timeline to one site (site detail tab) — hides the site filter. */
   siteId?: number
   pageSize?: number
@@ -120,6 +132,9 @@ export function EventTimeline({
   me,
   events: initialEvents,
   eventTypes,
+  teams,
+  workCenters,
+  personnel,
   siteId,
   pageSize = 100,
   showHidden = false,
@@ -145,6 +160,8 @@ export function EventTimeline({
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set())
   const [siteFilter, setSiteFilter] = useState<Set<string>>(new Set())
   const [scopeFilter, setScopeFilter] = useState<Set<string>>(new Set())
+  const [teamFilter, setTeamFilter] = useState<Set<string>>(new Set())
+  const [workCenterFilter, setWorkCenterFilter] = useState<Set<string>>(new Set())
 
   // Timeline scrub nav — which day/hour is currently at the top of the view.
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -206,6 +223,24 @@ export function EventTimeline({
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [all])
 
+  // Team / work-center reach — an event row has no org column, so membership
+  // comes off the roster. See lib/event-org-filter.
+  const orgIndex = useMemo(() => buildEventOrgIndex(personnel), [personnel])
+  const teamOptions: MultiSelectOption[] = useMemo(
+    () =>
+      orgFilterOptions(all, orgIndex.teamsFor, new Map(teams.map((t) => [t.id, t.name]))),
+    [all, orgIndex, teams],
+  )
+  const workCenterOptions: MultiSelectOption[] = useMemo(
+    () =>
+      orgFilterOptions(
+        all,
+        orgIndex.workCentersFor,
+        new Map(workCenters.map((w) => [w.id, w.name])),
+      ),
+    [all, orgIndex, workCenters],
+  )
+
   // Filter dimensions for the funnel bar + chips. Sites is dropped when the
   // timeline is already locked to one site.
   const filterBank: FilterBankItem[] = [
@@ -215,6 +250,14 @@ export function EventTimeline({
       ? [{ key: "site", label: "Sites", options: siteOptions, searchable: true, selected: siteFilter, onChange: setSiteFilter } as FilterBankItem]
       : []),
     { key: "scope", label: "Scope", options: scopeOptions, selected: scopeFilter, onChange: setScopeFilter },
+    // Only offered when the roster actually places someone — an empty funnel
+    // is worse than no funnel.
+    ...(teamOptions.length > 0
+      ? [{ key: "team", label: "Team", options: teamOptions, searchable: true, selected: teamFilter, onChange: setTeamFilter } as FilterBankItem]
+      : []),
+    ...(workCenterOptions.length > 0
+      ? [{ key: "work_center", label: "Work center", options: workCenterOptions, searchable: true, selected: workCenterFilter, onChange: setWorkCenterFilter } as FilterBankItem]
+      : []),
   ]
 
   // How many routine (log-class) records the timeline is hiding — surfaced
@@ -265,6 +308,9 @@ export function EventTimeline({
       )
         return false
       if (scopeFilter.size > 0 && !scopeFilter.has(v.subject_kind)) return false
+      if (!matchesOrgFilter(orgIndex.teamsFor(v), teamFilter)) return false
+      if (!matchesOrgFilter(orgIndex.workCentersFor(v), workCenterFilter))
+        return false
       if (q) {
         const hay = [v.subject_name, v.site_name, v.note, v.validated_by_username]
           .filter(Boolean)
@@ -274,7 +320,17 @@ export function EventTimeline({
       }
       return true
     })
-  }, [all, search, typeFilter, severityFilter, siteFilter, scopeFilter])
+  }, [
+    all,
+    search,
+    typeFilter,
+    severityFilter,
+    siteFilter,
+    scopeFilter,
+    teamFilter,
+    workCenterFilter,
+    orgIndex,
+  ])
 
   const groups = useMemo(() => {
     const out: { key: string; label: string; items: Event[] }[] = []

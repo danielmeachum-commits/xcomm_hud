@@ -97,6 +97,24 @@ export function formatDurationShort(
   return `${day}day${day === 1 ? "" : "s"}`
 }
 
+/** Elapsed time since `iso` as a running counter, e.g. "45s", "12m",
+ *  "4h 12m", "3d 4h". Unlike `timeAgo` this keeps the coarser unit's
+ *  remainder, because an outage clock reading "4h ago" for three hours
+ *  straight tells the watch floor nothing about how it's trending. */
+export function durationSince(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const start = new Date(iso).getTime()
+  if (!Number.isFinite(start)) return null
+  const sec = Math.floor(Math.max(0, Date.now() - start) / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return hr === 0 ? `${min}m` : `${hr}h ${min % 60}m`
+  const day = Math.floor(hr / 24)
+  return `${day}d ${hr % 24}h`
+}
+
 /** Short relative-ago, e.g. "3m ago", "2h ago", "yesterday". */
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "never"
