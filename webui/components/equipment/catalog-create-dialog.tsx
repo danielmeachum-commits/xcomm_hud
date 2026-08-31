@@ -29,6 +29,8 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   CAPABILITY_LABELS,
   EQUIPMENT_CATEGORY_LABELS,
+  UTC_ROLE_HINT_LABELS,
+  UTC_ROLE_HINT_VALUES,
 } from "@/lib/equipment-meta"
 import type {
   Enclave,
@@ -41,12 +43,6 @@ import { cn } from "@/lib/utils"
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-
-const ROLE_HINTS: { value: UtcRoleHint; label: string }[] = [
-  { value: "either", label: "Any role" },
-  { value: "primary", label: "Primary" },
-  { value: "extension", label: "Extension" },
-]
 
 export type CatalogKind = "types" | "utcs" | "packages"
 
@@ -453,9 +449,9 @@ export function CatalogCreateDialog({
                         )
                       }
                     >
-                      {ROLE_HINTS.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
+                      {UTC_ROLE_HINT_VALUES.map((r) => (
+                        <option key={r} value={r}>
+                          {UTC_ROLE_HINT_LABELS[r]}
                         </option>
                       ))}
                     </select>

@@ -27,6 +27,8 @@ import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import {
   CAPABILITY_LABELS,
   EQUIPMENT_CATEGORY_LABELS,
+  UTC_ROLE_HINT_LABELS,
+  UTC_ROLE_HINT_VALUES,
   equipmentIcon,
 } from "@/lib/equipment-meta"
 import type {
@@ -44,12 +46,6 @@ import { cn } from "@/lib/utils"
 export const CATEGORY_VALUES = Object.keys(
   EQUIPMENT_CATEGORY_LABELS,
 ) as EquipmentCategory[]
-
-const ROLE_HINT_LABELS: Record<UtcRoleHint, string> = {
-  primary: "Primary",
-  extension: "Extension",
-  either: "Any role",
-}
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -1213,9 +1209,9 @@ function PackageUtcEditor({
                   update(index, { role_hint: e.target.value as UtcRoleHint })
                 }
               >
-                {(Object.keys(ROLE_HINT_LABELS) as UtcRoleHint[]).map((h) => (
+                {UTC_ROLE_HINT_VALUES.map((h) => (
                   <option key={h} value={h}>
-                    {ROLE_HINT_LABELS[h]}
+                    {UTC_ROLE_HINT_LABELS[h]}
                   </option>
                 ))}
               </select>
@@ -1422,7 +1418,7 @@ export function PackageDefSheet({
                             </span>
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {ROLE_HINT_LABELS[u.role_hint]}
+                            {UTC_ROLE_HINT_LABELS[u.role_hint]}
                             {u.quantity > 1 ? ` ×${u.quantity}` : ""}
                           </span>
                         </li>

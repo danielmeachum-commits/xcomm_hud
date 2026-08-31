@@ -67,7 +67,12 @@ EquipmentStatusValue = Literal[
 EquipmentLinkKind = Literal["los", "satcom", "fiber", "cable", "wireless", "other"]
 EquipmentLinkDirection = Literal["bidirectional", "a_to_b"]
 UtcRole = Literal["primary", "extension", "independent"]
-UtcRoleHint = Literal["primary", "extension", "either"]
+# Beyond the two topology roles: `alternate` is a standby for the primary, and
+# `support` keeps the others alive rather than carrying traffic — HVAC,
+# PowerPro and the like. Both are hints on package membership only; neither has
+# a standing place on the RF topology, so both land as `independent` in
+# `UtcRole` when the package is deployed.
+UtcRoleHint = Literal["primary", "alternate", "extension", "support", "either"]
 CapabilityBindRole = Literal["endpoint", "transport"]
 # `reported` = a human owns the status; `derived` = the dependency chain
 # does, and the reported field goes read-only. Per delivery and per

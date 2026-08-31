@@ -3,7 +3,11 @@ import {
   Battery,
   Boxes,
   Cable,
+  CircleDashed,
+  CircleDot,
+  CornerDownRight,
   KeyRound,
+  LifeBuoy,
   Merge,
   Network,
   Package,
@@ -27,6 +31,7 @@ import type {
   EquipmentLinkKind,
   EquipmentStatus,
   UtcRole,
+  UtcRoleHint,
 } from "./types"
 
 export const EQUIPMENT_STATUS_VALUES: EquipmentStatus[] = [
@@ -146,6 +151,46 @@ export const LINK_KIND_DASH: Record<EquipmentLinkKind, string | undefined> = {
   fiber: undefined,
   cable: undefined,
   other: "4 4",
+}
+
+/** What a package says a UTC is *for*, as opposed to `UtcRole`, which is what a
+ *  deployed UTC turned out to be. Shared by the force-element list and the
+ *  package detail page so the two never drift apart. */
+export const UTC_ROLE_HINT_LABELS: Record<UtcRoleHint, string> = {
+  primary: "Primary",
+  alternate: "Alternate",
+  extension: "Extension",
+  support: "Support",
+  either: "Any role",
+}
+
+/** Every role-hint select offers these, in this order: primary and the standby
+ *  that would take its place, then the spur, then support, then the shrug. Shared so a new hint cannot be added to
+ *  one form and missed by the other three. */
+export const UTC_ROLE_HINT_VALUES: UtcRoleHint[] = [
+  "primary",
+  "alternate",
+  "extension",
+  "support",
+  "either",
+]
+
+/** The set reads as a topology, because that is what the roles are: a primary
+ *  is a node, an extension is something hanging off one — "takes signal off the
+ *  primary UTC over an RF shot", in the seed data's own words. CircleDot is the
+ *  node; CornerDownRight is the spur descending from it.
+ *
+ *  An alternate is the same node held in reserve, so it is the same circle
+ *  drawn dashed. Support sits off the topology entirely — HVAC and power keep
+ *  the node running without ever carrying its traffic — so LifeBuoy rather
+ *  than another node-and-edge glyph. `either` keeps the generic Boxes: the API's default
+ *  role_hint genuinely means "no particular position". */
+export const UTC_ROLE_HINT_ICONS: Record<UtcRoleHint, LucideIcon> = {
+  primary: CircleDot,
+  alternate: CircleDashed,
+  extension: CornerDownRight,
+  support: LifeBuoy,
+  either: Boxes,
 }
 
 export const UTC_ROLE_LABELS: Record<UtcRole, string> = {

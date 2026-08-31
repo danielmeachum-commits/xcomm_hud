@@ -1,13 +1,6 @@
 "use client"
 
-import {
-  ArrowRight,
-  Boxes,
-  CircleDot,
-  CornerDownRight,
-  Search,
-  type LucideIcon,
-} from "lucide-react"
+import { ArrowRight, Boxes, Search } from "lucide-react"
 import Link from "next/link"
 import { useMemo, useState } from "react"
 
@@ -37,30 +30,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
+import {
+  UTC_ROLE_HINT_ICONS,
+  UTC_ROLE_HINT_LABELS,
+} from "@/lib/equipment-meta"
 import type { PackageDef, UtcDef, UtcRoleHint } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/lib/workspace"
-
-const ROLE_LABELS: Record<UtcRoleHint, string> = {
-  primary: "Primary",
-  extension: "Extension",
-  either: "Any role",
-}
-
-/** The pair reads as a topology, because that is what the roles are: a primary
- *  is a node, an extension is something hanging off one — "takes signal off the
- *  primary UTC over an RF shot", in the seed data's own words. CircleDot is the
- *  node; CornerDownRight is the spur descending from it.
- *
- *  These replace the generic Boxes glyph every item used to carry. That icon
- *  was identical on every row and so said nothing; the role costs no space
- *  here because the slot was already being paid for. `either` keeps Boxes —
- *  the API's default role_hint genuinely means "no particular position". */
-const ROLE_ICONS: Record<UtcRoleHint, LucideIcon> = {
-  primary: CircleDot,
-  extension: CornerDownRight,
-  either: Boxes,
-}
 
 // ===================== derived shapes =====================
 
@@ -105,13 +81,11 @@ function buildUtcRow(
   }
 }
 
-// ===================== small presentational pieces =====================
-
 // ===================== the UTC item =====================
 
 function UtcItem({ utc }: { utc: UtcRow }) {
-  const RoleIcon = utc.role ? ROLE_ICONS[utc.role] : Boxes
-  const roleLabel = utc.role ? ROLE_LABELS[utc.role] : "UTC"
+  const RoleIcon = utc.role ? UTC_ROLE_HINT_ICONS[utc.role] : Boxes
+  const roleLabel = utc.role ? UTC_ROLE_HINT_LABELS[utc.role] : "UTC"
   return (
     <Item variant="muted" className="items-start" title={roleLabel}>
       <ItemMedia variant="icon">

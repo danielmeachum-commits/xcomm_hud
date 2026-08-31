@@ -158,10 +158,12 @@ function proposeCode(type: EquipmentType | undefined, serial: string): string {
 }
 
 /** A package definition says what each UTC is *for*; the deployment has to
- *  commit to a role. "Either" is a definition-level shrug, so it deploys as
- *  independent until the operator says otherwise. */
+ *  commit to a role. Only the two topology hints carry across. "Either" is a
+ *  definition-level shrug and "support" — HVAC, power — never sits on the RF
+ *  path at all, so both deploy as independent until the operator says
+ *  otherwise. */
 function roleFromHint(hint: UtcRoleHint): UtcRole {
-  return hint === "either" ? "independent" : hint
+  return hint === "primary" || hint === "extension" ? hint : "independent"
 }
 
 interface Props {

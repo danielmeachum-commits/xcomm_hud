@@ -783,7 +783,16 @@ export type StatusMode = "reported" | "derived"
 
 export type EquipmentLinkDirection = "bidirectional" | "a_to_b"
 export type UtcRole = "primary" | "extension" | "independent"
-export type UtcRoleHint = "primary" | "extension" | "either"
+/** Beyond the two topology roles: `alternate` is a standby for the primary,
+ *  and `support` keeps the others alive rather than carrying traffic — HVAC,
+ *  PowerPro and the like. Package membership only: neither has a standing place
+ *  on the RF topology, so both deploy as `independent`. */
+export type UtcRoleHint =
+  | "primary"
+  | "alternate"
+  | "extension"
+  | "support"
+  | "either"
 export type CapabilityBindRole = "endpoint" | "transport"
 export type CapabilitySource = "template" | "custom"
 
