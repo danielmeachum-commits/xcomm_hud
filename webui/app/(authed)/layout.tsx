@@ -31,7 +31,13 @@ export default async function AuthedLayout({
             initialCurrent={user.current_workspace}
             initialAll={user.workspaces}
           >
-            <SidebarProvider>
+            {/* The shell is exactly one viewport tall, which makes the
+                scroll pane below the real scroller. Without a definite height
+                here the wrapper's `min-h-svh` lets the whole shell grow and the
+                document scrolls instead — the pane's `overflow-auto` then never
+                fires, and anything inside it positioned `sticky` pins to a box
+                that is itself off-screen. */}
+            <SidebarProvider className="h-svh overflow-hidden">
               <AppSidebar user={user} sites={sites} />
               <SidebarInset>
                 <SiteHeader />
