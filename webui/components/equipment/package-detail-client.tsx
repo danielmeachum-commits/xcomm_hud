@@ -3,6 +3,7 @@
 import {
   DndContext,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
   KeyboardSensor,
   MeasuringStrategy,
@@ -30,7 +31,7 @@ import {
   X,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useId, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
 import { Button } from "@/components/ui/button"
@@ -47,10 +48,8 @@ import {
 import { Input } from "@/components/ui/input"
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemGroup,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
@@ -120,16 +119,29 @@ async function send(
 
 // ===================== UTC drafts =====================
 
+/** One unit of one UTC. A package that carries two of something is two of
+ *  these, not one row wearing a count: an operator reads a package as the list
+ *  of things it puts on the ground, and "×2" is a number to decode rather than
+ *  a thing to see. Quantity survives only at the edges — the API still stores
+ *  one row per (UTC, role) with a count — so `draftsOf` expands it on the way
+ *  in and `collapse` folds it back on the way out. */
 interface UtcDraft {
   /** Identity for React and for dnd-kit, stable across a reorder — the array
    *  index is not, and sorting by index makes the dragged row swap places with
-   *  its own ghost. Seeded from the membership row's id so the first render
-   *  matches on the server and the client. */
+   *  its own ghost. Seeded from the membership row's id plus which copy this
+   *  is, so the first render matches on the server and the client. */
   uid: string
   utc_def_id: number
-  quantity: number
   /** Which group the row currently sits in. No longer picked on the row: the
    *  group *is* the role, so this is set by where the row was dropped. */
+  role_hint: UtcRoleHint
+}
+
+/** One line as the API stores it — what `collapse` produces and `saveUtcs`
+ *  sends. */
+interface UtcLine {
+  utc_def_id: number
+  quantity: number
   role_hint: UtcRoleHint
 }
 
@@ -140,38 +152,69 @@ function sortedUtcs(def: PackageDef): PackageDefUtc[] {
 }
 
 function draftsOf(def: PackageDef): UtcDraft[] {
-  return sortedUtcs(def).map((u) => ({
-    uid: `u${u.id}`,
-    utc_def_id: u.utc_def_id,
-    quantity: u.quantity,
-    role_hint: u.role_hint,
-  }))
+  return sortedUtcs(def).flatMap((u) =>
+    repeat(u.quantity).map((i) => ({
+      uid: `u${u.id}#${i}`,
+      utc_def_id: u.utc_def_id,
+      role_hint: u.role_hint,
+    })),
+  )
+}
+
+/** `[0, 1, … n-1]`, and never empty: a stored quantity of zero would otherwise
+ *  make a membership row vanish from a list whose whole job is to show it. */
+function repeat(n: number): number[] {
+  return Array.from({ length: Math.max(1, n) }, (_, i) => i)
+}
+
+/** Fold the unit rows back into what the API stores: one line per (UTC, role)
+ *  carrying a count, so `uq_package_def_utc_role` stays satisfied however many
+ *  copies the operator laid out. A line takes its place in the sequence from
+ *  where its first copy sits. */
+function collapse(rows: UtcDraft[]): UtcLine[] {
+  const lines: UtcLine[] = []
+  const byPair = new Map<string, UtcLine>()
+  for (const r of rows) {
+    const key = `${r.utc_def_id}:${r.role_hint}`
+    const line = byPair.get(key)
+    if (line) {
+      line.quantity += 1
+      continue
+    }
+    const fresh = { utc_def_id: r.utc_def_id, quantity: 1, role_hint: r.role_hint }
+    byPair.set(key, fresh)
+    lines.push(fresh)
+  }
+  return lines
 }
 
 /** Order is part of the value: `PUT /package-defs/{id}/utcs` writes
  *  `display_order` from the array index, so moving a row is a real change with
  *  nothing else to show for it. Hence a joined sequence rather than a set
- *  comparison. `uid` is deliberately absent — it identifies a row to React, not
- *  to the API. */
+ *  comparison.
+ *
+ *  Taken over the collapsed lines rather than the rows, because that is what
+ *  actually gets written: dragging one of two identical copies past the other
+ *  rearranges the list without changing the package, and the Save button
+ *  should not light up for it. */
 function signature(rows: UtcDraft[]): string {
-  return rows
-    .map((r) => `${r.utc_def_id}:${r.quantity}:${r.role_hint}`)
+  return collapse(rows)
+    .map((l) => `${l.utc_def_id}:${l.quantity}:${l.role_hint}`)
     .join("|")
 }
 
 /** Pull a row out of the flat list and put it back under `role`, either in
  *  front of `overUid` or at the end of that group.
  *
- *  Dropping onto a role that already carries this UTC folds the two together
- *  and sums their quantities, rather than refusing the drop. Two rows for one
- *  UTC in one role were never distinct things — they were always a count — so
- *  the merge is what the operator meant, and it removes the only state that
- *  could ever have violated `uq_package_def_utc_role`.
+ *  Nothing merges any more. Dropping a UTC into a role that already carries it
+ *  used to fold the two together and sum their counts; now the copy *is* the
+ *  count, so the drop simply leaves two rows side by side and `collapse` is
+ *  what turns them back into a quantity at save time.
  *
  *  The list stays flat rather than becoming a map of groups: `display_order` is
  *  one sequence across the whole package, and rebuilding it from five buckets
  *  every save would invent an ordering the operator never chose. */
-function moveOrMerge(
+function move(
   rows: UtcDraft[],
   activeUid: string,
   role: UtcRoleHint,
@@ -180,16 +223,6 @@ function moveOrMerge(
   const active = rows.find((r) => r.uid === activeUid)
   if (!active) return rows
   const rest = rows.filter((r) => r.uid !== activeUid)
-
-  const twin = rest.find(
-    (r) => r.role_hint === role && r.utc_def_id === active.utc_def_id,
-  )
-  if (twin) {
-    return rest.map((r) =>
-      r.uid === twin.uid ? { ...r, quantity: r.quantity + active.quantity } : r,
-    )
-  }
-
   const moved = { ...active, role_hint: role }
   if (overUid) {
     const at = rest.findIndex((r) => r.uid === overUid)
@@ -234,6 +267,12 @@ export function PackageDetailClient({
   const [editingUtcs, setEditingUtcs] = useState(false)
   const [rows, setRows] = useState<UtcDraft[]>(() => draftsOf(def))
   const [dragging, setDragging] = useState<string | null>(null)
+  /** The list as it stood when the drag began. A drag now rearranges `rows`
+   *  live, so Escape has to have something to put back.
+   *
+   *  A ref rather than state: nothing renders from it, and writing it should
+   *  not cost a render in the middle of a drag. */
+  const beforeDrag = useRef<UtcDraft[] | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -265,33 +304,19 @@ export function PackageDetailClient({
     const out = new Map<number, Map<UtcRoleHint, number>>()
     for (const r of rows) {
       const byRole = out.get(r.utc_def_id) ?? new Map<UtcRoleHint, number>()
-      byRole.set(r.role_hint, (byRole.get(r.role_hint) ?? 0) + r.quantity)
+      byRole.set(r.role_hint, (byRole.get(r.role_hint) ?? 0) + 1)
       out.set(r.utc_def_id, byRole)
     }
     return out
   }, [rows])
 
-  /** Adding a UTC to a role it is already in raises that row's quantity rather
-   *  than making a second row — the same merge a drag does. */
+  /** Adding a UTC to a role it is already in makes a second row, which is what
+   *  two of something looks like everywhere else on the page. */
   function addUtc(utc: UtcDef, role: UtcRoleHint) {
-    const twin = rows.find(
-      (r) => r.utc_def_id === utc.id && r.role_hint === role,
-    )
-    setRows(
-      twin
-        ? rows.map((r) =>
-            r.uid === twin.uid ? { ...r, quantity: r.quantity + 1 } : r,
-          )
-        : [
-            ...rows,
-            {
-              uid: `new${++addedRows}`,
-              utc_def_id: utc.id,
-              quantity: 1,
-              role_hint: role,
-            },
-          ],
-    )
+    setRows([
+      ...rows,
+      { uid: `new${++addedRows}`, utc_def_id: utc.id, role_hint: role },
+    ])
   }
 
   /** Enter saves, Escape cancels, from anywhere in edit mode.
@@ -313,6 +338,11 @@ export function PackageDetailClient({
         return
       }
       if (e.key === "Escape") {
+        // Mid-drag, Escape belongs to the drag: dnd-kit cancels it and
+        // `handleDragCancel` puts the list back where it was. Tearing down the
+        // whole edit — every other change in it included — is a wild
+        // overreaction to backing out of one drag.
+        if (dragging) return
         e.preventDefault()
         cancelUtcs()
       } else if (e.key === "Enter" && dirty && !pending) {
@@ -320,8 +350,13 @@ export function PackageDetailClient({
         saveUtcs()
       }
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    // Capture, so this sees Escape before dnd-kit does. In the bubble phase it
+    // does not: dnd-kit cancels the drag on the way up, React flushes that
+    // re-render before the event reaches the window, and the listener the
+    // render re-registered then reads `dragging` as already null — so an
+    // Escape meant for the drag would tear down the whole edit.
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
   })
 
   function startEditingUtcs() {
@@ -337,29 +372,67 @@ export function PackageDetailClient({
   }
 
   function handleDragStart({ active }: DragStartEvent) {
+    beforeDrag.current = rows
     setDragging(String(active.id))
+  }
+
+  /** Which role the pointer is over — the group itself when it is over the
+   *  group's own padding, otherwise the role of the row under it. */
+  function roleUnder(overId: string): UtcRoleHint | undefined {
+    return overId.startsWith(GROUP)
+      ? (overId.slice(GROUP.length) as UtcRoleHint)
+      : rows.find((r) => r.uid === overId)?.role_hint
+  }
+
+  /** Crossing into another role moves the row *now*, while the pointer is still
+   *  down.
+   *
+   *  dnd-kit reflows a list by itself only within one SortableContext, and each
+   *  role group is its own — so with the move left until drag end, dragging
+   *  between groups showed nothing at all until the drop, and the row appeared
+   *  to teleport at the one moment it was too late to change your mind.
+   *
+   *  Reordering inside a role still needs nothing here: that is the case
+   *  dnd-kit already previews. */
+  function handleDragOver({ active, over }: DragOverEvent) {
+    if (!over) return
+    const activeUid = String(active.id)
+    const overId = String(over.id)
+    if (activeUid === overId) return
+    const row = rows.find((r) => r.uid === activeUid)
+    if (!row) return
+    const target = roleUnder(overId)
+    if (!target || target === row.role_hint) return
+    setRows(
+      move(rows, activeUid, target, overId.startsWith(GROUP) ? null : overId),
+    )
   }
 
   function handleDragEnd({ active, over }: DragEndEvent) {
     setDragging(null)
+    beforeDrag.current = null
     if (!over) return
-    const row = rows.find((r) => r.uid === active.id)
-    if (!row) return
-
+    const activeUid = String(active.id)
     const overId = String(over.id)
-    const target = overId.startsWith(GROUP)
-      ? (overId.slice(GROUP.length) as UtcRoleHint)
-      : rows.find((r) => r.uid === overId)?.role_hint
+    if (activeUid === overId) return
+    const row = rows.find((r) => r.uid === activeUid)
+    if (!row) return
+    const target = roleUnder(overId)
     if (!target) return
 
+    // Usually a no-op by now — the row crossed into this group during the drag
+    // — but it is what settles its final position inside it.
     setRows(
-      moveOrMerge(
-        rows,
-        row.uid,
-        target,
-        overId.startsWith(GROUP) ? null : overId,
-      ),
+      move(rows, activeUid, target, overId.startsWith(GROUP) ? null : overId),
     )
+  }
+
+  /** Escape mid-drag puts the list back as it was, since the drag has been
+   *  rearranging it the whole way across. */
+  function handleDragCancel() {
+    setDragging(null)
+    if (beforeDrag.current) setRows(beforeDrag.current)
+    beforeDrag.current = null
   }
 
   async function saveUtcs() {
@@ -368,11 +441,7 @@ export function PackageDetailClient({
     const err = await send(
       "PUT",
       `/api/be/package-defs/${def.id}/utcs`,
-      rows.map((r) => ({
-        utc_def_id: r.utc_def_id,
-        quantity: r.quantity,
-        role_hint: r.role_hint,
-      })),
+      collapse(rows),
     )
     setPending(false)
     if (err) {
@@ -441,8 +510,9 @@ export function PackageDetailClient({
               measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
               modifiers={[restrictToVerticalAxis]}
               onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
-              onDragCancel={() => setDragging(null)}
+              onDragCancel={handleDragCancel}
             >
               <div className="flex flex-col gap-3">
                 {UTC_ROLE_HINT_VALUES.map((r) => (
@@ -453,13 +523,6 @@ export function PackageDetailClient({
                     utcById={utcById}
                     dragging={draggingRow !== null}
                     disabled={pending}
-                    onQuantity={(uid, quantity) =>
-                      setRows(
-                        rows.map((row) =>
-                          row.uid === uid ? { ...row, quantity } : row,
-                        ),
-                      )
-                    }
                     onRemove={(uid) =>
                       setRows(rows.filter((row) => row.uid !== uid))
                     }
@@ -521,46 +584,60 @@ export function PackageDetailClient({
             No UTCs — this package definition is empty.
           </p>
         ) : (
-          /* Name, code, role, count and nothing else. What a UTC is made of
-             lives in the equipment catalog; repeating it here buries the one
-             thing this page is for, which is the shape of the package. */
-          <ItemGroup>
-            {links.map((link) => {
-              const utc = utcById.get(link.utc_def_id)
-              const RoleIcon = UTC_ROLE_HINT_ICONS[link.role_hint]
-              const roleLabel = UTC_ROLE_HINT_LABELS[link.role_hint]
+          /* Role is a heading, not a badge on the row. It is the one thing
+             every row in a group shares, and saying it once above them is what
+             makes the page read as the shape of the package rather than as a
+             list of UTCs that each happen to carry a role. Read mode groups
+             exactly the way manage mode does, so nothing jumps when you cross
+             between them.
+
+             Name, code and nothing else on a row. What a UTC is made of lives
+             in the equipment catalog; repeating it here buries the one thing
+             this page is for. */
+          <div className="flex flex-col gap-4">
+            {UTC_ROLE_HINT_VALUES.map((role) => {
+              const inRole = links.filter((l) => l.role_hint === role)
+              if (inRole.length === 0) return null
+              const RoleIcon = UTC_ROLE_HINT_ICONS[role]
               return (
-                <Item key={link.id} variant="muted" size="sm">
-                  <ItemMedia variant="icon">
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={<span className="flex items-center" />}
-                      >
-                        <RoleIcon className="text-foreground" />
-                        <span className="sr-only">{roleLabel}</span>
-                      </TooltipTrigger>
-                      <TooltipContent>{roleLabel}</TooltipContent>
-                    </Tooltip>
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle className="flex-wrap gap-2">
-                      <span>
-                        {utc?.name ?? link.utc_def_name ?? "Unknown UTC"}
-                      </span>
-                      <CodeBadge code={utc?.code ?? link.utc_def_code ?? "—"} />
-                    </ItemTitle>
-                  </ItemContent>
-                  {link.quantity > 1 && (
-                    <ItemActions>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        ×{link.quantity}
-                      </span>
-                    </ItemActions>
-                  )}
-                </Item>
+                <div key={role} className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <RoleIcon className="size-4 text-muted-foreground" />
+                    <h3 className="text-sm font-medium">
+                      {UTC_ROLE_HINT_LABELS[role]}
+                    </h3>
+                  </div>
+                  <ItemGroup>
+                    {/* Two of a UTC is two rows. A count beside one row was a
+                        number to decode; the second row is the thing itself. */}
+                    {inRole.flatMap((link) => {
+                      const utc = utcById.get(link.utc_def_id)
+                      return repeat(link.quantity).map((i) => (
+                        <Item
+                          key={`${link.id}#${i}`}
+                          variant="muted"
+                          size="sm"
+                        >
+                          <ItemContent>
+                            <ItemTitle className="flex-wrap gap-2">
+                              <span>
+                                {utc?.name ??
+                                  link.utc_def_name ??
+                                  "Unknown UTC"}
+                              </span>
+                              <CodeBadge
+                                code={utc?.code ?? link.utc_def_code ?? "—"}
+                              />
+                            </ItemTitle>
+                          </ItemContent>
+                        </Item>
+                      ))
+                    })}
+                  </ItemGroup>
+                </div>
               )
             })}
-          </ItemGroup>
+          </div>
         )}
       </section>
 
@@ -598,7 +675,6 @@ function RoleGroup({
   utcById,
   dragging,
   disabled,
-  onQuantity,
   onRemove,
 }: {
   role: UtcRoleHint
@@ -606,7 +682,6 @@ function RoleGroup({
   utcById: Map<number, UtcDef>
   dragging: boolean
   disabled: boolean
-  onQuantity: (uid: string, quantity: number) => void
   onRemove: (uid: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${GROUP}${role}` })
@@ -642,7 +717,6 @@ function RoleGroup({
               row={row}
               utc={utcById.get(row.utc_def_id) ?? null}
               disabled={disabled}
-              onQuantity={(q) => onQuantity(row.uid, q)}
               onRemove={() => onRemove(row.uid)}
             />
           ))
@@ -654,24 +728,26 @@ function RoleGroup({
 
 // ===================== one editable row =====================
 
-/** With the role carried by the group, a row is down to what it is and how many
- *  — so it reads almost exactly like the read-mode item it replaces, rather
- *  than like a form. Remove keeps its own full-height rail: nothing wraps
- *  around the one control on the row that destroys something. */
+/** With the role carried by the group and the count carried by the number of
+ *  rows, a row is down to what it is — so it reads exactly like the read-mode
+ *  item it replaces, rather than like a form. Remove keeps its own full-height
+ *  rail: nothing wraps around the one control on the row that destroys
+ *  something.
+ *
+ *  Removing takes away one copy, because a row *is* one copy. Two of a UTC
+ *  therefore takes two clicks to clear, which is the honest price of never
+ *  making the operator edit a number to change what the package carries. */
 function UtcEditorRow({
   row,
   utc,
   disabled,
-  onQuantity,
   onRemove,
 }: {
   row: UtcDraft
   utc: UtcDef | null
   disabled: boolean
-  onQuantity: (quantity: number) => void
   onRemove: () => void
 }) {
-  const id = useId()
   const {
     attributes,
     listeners,
@@ -711,21 +787,6 @@ function UtcEditorRow({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {utc && <CodeBadge code={utc.code} />}
         <span className="truncate text-sm">{utc?.name ?? "Unknown UTC"}</span>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1.5">
-        <Label htmlFor={`${id}-qty`} className="text-xs font-normal">
-          Quantity
-        </Label>
-        <Input
-          id={`${id}-qty`}
-          type="number"
-          min={1}
-          disabled={disabled}
-          value={row.quantity}
-          onChange={(e) => onQuantity(Math.max(1, Number(e.target.value) || 1))}
-          className="h-8 w-14 px-2"
-        />
       </div>
 
       <div className="flex shrink-0 items-center self-stretch border-l border-border pl-1.5">
@@ -872,10 +933,11 @@ function AddUtcPopover({
                     >
                       <Icon />
                       <span>{UTC_ROLE_HINT_LABELS[r]}</span>
-                      {/* What it already carries, so picking it again reads as
-                          ×1 → ×2 rather than as a duplicate. */}
+                      {/* How many rows the role already holds, so picking it
+                          again reads as one more of the same rather than as a
+                          duplicate. */}
                       {held > 0 && (
-                        <CommandShortcut>{`×${held} → ×${held + 1}`}</CommandShortcut>
+                        <CommandShortcut>{`${held} → ${held + 1}`}</CommandShortcut>
                       )}
                     </CommandItem>
                   )
