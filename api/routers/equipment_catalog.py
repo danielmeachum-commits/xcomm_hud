@@ -588,6 +588,23 @@ def replace_package_def_utcs(
 ):
     row = _load_package_def(db, package_def_id, workspace)
     _require_write(row.workspace_id, current_user)
+
+    # A package may carry the same UTC in two roles — a primary and the
+    # alternate standing by for it — but the same UTC in the same role twice is
+    # a quantity of two, not a second row. `uq_package_def_utc_role` enforces
+    # that; catching it here turns an IntegrityError 500 into something a form
+    # can put next to the offending field.
+    seen: set[tuple[int, str]] = set()
+    for utc in body:
+        pair = (int(utc["utc_def_id"]), utc.get("role_hint", "either"))
+        if pair in seen:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The same UTC is listed twice in the same role — raise its "
+                "quantity instead.",
+            )
+        seen.add(pair)
+
     db.query(PackageDefUtc).filter(PackageDefUtc.package_def_id == row.id).delete(
         synchronize_session=False
     )

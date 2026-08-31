@@ -1847,9 +1847,16 @@ class PackageDefUtc(Base):
     """Which UTCs a package definition is built from, and in what role."""
 
     __tablename__ = "package_def_utc"
+    # Per role, not per UTC: a package can carry the same UTC definition as its
+    # primary and again as the alternate standing by to replace it. The same
+    # UTC in the *same* role twice is not a second row, it is a quantity of
+    # two — which is what this still rejects.
     __table_args__ = (
         UniqueConstraint(
-            "package_def_id", "utc_def_id", name="uq_package_def_utc_pair"
+            "package_def_id",
+            "utc_def_id",
+            "role_hint",
+            name="uq_package_def_utc_role",
         ),
     )
 
