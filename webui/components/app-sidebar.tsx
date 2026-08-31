@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import {
   Bell,
+  Blocks,
   BookOpen,
   Boxes,
   ChevronRight,
@@ -85,6 +86,10 @@ const WORKSPACE_ADMIN_ITEMS = [
   { path: "/settings/event-types", label: "Event types", icon: Shapes },
   { path: "/settings/rules", label: "Rules", icon: Workflow },
   { path: "/admin/gateways", label: "Gateways", icon: Network },
+  // Force elements is the structure view: which packages exist and which UTCs
+  // each carries. The catalog page is the flat view of the same rows and still
+  // the only place to edit gear. Adjacent on purpose.
+  { path: "/admin/force-elements", label: "Force elements", icon: Blocks },
   { path: "/admin/equipment-catalog", label: "Equipment catalog", icon: Boxes },
   // The catalog says what a TACLANE is; the property book says which ones we
   // own. Adjacent on purpose.

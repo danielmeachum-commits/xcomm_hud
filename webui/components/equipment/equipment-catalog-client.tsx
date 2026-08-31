@@ -6,12 +6,12 @@ import { useMemo, useState } from "react"
 import { CatalogCreateDialog } from "@/components/equipment/catalog-create-dialog"
 import {
   CATEGORY_VALUES,
-  CodeBadge,
   EquipmentTypeSheet,
   PackageDefSheet,
   UtcDefSheet,
   aggregateCapabilities,
 } from "@/components/equipment/catalog-detail-sheets"
+import { CodeBadge } from "@/components/equipment/code-badge"
 import { Input } from "@/components/ui/input"
 import {
   Table,

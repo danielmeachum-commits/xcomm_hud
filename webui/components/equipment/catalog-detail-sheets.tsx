@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
+import { CodeBadge } from "@/components/equipment/code-badge"
 import { TagsInput } from "@/components/equipment/tags-input"
 import {
   UtcLineEditor,
@@ -70,27 +71,6 @@ async function send(
 
 const patch = (url: string, body: unknown) => send("PATCH", url, body)
 const put = (url: string, body: unknown) => send("PUT", url, body)
-
-/** Code pill for a UTC or package. Mirrors the transport-badge shape so codes
- *  read as identifiers rather than prose. */
-export function CodeBadge({
-  code,
-  className,
-}: {
-  code: string
-  className?: string
-}) {
-  return (
-    <span
-      className={
-        "inline-flex items-center rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-bold uppercase tracking-wider text-foreground ring-1 ring-inset ring-border " +
-        (className ?? "")
-      }
-    >
-      {code}
-    </span>
-  )
-}
 
 function Field({
   label,
