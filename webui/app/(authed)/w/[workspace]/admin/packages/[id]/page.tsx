@@ -36,10 +36,7 @@ export default async function PackageDetailPage({
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
         items={[
-          {
-            label: "Force element templates",
-            href: w("/admin/force-element-templates"),
-          },
+          { label: "Packages", href: w("/admin/packages") },
           { label: def.code },
         ]}
       />

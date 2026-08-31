@@ -93,6 +93,12 @@ export const EQUIPMENT_SUBCATEGORY_LABELS: Record<EquipmentSubcategory, string> 
   other: "Other",
 }
 
+/** Subcategories in table order — the order they were declared above, which
+ *  runs from the gear that carries traffic to the gear that supports it. */
+export const EQUIPMENT_SUBCATEGORY_VALUES = Object.keys(
+  EQUIPMENT_SUBCATEGORY_LABELS,
+) as EquipmentSubcategory[]
+
 export const CAPABILITY_ICONS: Record<CapabilityKind, LucideIcon> = {
   voice: Phone,
   data: Waypoints,

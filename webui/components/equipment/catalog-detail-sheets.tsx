@@ -24,6 +24,7 @@ import {
   ASSET_CATEGORY_LABELS,
   ASSET_CATEGORY_VALUES,
   EQUIPMENT_SUBCATEGORY_LABELS,
+  EQUIPMENT_SUBCATEGORY_VALUES,
   UTC_ROLE_HINT_LABELS,
   UTC_ROLE_HINT_VALUES,
   equipmentIcon,
@@ -42,9 +43,10 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-export const CATEGORY_VALUES = Object.keys(
-  EQUIPMENT_SUBCATEGORY_LABELS,
-) as EquipmentSubcategory[]
+/** Kept as a re-export under its old name: the sheets and the create dialog
+ *  have called it this since before `AssetCategory` existed. */
+export const CATEGORY_VALUES: EquipmentSubcategory[] =
+  EQUIPMENT_SUBCATEGORY_VALUES
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"

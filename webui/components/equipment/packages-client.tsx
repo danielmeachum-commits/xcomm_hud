@@ -62,8 +62,8 @@ interface PackageCard {
 /** This page answers one question: which packages exist, and which UTCs does
  *  each carry in which role. What a UTC is *made of* — its enclaves, its
  *  equipment types, what they can do — is a different question with a different
- *  answer, so nothing here reads `def.lines`. The equipment catalog holds that
- *  view, and duplicating it here only made the force structure harder to see. */
+ *  answer, so nothing here reads `def.lines`. The UTCs page holds that view,
+ *  and duplicating it here only made the force structure harder to see. */
 function buildUtcRow(
   key: string,
   def: UtcDef,
@@ -98,9 +98,9 @@ function UtcItem({ utc }: { utc: UtcRow }) {
       <ItemContent>
         <ItemTitle className="flex-wrap gap-2">
           {/* The name is the way in to what the UTC is made of, which lives on
-              the catalog's definition page rather than here. */}
+              the UTC's own definition page rather than here. */}
           <Link
-            href={w(`/admin/equipment-catalog/utc/${utc.def.id}`)}
+            href={w(`/admin/utcs/${utc.def.id}`)}
             className="hover:underline"
           >
             {utc.def.name}
@@ -131,7 +131,7 @@ interface Props {
   packageDefs: PackageDef[]
 }
 
-export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
+export function PackagesClient({ utcDefs, packageDefs }: Props) {
   const { w } = useWorkspace()
   const [query, setQuery] = useState("")
 
@@ -165,9 +165,9 @@ export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
     [packageDefs, utcById],
   )
 
-  /** UTC definitions no package composes. They exist, they cost money, and the
-   *  old catalog's flat table was the only place they showed up — dropping them
-   *  here would make a real row invisible. */
+  /** UTC definitions no package composes. They exist, they cost money, and a
+   *  page about force structure that silently omitted them would read as if
+   *  every UTC were spoken for. */
   const orphans: UtcRow[] = useMemo(() => {
     const used = new Set(
       packageDefs.flatMap((p) => p.utcs.map((u) => u.utc_def_id)),
@@ -214,7 +214,7 @@ export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search package or UTC…"
           className="pl-8"
-          aria-label="Search force element templates"
+          aria-label="Search packages"
         />
       </div>
 
@@ -301,7 +301,7 @@ export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
                 assistive tech. buttonVariants gives the same styling on an
                 honest <a>. */}
             <Link
-              href={w(`/admin/force-element-templates/${c.def.id}`)}
+              href={w(`/admin/packages/${c.def.id}`)}
               className={cn(
                 buttonVariants({ variant: "outline" }),
                 "w-full",
@@ -323,8 +323,8 @@ export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
             <span className="h-px flex-1 bg-border" />
           </div>
           {/* One card each, same shape as a package card: a UTC that no package
-              composes is still a force element template in its own right, not
-              a footnote to the ones that are. */}
+              composes is still a deployable template in its own right, not a
+              footnote to the ones that are. */}
           {visibleOrphans.map((u) => (
             <Card
               key={u.key}
@@ -333,7 +333,7 @@ export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
               <CardHeader>
                 <CardTitle className="flex flex-wrap items-center gap-2">
                   <Link
-                    href={w(`/admin/equipment-catalog/utc/${u.def.id}`)}
+                    href={w(`/admin/utcs/${u.def.id}`)}
                     className="hover:underline"
                   >
                     {u.def.name}

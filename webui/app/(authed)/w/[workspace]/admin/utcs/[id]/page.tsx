@@ -12,11 +12,7 @@ import type { Enclave, EquipmentType, UtcDef } from "@/lib/types"
  *  `GET /utc-defs/{id}` — so this finds the row in the collection it already
  *  has to trust for visibility rules. Cheap: the catalog is small, and
  *  filtering here keeps the same global-plus-workspace scoping the list has.
- *  Same shape as the package detail page next door.
- *
- *  Under the catalog rather than under force element templates: a UTC
- *  definition is a catalog row, and an HVAC set has no business hanging off a
- *  page about force structure. */
+ *  Same shape as the package detail page next door. */
 export default async function UtcDefDetailPage({
   params,
 }: {
@@ -48,7 +44,7 @@ export default async function UtcDefDetailPage({
     <div className="flex h-full min-w-0 flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
         items={[
-          { label: "Equipment catalog", href: w("/admin/equipment-catalog") },
+          { label: "UTCs", href: w("/admin/utcs") },
           { label: def.code },
         ]}
       />

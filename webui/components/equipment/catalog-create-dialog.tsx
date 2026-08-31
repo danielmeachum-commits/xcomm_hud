@@ -120,14 +120,16 @@ function QuantityRow({
  *  at. */
 export function CatalogCreateDialog({
   kind,
-  types,
-  utcDefs,
+  // Only some kinds need the other collections — a UTC picks equipment types,
+  // a package picks UTCs — so each page passes what its own kind draws on.
+  types = [],
+  utcDefs = [],
   enclaves = [],
   isAdmin,
 }: {
   kind: CatalogKind
-  types: EquipmentType[]
-  utcDefs: UtcDef[]
+  types?: EquipmentType[]
+  utcDefs?: UtcDef[]
   enclaves?: Enclave[]
   isAdmin: boolean
 }) {

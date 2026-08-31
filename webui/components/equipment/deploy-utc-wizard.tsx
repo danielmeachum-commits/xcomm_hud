@@ -1375,7 +1375,7 @@ export function DeployUtcWizard({
               {defEnclaves.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
                   {current.utcDefId
-                    ? "No line in this UTC is tagged with an enclave, so there is nothing to leave home. Tag the UTC definition's lines in the equipment catalog to use this step."
+                    ? "No line in this UTC is tagged with an enclave, so there is nothing to leave home. Tag the UTC definition's lines under Admin → Templates → UTCs to use this step."
                     : "No enclaves are defined yet — add them under Admin → Enclaves."}
                 </p>
               ) : (

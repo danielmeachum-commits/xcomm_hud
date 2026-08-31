@@ -77,7 +77,7 @@ export function UtcDefPeekSheet({
               {/* A real anchor, not a Button with a click handler: this
                   navigates, so middle-click and open-in-new-tab have to work. */}
               <Link
-                href={w(`/admin/equipment-catalog/utc/${def.id}`)}
+                href={w(`/admin/utcs/${def.id}`)}
                 className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
               >
                 Open definition

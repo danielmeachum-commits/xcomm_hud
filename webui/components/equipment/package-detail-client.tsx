@@ -600,7 +600,7 @@ export function PackageDetailClient({
              between them.
 
              Name, code and nothing else on a row. What a UTC is made of lives
-             in the equipment catalog; repeating it here buries the one thing
+             on its own definition page; repeating it here buries the one thing
              this page is for. */
           <div className="flex flex-col gap-4">
             {UTC_ROLE_HINT_VALUES.map((role) => {
@@ -1052,7 +1052,7 @@ function PropertiesSheet({
         <SheetHeader>
           <SheetTitle>Edit package</SheetTitle>
           <SheetDescription>
-            How this force element template is named and described.
+            How this package is named and described.
           </SheetDescription>
         </SheetHeader>
 

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
  *  read as identifiers rather than prose.
  *
  *  Its own module rather than living in `catalog-detail-sheets`: the read-only
- *  Force Element Templates page wants the badge and nothing else, and
+ *  Packages page wants the badge and nothing else, and
  *  importing it from there would drag every sheet, editor and write path along
  *  with it.
  *
