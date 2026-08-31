@@ -307,7 +307,12 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        // `min-w-0`: this is a flex item, and flex items default to
+        // `min-width: auto`, which means the widest thing inside — a table
+        // with nowrap cells, say — pushes the whole pane past its share of
+        // the row. The shell above is `overflow-hidden`, so the excess is not
+        // scrolled to, it is cut off with the page header carried out of view.
+        "relative flex w-full min-w-0 flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}
@@ -362,7 +367,15 @@ function SidebarSeparator({
     <Separator
       data-slot="sidebar-separator"
       data-sidebar="separator"
-      className={cn("mx-2 w-auto bg-sidebar-border", className)}
+      // `data-horizontal:w-auto` rather than the plain `w-auto` alone:
+      // Separator's own `data-horizontal:w-full` carries an attribute
+      // selector, so it outranks it — and 100% of the padding box plus
+      // `mx-2` overflowed the sidebar by 16px, which is a horizontal
+      // scrollbar now that the pane's bars are visible.
+      className={cn(
+        "mx-2 w-auto data-horizontal:w-auto bg-sidebar-border",
+        className
+      )}
       {...props}
     />
   )
@@ -374,7 +387,14 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        "no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-auto [--radius:var(--radius-xl)] group-data-[collapsible=icon]:overflow-hidden",
+        // A thin scrollbar rather than shadcn's `no-scrollbar`: hiding it is
+        // honest only while the nav fits, and this one does not on a laptop
+        // with the Admin group open. Rows cut off with no bar in sight read
+        // as "those items don't exist" — the pane scrolls either way, so the
+        // only thing hiding it removed was the evidence.
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto [--radius:var(--radius-xl)] group-data-[collapsible=icon]:overflow-hidden",
+        "[scrollbar-width:thin] [scrollbar-color:var(--sidebar-border)_transparent]",
+        "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border [&::-webkit-scrollbar-track]:bg-transparent",
         className
       )}
       {...props}

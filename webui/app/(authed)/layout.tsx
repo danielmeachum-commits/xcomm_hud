@@ -41,7 +41,10 @@ export default async function AuthedLayout({
               <AppSidebar user={user} sites={sites} />
               <SidebarInset>
                 <SiteHeader />
-                <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+                {/* `min-w-0` for the same reason as `min-h-0`: without it a
+                    wide child sets this column's width and the pane grows
+                    instead of scrolling. */}
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
                   {children}
                 </div>
               </SidebarInset>
