@@ -198,7 +198,7 @@ function EquipmentRow({
   equipment: Equipment
   href: string
 }) {
-  const Icon = equipmentIcon(equipment.type_category)
+  const Icon = equipmentIcon(equipment.type_subcategory)
   const rollup = equipmentRollup(equipment)
   return (
     <li

@@ -737,7 +737,10 @@ export interface ApiError {
 
 // ===================== Equipment tier =====================
 
-export type EquipmentCategory =
+/** The SUB-category: what kind of box it is, under the `AssetCategory` that
+ *  says what world it belongs to. `environmental` arrived when the app started
+ *  tracking the HVAC that keeps the comm gear alive. */
+export type EquipmentSubcategory =
   | "radio"
   | "satcom"
   | "crypto"
@@ -746,6 +749,7 @@ export type EquipmentCategory =
   | "power"
   | "antenna"
   | "cable"
+  | "environmental"
   | "other"
 
 export type CapabilityKind =
@@ -793,6 +797,16 @@ export type UtcRoleHint =
   | "extension"
   | "support"
   | "either"
+/** What a thing IS, at the coarsest level that matters — shared by UTCs and
+ *  equipment types so the two can be filtered against the same vocabulary.
+ *
+ *  On a UTC it also decides layout: only `comm` divides its bill of materials
+ *  by enclave, since an HVAC or power set has no network to divide along.
+ *
+ *  Not the same fact as `UtcRoleHint`'s `support`, which is per-package
+ *  membership. And one level ABOVE `EquipmentSubcategory`: a TACLANE is
+ *  `comm`/`crypto`, an ECU is `environmental`/`environmental`. */
+export type AssetCategory = "comm" | "power" | "environmental" | "other"
 export type CapabilityBindRole = "endpoint" | "transport"
 export type CapabilitySource = "template" | "custom"
 
@@ -854,7 +868,10 @@ export interface EquipmentType {
   tags: string[]
   nsn: string | null
   lin: string | null
-  category: EquipmentCategory
+  /** The coarse level, shared with `UtcDef.category`. */
+  category: AssetCategory
+  /** What kind of box it is, under `category`. */
+  subcategory: EquipmentSubcategory
   serialized: boolean
   id_prefix: string
   manufacturer: string | null
@@ -867,7 +884,19 @@ export interface EquipmentType {
    *  "capable of nothing" — a type whose catalog entry hasn't been filled in
    *  must not block assignments. */
   enclave_ids: number[]
+  /** Which work centers answer for this kind of gear. Usually one, flagged
+   *  primary, but a type can be shared between shops. Workspace-scoped even
+   *  for a global catalog row — see `EquipmentTypeWorkCenter` in the API. */
+  work_centers: EquipmentTypeWorkCenter[]
   is_global: boolean
+}
+
+export interface EquipmentTypeWorkCenter {
+  id: number
+  equipment_type_id: number
+  work_center_id: number
+  is_primary: boolean
+  work_center_name: string | null
 }
 
 export interface UtcDefLine {
@@ -890,6 +919,7 @@ export interface UtcDef {
   code: string
   name: string
   description: string | null
+  category: AssetCategory
   retired_at: string | null
   lines: UtcDefLine[]
   is_global: boolean
@@ -1047,7 +1077,8 @@ export interface Equipment {
   notes: string | null
   type_title: string | null
   type_short_name: string | null
-  type_category: EquipmentCategory | null
+  type_category: AssetCategory | null
+  type_subcategory: EquipmentSubcategory | null
   nsn: string | null
   site_name: string | null
   utc_name: string | null

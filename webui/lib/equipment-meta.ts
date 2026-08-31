@@ -16,6 +16,7 @@ import {
   Router,
   Satellite,
   Server,
+  Thermometer,
   Video,
   Waypoints,
   Wifi,
@@ -26,7 +27,8 @@ import {
 import type {
   CapabilityKind,
   Equipment,
-  EquipmentCategory,
+  AssetCategory,
+  EquipmentSubcategory,
   EquipmentLinkDirection,
   EquipmentLinkKind,
   EquipmentStatus,
@@ -65,7 +67,7 @@ export function worstEquipmentStatus(
   return worst
 }
 
-export const EQUIPMENT_CATEGORY_ICONS: Record<EquipmentCategory, LucideIcon> = {
+export const EQUIPMENT_SUBCATEGORY_ICONS: Record<EquipmentSubcategory, LucideIcon> = {
   radio: Radio,
   satcom: Satellite,
   crypto: KeyRound,
@@ -74,10 +76,11 @@ export const EQUIPMENT_CATEGORY_ICONS: Record<EquipmentCategory, LucideIcon> = {
   power: Battery,
   antenna: Antenna,
   cable: Cable,
+  environmental: Thermometer,
   other: Package,
 }
 
-export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
+export const EQUIPMENT_SUBCATEGORY_LABELS: Record<EquipmentSubcategory, string> = {
   radio: "Radio",
   satcom: "SATCOM",
   crypto: "Crypto",
@@ -86,6 +89,7 @@ export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   power: "Power",
   antenna: "Antenna",
   cable: "Cable",
+  environmental: "Environmental",
   other: "Other",
 }
 
@@ -193,14 +197,57 @@ export const UTC_ROLE_HINT_ICONS: Record<UtcRoleHint, LucideIcon> = {
   either: Boxes,
 }
 
+/** What kind of thing something IS, shared by UTCs and equipment types so the
+ *  two filter against one vocabulary. Kept next to the role-hint tables above
+ *  deliberately: role and category are easy to confuse and must not be merged.
+ *  A hint says what one package uses a UTC FOR; this says what the thing IS,
+ *  and on a UTC only `comm` earns the enclave board. */
+export const ASSET_CATEGORY_LABELS: Record<AssetCategory, string> = {
+  comm: "Communications",
+  power: "Power",
+  environmental: "Environmental",
+  other: "Other",
+}
+
+/** Communications first — it is the default and the overwhelming majority —
+ *  then the two support kinds that prompted the column, then the shrug. */
+export const ASSET_CATEGORY_VALUES: AssetCategory[] = [
+  "comm",
+  "power",
+  "environmental",
+  "other",
+]
+
+/** Radio for the gear that carries traffic; Zap and Thermometer for the two
+ *  that keep it running. `other` takes the same Boxes as `either` — both mean
+ *  "nothing more specific to say". */
+export const ASSET_CATEGORY_ICONS: Record<AssetCategory, LucideIcon> = {
+  comm: Radio,
+  power: Zap,
+  environmental: Thermometer,
+  other: Boxes,
+}
+
+/** Only a comm UTC divides its bill of materials by enclave. Everything else
+ *  gets one plain list, so this is the single question the page asks. */
+export function utcUsesEnclaves(category: AssetCategory): boolean {
+  return category === "comm"
+}
+
 export const UTC_ROLE_LABELS: Record<UtcRole, string> = {
   primary: "Primary",
   extension: "Extension",
   independent: "Independent",
 }
 
-export function equipmentIcon(category: EquipmentCategory | null): LucideIcon {
-  return category ? EQUIPMENT_CATEGORY_ICONS[category] ?? Package : Package
+/** Icon for a piece of gear. Takes the SUB-category: `AssetCategory` is too
+ *  coarse to draw — every comm box would get the same glyph. */
+export function equipmentIcon(
+  subcategory: EquipmentSubcategory | null,
+): LucideIcon {
+  return subcategory
+    ? EQUIPMENT_SUBCATEGORY_ICONS[subcategory] ?? Package
+    : Package
 }
 
 /** What to call a piece of gear in a list. Nobody says "AN/PRC-117G", so the

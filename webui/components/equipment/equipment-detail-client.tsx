@@ -10,7 +10,8 @@ import { LinkForm } from "@/components/equipment/link-form"
 import { Button } from "@/components/ui/button"
 import {
   CAPABILITY_LABELS,
-  EQUIPMENT_CATEGORY_LABELS,
+  ASSET_CATEGORY_LABELS,
+  EQUIPMENT_SUBCATEGORY_LABELS,
   LINK_KIND_LABELS,
   equipmentIcon,
 } from "@/lib/equipment-meta"
@@ -58,7 +59,7 @@ export function EquipmentDetailClient({
   utc = null,
   events,
 }: Props) {
-  const Icon = equipmentIcon(equipment.type_category)
+  const Icon = equipmentIcon(equipment.type_subcategory)
 
   return (
     <>
@@ -97,7 +98,14 @@ export function EquipmentDetailClient({
             label="Category"
             value={
               equipment.type_category
-                ? EQUIPMENT_CATEGORY_LABELS[equipment.type_category]
+                ? [
+                    ASSET_CATEGORY_LABELS[equipment.type_category],
+                    equipment.type_subcategory
+                      ? EQUIPMENT_SUBCATEGORY_LABELS[equipment.type_subcategory]
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                 : "—"
             }
           />

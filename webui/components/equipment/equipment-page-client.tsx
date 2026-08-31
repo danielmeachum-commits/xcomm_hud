@@ -18,7 +18,7 @@ import { UtcCompletenessPanel } from "@/components/equipment/utc-completeness-pa
 import { ViewTabs } from "@/components/ui/view-tabs"
 import {
   CAPABILITY_LABELS,
-  EQUIPMENT_CATEGORY_LABELS,
+  EQUIPMENT_SUBCATEGORY_LABELS,
   equipmentIcon,
   equipmentRollup,
 } from "@/lib/equipment-meta"
@@ -585,7 +585,7 @@ export function EquipmentPageClient({
                             information together. */}
                         <ul className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
                           {enclaveGroup.items.map((e) => {
-                            const Icon = equipmentIcon(e.type_category)
+                            const Icon = equipmentIcon(e.type_subcategory)
                             const rollup = equipmentRollup(e)
                             return (
                               <li
@@ -618,9 +618,9 @@ export function EquipmentPageClient({
                                         equipment ID identifies this one box,
                                         which is what you look a row up by. */}
                                     <div className="truncate text-xs text-muted-foreground">
-                                      {e.type_category
-                                        ? EQUIPMENT_CATEGORY_LABELS[
-                                            e.type_category
+                                      {e.type_subcategory
+                                        ? EQUIPMENT_SUBCATEGORY_LABELS[
+                                            e.type_subcategory
                                           ]
                                         : "—"}
                                       {" · "}

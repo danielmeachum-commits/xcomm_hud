@@ -28,14 +28,17 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   CAPABILITY_LABELS,
-  EQUIPMENT_CATEGORY_LABELS,
+  EQUIPMENT_SUBCATEGORY_LABELS,
+  ASSET_CATEGORY_LABELS,
+  ASSET_CATEGORY_VALUES,
   UTC_ROLE_HINT_LABELS,
   UTC_ROLE_HINT_VALUES,
 } from "@/lib/equipment-meta"
 import type {
   Enclave,
-  EquipmentCategory,
+  EquipmentSubcategory,
   EquipmentType,
+  AssetCategory,
   UtcDef,
   UtcRoleHint,
 } from "@/lib/types"
@@ -140,7 +143,8 @@ export function CatalogCreateDialog({
   const [description, setDescription] = useState("")
   // equipment type
   const [shortName, setShortName] = useState("")
-  const [category, setCategory] = useState<EquipmentCategory>("other")
+  const [category, setCategory] = useState<AssetCategory>("comm")
+  const [subcategory, setSubcategory] = useState<EquipmentSubcategory>("other")
   const [tags, setTags] = useState<string[]>([])
   const [serialized, setSerialized] = useState(true)
   const [idPrefix, setIdPrefix] = useState("R")
@@ -151,6 +155,7 @@ export function CatalogCreateDialog({
   const [lines, setLines] = useState<LineDraft[]>([])
   const [activeEnclaves, setActiveEnclaves] = useState<number[]>([])
   const [slots, setSlots] = useState<UtcSlotDraft[]>([])
+  const [utcCategory, setAssetCategory] = useState<AssetCategory>("comm")
 
   function reset() {
     setName("")
@@ -183,6 +188,7 @@ export function CatalogCreateDialog({
         title: name.trim(),
         short_name: shortName.trim() || null,
         category,
+        subcategory,
         tags,
         serialized,
         id_prefix: idPrefix.trim() || "R",
@@ -199,6 +205,7 @@ export function CatalogCreateDialog({
         code: code.trim().toUpperCase(),
         name: name.trim(),
         description: description.trim() || null,
+        category: utcCategory,
         lines: lines
           .filter((l) => l.equipment_type_id !== "")
           .map((l) => ({
@@ -296,12 +303,30 @@ export function CatalogCreateDialog({
                     value={category}
                     disabled={pending}
                     onChange={(e) =>
-                      setCategory(e.target.value as EquipmentCategory)
+                      setCategory(e.target.value as AssetCategory)
+                    }
+                  >
+                    {ASSET_CATEGORY_VALUES.map((c) => (
+                      <option key={c} value={c}>
+                        {ASSET_CATEGORY_LABELS[c]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="cat-subcategory">Subcategory</Label>
+                  <select
+                    id="cat-subcategory"
+                    className={SELECT_CLASS}
+                    value={subcategory}
+                    disabled={pending}
+                    onChange={(e) =>
+                      setSubcategory(e.target.value as EquipmentSubcategory)
                     }
                   >
                     {CATEGORY_VALUES.map((c) => (
                       <option key={c} value={c}>
-                        {EQUIPMENT_CATEGORY_LABELS[c]}
+                        {EQUIPMENT_SUBCATEGORY_LABELS[c]}
                       </option>
                     ))}
                   </select>
@@ -361,20 +386,45 @@ export function CatalogCreateDialog({
           )}
 
           {kind === "utcs" && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="new-utc-category">Category</Label>
+              <select
+                id="new-utc-category"
+                className={SELECT_CLASS}
+                value={utcCategory}
+                disabled={pending}
+                onChange={(e) =>
+                  setAssetCategory(e.target.value as AssetCategory)
+                }
+              >
+                {ASSET_CATEGORY_VALUES.map((c) => (
+                  <option key={c} value={c}>
+                    {ASSET_CATEGORY_LABELS[c]}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Communications UTCs are described enclave by enclave. HVAC and
+                power have no network to divide along, so they get one list.
+              </p>
+            </div>
+          )}
+
+          {kind === "utcs" && (
             <div className="flex flex-col gap-1">
               <Label>Bill of materials</Label>
               <p className="text-xs text-muted-foreground">
-                What this UTC brings, grouped by the enclave it serves. Gear
-                every enclave needs — power, cables, the RF shot — goes under
-                Common.
+                {utcCategory === "comm"
+                  ? "What this UTC brings, grouped by the enclave it serves. Gear every enclave needs — power, cables, the RF shot — goes under Common."
+                  : "What this UTC brings. No enclaves: this kind of UTC doesn't divide along a network."}
               </p>
               <div className="mt-1">
                 <UtcLineEditor
                   lines={lines}
                   onChange={setLines}
                   types={types}
-                  enclaves={enclaves}
-                  active={activeEnclaves}
+                  enclaves={utcCategory === "comm" ? enclaves : []}
+                  active={utcCategory === "comm" ? activeEnclaves : []}
                   onActiveChange={setActiveEnclaves}
                   disabled={pending}
                 />

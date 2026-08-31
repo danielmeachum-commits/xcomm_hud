@@ -1,6 +1,7 @@
 "use client"
 
 import { Boxes, Globe, Package, Radio, Search } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 
 import { CatalogCreateDialog } from "@/components/equipment/catalog-create-dialog"
@@ -8,7 +9,6 @@ import {
   CATEGORY_VALUES,
   EquipmentTypeSheet,
   PackageDefSheet,
-  UtcDefSheet,
   aggregateCapabilities,
 } from "@/components/equipment/catalog-detail-sheets"
 import { CodeBadge } from "@/components/equipment/code-badge"
@@ -25,17 +25,23 @@ import { ViewTabs } from "@/components/ui/view-tabs"
 import { isNeutralEnclaveColor } from "@/lib/enclave-meta"
 import {
   CAPABILITY_LABELS,
-  EQUIPMENT_CATEGORY_LABELS,
+  ASSET_CATEGORY_ICONS,
+  ASSET_CATEGORY_LABELS,
+  ASSET_CATEGORY_VALUES,
+  EQUIPMENT_SUBCATEGORY_LABELS,
   equipmentIcon,
 } from "@/lib/equipment-meta"
 import type {
   Enclave,
-  EquipmentCategory,
+  AssetCategory,
+  EquipmentSubcategory,
   EquipmentType,
+  WorkCenter,
   PackageDef,
   UtcDef,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useWorkspace } from "@/lib/workspace"
 
 type Tab = "types" | "utcs" | "packages"
 
@@ -44,6 +50,7 @@ interface Props {
   utcDefs: UtcDef[]
   packageDefs: PackageDef[]
   enclaves?: Enclave[]
+  workCenters?: WorkCenter[]
   isAdmin: boolean
 }
 
@@ -158,14 +165,16 @@ export function EquipmentCatalogClient({
   utcDefs,
   packageDefs,
   enclaves = [],
+  workCenters = [],
   isAdmin,
 }: Props) {
+  const router = useRouter()
+  const { w } = useWorkspace()
   const [tab, setTab] = useState<Tab>("types")
   const [query, setQuery] = useState("")
-  const [category, setCategory] = useState<EquipmentCategory | "all">("all")
+  const [category, setCategory] = useState<AssetCategory | "all">("all")
   const [activeTags, setActiveTags] = useState<string[]>([])
   const [selectedType, setSelectedType] = useState<EquipmentType | null>(null)
-  const [selectedUtc, setSelectedUtc] = useState<UtcDef | null>(null)
   const [selectedPackage, setSelectedPackage] = useState<PackageDef | null>(
     null,
   )
@@ -187,7 +196,7 @@ export function EquipmentCatalogClient({
   /** Categories that actually have gear, so the filter never offers a dead
    *  option. */
   const presentCategories = useMemo(
-    () => CATEGORY_VALUES.filter((c) => types.some((t) => t.category === c)),
+    () => ASSET_CATEGORY_VALUES.filter((c) => types.some((t) => t.category === c)),
     [types],
   )
 
@@ -208,8 +217,8 @@ export function EquipmentCatalogClient({
     })
     return CATEGORY_VALUES.map(
       (c) =>
-        [c, matches.filter((t) => t.category === c)] as [
-          EquipmentCategory,
+        [c, matches.filter((t) => t.subcategory === c)] as [
+          EquipmentSubcategory,
           EquipmentType[],
         ],
     ).filter(([, rows]) => rows.length > 0)
@@ -286,7 +295,7 @@ export function EquipmentCatalogClient({
                 All
               </button>
               {presentCategories.map((c) => {
-                const Icon = equipmentIcon(c)
+                const Icon = ASSET_CATEGORY_ICONS[c]
                 return (
                   <button
                     key={c}
@@ -300,7 +309,7 @@ export function EquipmentCatalogClient({
                     )}
                   >
                     <Icon className="size-3" />
-                    {EQUIPMENT_CATEGORY_LABELS[c]}
+                    {ASSET_CATEGORY_LABELS[c]}
                   </button>
                 )
               })}
@@ -376,7 +385,7 @@ export function EquipmentCatalogClient({
                       >
                         <span className="inline-flex items-center gap-1.5">
                           <Icon className="size-3.5" />
-                          {EQUIPMENT_CATEGORY_LABELS[cat]}
+                          {EQUIPMENT_SUBCATEGORY_LABELS[cat]}
                           <span className="font-normal">({rows.length})</span>
                         </span>
                       </TableCell>
@@ -452,7 +461,7 @@ export function EquipmentCatalogClient({
             {utcDefs.map((d) => (
               <TableRow
                 key={d.id}
-                onClick={() => setSelectedUtc(d)}
+                onClick={() => router.push(w(`/admin/equipment-catalog/utc/${d.id}`))}
                 className="cursor-pointer"
               >
                 <TableCell>
@@ -531,17 +540,11 @@ export function EquipmentCatalogClient({
 
       <EquipmentTypeSheet
         enclaves={enclaves}
+        workCenters={workCenters}
         type={selectedType}
         canEdit={!!selectedType && canEditRow(selectedType.is_global)}
         tagSuggestions={allTags}
         onClose={() => setSelectedType(null)}
-      />
-      <UtcDefSheet
-        enclaves={enclaves}
-        def={selectedUtc}
-        types={types}
-        canEdit={!!selectedUtc && canEditRow(selectedUtc.is_global)}
-        onClose={() => setSelectedUtc(null)}
       />
       <PackageDefSheet
         def={selectedPackage}

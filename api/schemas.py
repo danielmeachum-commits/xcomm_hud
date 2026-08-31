@@ -52,9 +52,12 @@ ServiceReach = Literal["local", "external"]
 GatewayKind = Literal["milsat", "commercial", "other"]
 GatewayPace = Literal["primary", "alternate", "contingency", "emergency"]
 # --- Equipment tier (mirrors the tuples in models.py) ---
-EquipmentCategory = Literal[
+# The SUB-category: what kind of box it is, under the `AssetCategory` that says
+# what world it belongs to. `environmental` was added when the app started
+# tracking the HVAC that keeps the comm gear alive.
+EquipmentSubcategory = Literal[
     "radio", "satcom", "crypto", "network", "compute", "power", "antenna",
-    "cable", "other",
+    "cable", "environmental", "other",
 ]
 CapabilityKind = Literal[
     "voice", "data", "video", "satcom_rf", "los_rf", "routing", "switching",
@@ -73,6 +76,15 @@ UtcRole = Literal["primary", "extension", "independent"]
 # a standing place on the RF topology, so both land as `independent` in
 # `UtcRole` when the package is deployed.
 UtcRoleHint = Literal["primary", "alternate", "extension", "support", "either"]
+# What a thing IS, at the coarsest level that matters — shared by UTCs and by
+# equipment types so the two can be filtered and reconciled against each other.
+# On a UTC it also decides presentation: only `comm` divides its bill of
+# materials by enclave, the rest have no network to divide along.
+#
+# Distinct from `UtcRoleHint.support`, which is per-package-membership; see the
+# UtcDef docstring. And one level ABOVE `EquipmentSubcategory` — a TACLANE is
+# `comm`/`crypto`, an ECU is `environmental`/`environmental`.
+AssetCategory = Literal["comm", "power", "environmental", "other"]
 CapabilityBindRole = Literal["endpoint", "transport"]
 # `reported` = a human owns the status; `derived` = the dependency chain
 # does, and the reported field goes read-only. Per delivery and per
@@ -382,7 +394,8 @@ class ExportedEquipmentType(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     nsn: Optional[str] = None
     lin: Optional[str] = None
-    category: EquipmentCategory = "other"
+    category: AssetCategory = "comm"
+    subcategory: EquipmentSubcategory = "other"
     serialized: bool = True
     id_prefix: str = "R"
     manufacturer: Optional[str] = None
@@ -406,6 +419,9 @@ class ExportedUtcDef(BaseModel):
     code: str
     name: str
     description: Optional[str] = None
+    # Defaulted so a bundle written before 0061 still imports, landing on the
+    # same value the migration backfills.
+    category: AssetCategory = "comm"
     lines: list[ExportedUtcDefLine] = Field(default_factory=list)
 
 
@@ -1850,6 +1866,20 @@ class EquipmentTypeCapabilityOut(_ORM):
     materialize_by_default: bool = True
 
 
+class EquipmentTypeWorkCenterIn(BaseModel):
+    work_center_id: int
+    is_primary: bool = False
+
+
+class EquipmentTypeWorkCenterOut(_ORM):
+    id: int
+    equipment_type_id: int
+    work_center_id: int
+    is_primary: bool = False
+    # Denormalized for display so the UI doesn't need a second fetch.
+    work_center_name: Optional[str] = None
+
+
 class EquipmentTypeIn(BaseModel):
     title: str
     short_name: Optional[str] = None
@@ -1858,7 +1888,8 @@ class EquipmentTypeIn(BaseModel):
     tags: list[str] = Field(default_factory=list)
     nsn: Optional[str] = None
     lin: Optional[str] = None
-    category: EquipmentCategory = "other"
+    category: AssetCategory = "comm"
+    subcategory: EquipmentSubcategory = "other"
     serialized: bool = True
     id_prefix: str = "R"
     manufacturer: Optional[str] = None
@@ -1869,6 +1900,9 @@ class EquipmentTypeIn(BaseModel):
     # Enclaves this model of gear can serve. Empty = unrestricted, not
     # "capable of nothing".
     enclave_ids: list[int] = Field(default_factory=list)
+    # Which work centers answer for this kind of gear. Usually one, but a type
+    # can be shared, so it is a list with at most one flagged primary.
+    work_centers: list[EquipmentTypeWorkCenterIn] = Field(default_factory=list)
 
 
 class EquipmentTypePatch(BaseModel):
@@ -1878,7 +1912,8 @@ class EquipmentTypePatch(BaseModel):
     tags: Optional[list[str]] = None
     nsn: Optional[str] = None
     lin: Optional[str] = None
-    category: Optional[EquipmentCategory] = None
+    category: Optional[AssetCategory] = None
+    subcategory: Optional[EquipmentSubcategory] = None
     serialized: Optional[bool] = None
     id_prefix: Optional[str] = None
     manufacturer: Optional[str] = None
@@ -1897,7 +1932,8 @@ class EquipmentTypeOut(_ORM):
     tags: list[str] = Field(default_factory=list)
     nsn: Optional[str] = None
     lin: Optional[str] = None
-    category: EquipmentCategory
+    category: AssetCategory
+    subcategory: EquipmentSubcategory
     serialized: bool
     id_prefix: str
     manufacturer: Optional[str] = None
@@ -1906,6 +1942,7 @@ class EquipmentTypeOut(_ORM):
     description: Optional[str] = None
     retired_at: Optional[datetime.datetime] = None
     capabilities: list[EquipmentTypeCapabilityOut] = Field(default_factory=list)
+    work_centers: list[EquipmentTypeWorkCenterOut] = Field(default_factory=list)
     # True when workspace_id is NULL — the UI gates editing on this, since
     # only admins may touch the global catalog.
     is_global: bool = False
@@ -1941,6 +1978,7 @@ class UtcDefIn(BaseModel):
     code: str
     name: str
     description: Optional[str] = None
+    category: AssetCategory = "comm"
     lines: list[UtcDefLineIn] = Field(default_factory=list)
 
 
@@ -1948,6 +1986,7 @@ class UtcDefPatch(BaseModel):
     code: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
+    category: Optional[AssetCategory] = None
     retired: Optional[bool] = None
 
 
@@ -1957,6 +1996,7 @@ class UtcDefOut(_ORM):
     code: str
     name: str
     description: Optional[str] = None
+    category: AssetCategory = "comm"
     retired_at: Optional[datetime.datetime] = None
     lines: list[UtcDefLineOut] = Field(default_factory=list)
     is_global: bool = False
@@ -2170,7 +2210,8 @@ class EquipmentOut(_ORM):
     # nobody recognizes a piece of gear by type id.
     type_title: Optional[str] = None
     type_short_name: Optional[str] = None
-    type_category: Optional[EquipmentCategory] = None
+    type_category: Optional[AssetCategory] = None
+    type_subcategory: Optional[EquipmentSubcategory] = None
     nsn: Optional[str] = None
     site_name: Optional[str] = None
     utc_name: Optional[str] = None

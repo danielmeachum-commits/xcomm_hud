@@ -34,6 +34,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
+import { UtcDefPeekSheet } from "@/components/equipment/utc-def-peek-sheet"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -78,6 +79,7 @@ import {
   UTC_ROLE_HINT_VALUES,
 } from "@/lib/equipment-meta"
 import type {
+  Enclave,
   PackageDef,
   PackageDefUtc,
   Role,
@@ -248,15 +250,21 @@ function move(
 export function PackageDetailClient({
   def,
   utcDefs,
+  enclaves,
   role,
 }: {
   def: PackageDef
   utcDefs: UtcDef[]
+  /** Only used to name the columns in the peek sheet — the package itself has
+   *  no enclave dimension. */
+  enclaves: Enclave[]
   role: Role
 }) {
   const router = useRouter()
   const editable = canEdit(def, role)
 
+  /** Which UTC's contents are open over the page, if any. */
+  const [peek, setPeek] = useState<UtcDef | null>(null)
   const [editingProperties, setEditingProperties] = useState(false)
   /** Seeded on the click that opens the panel rather than by an effect: opening
    *  is an event, and reseeding on every `def` change would re-run on the
@@ -617,6 +625,19 @@ export function PackageDetailClient({
                           key={`${link.id}#${i}`}
                           variant="muted"
                           size="sm"
+                          // What a UTC actually brings is the next question a
+                          // reader has, and it is answered without leaving the
+                          // package. A button, not a link: this opens a sheet
+                          // over this page rather than navigating anywhere.
+                          render={
+                            <button
+                              type="button"
+                              disabled={!utc}
+                              onClick={() => utc && setPeek(utc)}
+                              aria-label={`Show what ${utc?.name ?? "this UTC"} brings`}
+                              className="cursor-pointer text-left hover:bg-muted disabled:cursor-default"
+                            />
+                          }
                         >
                           <ItemContent>
                             <ItemTitle className="flex-wrap gap-2">
@@ -648,6 +669,12 @@ export function PackageDetailClient({
             : "Read-only — editing requires the operator role."}
         </p>
       )}
+
+      <UtcDefPeekSheet
+        def={peek}
+        enclaves={enclaves}
+        onClose={() => setPeek(null)}
+      />
 
       <PropertiesSheet
         def={def}

@@ -6,11 +6,6 @@ import { useEffect, useState } from "react"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
 import { TagsInput } from "@/components/equipment/tags-input"
-import {
-  UtcLineEditor,
-  activeEnclavesFrom,
-  type LineDraft,
-} from "@/components/equipment/utc-line-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -26,7 +21,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import {
   CAPABILITY_LABELS,
-  EQUIPMENT_CATEGORY_LABELS,
+  ASSET_CATEGORY_LABELS,
+  ASSET_CATEGORY_VALUES,
+  EQUIPMENT_SUBCATEGORY_LABELS,
   UTC_ROLE_HINT_LABELS,
   UTC_ROLE_HINT_VALUES,
   equipmentIcon,
@@ -34,8 +31,10 @@ import {
 import type {
   CapabilityKind,
   Enclave,
-  EquipmentCategory,
+  AssetCategory,
+  EquipmentSubcategory,
   EquipmentType,
+  WorkCenter,
   PackageDef,
   UtcDef,
   UtcDefLine,
@@ -44,8 +43,8 @@ import type {
 import { cn } from "@/lib/utils"
 
 export const CATEGORY_VALUES = Object.keys(
-  EQUIPMENT_CATEGORY_LABELS,
-) as EquipmentCategory[]
+  EQUIPMENT_SUBCATEGORY_LABELS,
+) as EquipmentSubcategory[]
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -136,36 +135,6 @@ export function aggregateCapabilities(
       seen.add(c.kind)
   }
   return [...seen]
-}
-
-/** Read-view sections, mirroring `UtcLineEditor`: enclaves in catalog order,
- *  then the untagged lines as "common" — the tail of the packing list, not the
- *  headline. Enclaves the def says nothing about are omitted entirely; an
- *  empty section would read as a stack that was deliberately left out.
- *
- *  Grouped by enclave rather than by equipment category because that is how the
- *  UTC is described out loud: what are we supporting, and what does each one
- *  need. */
-function groupLinesByEnclave(
-  lines: UtcDefLine[],
-  enclaves: Enclave[],
-): { enclave: Enclave | null; lines: UtcDefLine[] }[] {
-  const sections = enclaves
-    .map((e) => ({
-      enclave: e as Enclave | null,
-      lines: lines.filter((l) => l.enclave_id === e.id),
-    }))
-    .filter((s) => s.lines.length > 0)
-  // A line tagged with an enclave this sheet wasn't handed (retired, or from
-  // another workspace) still has to appear — falling through to "common" is
-  // wrong but visible, where dropping it silently is not.
-  const known = new Set(enclaves.map((e) => e.id))
-  const common = lines.filter(
-    (l) => l.enclave_id === null || !known.has(l.enclave_id),
-  )
-  return common.length > 0
-    ? [...sections, { enclave: null, lines: common }]
-    : sections
 }
 
 function SaveBar({
@@ -392,6 +361,111 @@ export function CapabilityEditor({
   )
 }
 
+/** One work center's claim on a type, while it's being edited. */
+export interface WorkCenterDraft {
+  work_center_id: number
+  is_primary: boolean
+}
+
+/** Who answers for this kind of gear.
+ *
+ *  Two decisions in one control, because they are one thought: whether a shop
+ *  is involved at all, and which shop actually owns it. Checking adds a shop;
+ *  the star picks the single primary among those checked. Unchecking the
+ *  primary hands the star to whoever is left, so there is never a set of
+ *  owners with nobody responsible — the API would silently demote a second
+ *  primary anyway, and a UI that let you build that state was lying.
+ *
+ *  A star rather than a radio column: at most one primary is the rule, but
+ *  zero is legal too (a type nobody has claimed yet), and a radio group has no
+ *  natural way to say "none of these". */
+export function WorkCenterPicker({
+  workCenters,
+  value,
+  onChange,
+  disabled,
+}: {
+  workCenters: WorkCenter[]
+  value: WorkCenterDraft[]
+  onChange: (next: WorkCenterDraft[]) => void
+  disabled: boolean
+}) {
+  if (workCenters.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No work centers yet — add them under Admin to say who owns this gear.
+      </p>
+    )
+  }
+
+  function toggle(id: number) {
+    const on = value.some((v) => v.work_center_id === id)
+    if (on) {
+      const next = value.filter((v) => v.work_center_id !== id)
+      // Dropping the primary promotes the first survivor rather than leaving
+      // a set of owners with nobody responsible.
+      if (next.length > 0 && !next.some((v) => v.is_primary)) {
+        next[0] = { ...next[0], is_primary: true }
+      }
+      onChange(next)
+      return
+    }
+    onChange([
+      ...value,
+      { work_center_id: id, is_primary: value.length === 0 },
+    ])
+  }
+
+  function makePrimary(id: number) {
+    onChange(
+      value.map((v) => ({ ...v, is_primary: v.work_center_id === id })),
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {workCenters.map((wc) => {
+        const held = value.find((v) => v.work_center_id === wc.id)
+        return (
+          <div key={wc.id} className="flex items-center gap-2">
+            <label className="flex flex-1 cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-primary"
+                checked={!!held}
+                disabled={disabled}
+                onChange={() => toggle(wc.id)}
+              />
+              <span className="truncate">{wc.name}</span>
+            </label>
+            {held && (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => makePrimary(wc.id)}
+                aria-pressed={held.is_primary}
+                aria-label={
+                  held.is_primary
+                    ? `${wc.name} is the primary work center`
+                    : `Make ${wc.name} the primary work center`
+                }
+                className={cn(
+                  "rounded-md px-1.5 py-0.5 text-[11px] transition-colors",
+                  held.is_primary
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                {held.is_primary ? "Primary" : "Make primary"}
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 /** Order counts — it becomes `display_order` — so compare positionally. */
 function capabilitiesChanged(
   type: EquipmentType,
@@ -411,7 +485,10 @@ function capabilitiesChanged(
 interface TypeForm {
   title: string
   short_name: string
-  category: EquipmentCategory
+  /** The coarse level, shared with UTCs. */
+  category: AssetCategory
+  /** What kind of box it is, under `category`. */
+  subcategory: EquipmentSubcategory
   aliases: string
   tags: string[]
   nsn: string
@@ -423,6 +500,7 @@ interface TypeForm {
   description: string
   capabilities: CapabilityDraft[]
   enclave_ids: number[]
+  work_centers: WorkCenterDraft[]
 }
 
 function typeForm(t: EquipmentType): TypeForm {
@@ -430,6 +508,11 @@ function typeForm(t: EquipmentType): TypeForm {
     title: t.title,
     short_name: t.short_name ?? "",
     category: t.category,
+    subcategory: t.subcategory,
+    work_centers: t.work_centers.map((w) => ({
+      work_center_id: w.work_center_id,
+      is_primary: w.is_primary,
+    })),
     aliases: t.aliases.join(", "),
     tags: [...t.tags],
     nsn: t.nsn ?? "",
@@ -452,12 +535,14 @@ export function EquipmentTypeSheet({
   type,
   canEdit,
   enclaves = [],
+  workCenters = [],
   tagSuggestions = [],
   onClose,
 }: {
   type: EquipmentType | null
   canEdit: boolean
   enclaves?: Enclave[]
+  workCenters?: WorkCenter[]
   tagSuggestions?: string[]
   onClose: () => void
 }) {
@@ -517,6 +602,30 @@ export function EquipmentTypeSheet({
       router.refresh()
       return
     }
+    const wcSig = (rows: WorkCenterDraft[]) =>
+      [...rows]
+        .sort((a, b) => a.work_center_id - b.work_center_id)
+        .map((r) => `${r.work_center_id}:${r.is_primary}`)
+        .join(",")
+    const wcErr =
+      wcSig(form.work_centers) !==
+      wcSig(
+        type.work_centers.map((w) => ({
+          work_center_id: w.work_center_id,
+          is_primary: w.is_primary,
+        })),
+      )
+        ? await put(
+            `/api/be/equipment-types/${type.id}/work-centers`,
+            form.work_centers,
+          )
+        : null
+    if (wcErr) {
+      setPending(false)
+      setError(`Details saved, but work centers failed: ${wcErr}`)
+      router.refresh()
+      return
+    }
     const capsErr = capabilitiesChanged(type, form.capabilities)
       ? await put(
           `/api/be/equipment-types/${type.id}/capabilities`,
@@ -538,7 +647,7 @@ export function EquipmentTypeSheet({
     router.refresh()
   }
 
-  const Icon = type ? equipmentIcon(type.category) : null
+  const Icon = type ? equipmentIcon(type.subcategory) : null
 
   return (
     <Sheet open={!!type} onOpenChange={(open) => !open && onClose()}>
@@ -551,7 +660,9 @@ export function EquipmentTypeSheet({
                 {type.title}
               </SheetTitle>
               <SheetDescription>
-                {EQUIPMENT_CATEGORY_LABELS[type.category]}
+                {ASSET_CATEGORY_LABELS[type.category]}
+                {" · "}
+                {EQUIPMENT_SUBCATEGORY_LABELS[type.subcategory]}
                 {type.is_global ? " · Global catalog" : " · Workspace"}
               </SheetDescription>
             </SheetHeader>
@@ -591,14 +702,35 @@ export function EquipmentTypeSheet({
                         onChange={(e) =>
                           setForm({
                             ...form,
-                            category: e.target.value as EquipmentCategory,
+                            category: e.target.value as AssetCategory,
+                          })
+                        }
+                        disabled={pending}
+                      >
+                        {ASSET_CATEGORY_VALUES.map((c) => (
+                          <option key={c} value={c}>
+                            {ASSET_CATEGORY_LABELS[c]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="eq-subcategory">Subcategory</Label>
+                      <select
+                        id="eq-subcategory"
+                        className={SELECT_CLASS}
+                        value={form.subcategory}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            subcategory: e.target.value as EquipmentSubcategory,
                           })
                         }
                         disabled={pending}
                       >
                         {CATEGORY_VALUES.map((c) => (
                           <option key={c} value={c}>
-                            {EQUIPMENT_CATEGORY_LABELS[c]}
+                            {EQUIPMENT_SUBCATEGORY_LABELS[c]}
                           </option>
                         ))}
                       </select>
@@ -734,6 +866,21 @@ export function EquipmentTypeSheet({
                     />
                   </div>
                   <div className="flex flex-col gap-1">
+                    <Label>Responsible work centers</Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Usually one shop owns a kind of gear, but it can be
+                      shared. The primary is who gets asked first.
+                    </p>
+                    <WorkCenterPicker
+                      workCenters={workCenters}
+                      value={form.work_centers}
+                      onChange={(work_centers) =>
+                        setForm({ ...form, work_centers })
+                      }
+                      disabled={pending}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
                     <Label>Capabilities</Label>
                     <CapabilityEditor
                       value={form.capabilities}
@@ -853,231 +1000,6 @@ interface CodeForm {
   code: string
   name: string
   description: string
-}
-
-export function UtcDefSheet({
-  def,
-  types,
-  enclaves = [],
-  canEdit,
-  onClose,
-}: {
-  def: UtcDef | null
-  types: EquipmentType[]
-  enclaves?: Enclave[]
-  canEdit: boolean
-  onClose: () => void
-}) {
-  const router = useRouter()
-  const [editing, setEditing] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState<CodeForm | null>(null)
-  // The full bill of materials as drafts. Editing lines here rather than only
-  // their enclave tags is what makes "add an item to SIPR" possible at all.
-  const [lineDrafts, setLineDrafts] = useState<LineDraft[]>([])
-  const [activeEnclaves, setActiveEnclaves] = useState<number[]>([])
-
-  useEffect(() => {
-    setEditing(false)
-    setError(null)
-    setForm(
-      def
-        ? { code: def.code, name: def.name, description: def.description ?? "" }
-        : null,
-    )
-    const drafts: LineDraft[] = def
-      ? def.lines.map((l) => ({
-          equipment_type_id: l.equipment_type_id,
-          quantity: l.quantity,
-          enclave_id: l.enclave_id,
-        }))
-      : []
-    setLineDrafts(drafts)
-    setActiveEnclaves(activeEnclavesFrom(drafts))
-  }, [def])
-
-  const byId = new Map(types.map((t) => [t.id, t]))
-
-  async function save() {
-    if (!def || !form) return
-    setPending(true)
-    setError(null)
-    const err = await patch(`/api/be/utc-defs/${def.id}`, {
-      code: form.code.trim(),
-      name: form.name.trim(),
-      description: form.description.trim() || null,
-    })
-    if (err) {
-      setPending(false)
-      setError(err)
-      return
-    }
-    // Lines live on their own wholesale-replace endpoint. Only call it when
-    // something actually changed — an unnecessary replace churns line ids that
-    // nothing else should have to care about.
-    const payload = lineDrafts
-      .filter((l) => l.equipment_type_id !== "")
-      .map((l) => ({
-        equipment_type_id: Number(l.equipment_type_id),
-        quantity: l.quantity,
-        enclave_id: l.enclave_id,
-      }))
-    const before = def.lines
-      .map((l) => `${l.equipment_type_id}:${l.enclave_id ?? ""}:${l.quantity}`)
-      .sort()
-      .join("|")
-    const after = payload
-      .map((l) => `${l.equipment_type_id}:${l.enclave_id ?? ""}:${l.quantity}`)
-      .sort()
-      .join("|")
-    const linesErr =
-      before !== after
-        ? await put(`/api/be/utc-defs/${def.id}/lines`, payload)
-        : null
-    setPending(false)
-    if (linesErr) {
-      // The code/name already saved; say so rather than implying a rollback.
-      setError(`Details saved, but the bill of materials failed: ${linesErr}`)
-      router.refresh()
-      return
-    }
-    setEditing(false)
-    router.refresh()
-  }
-
-  return (
-    <Sheet open={!!def} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full sm:max-w-md">
-        {def && (
-          <>
-            <SheetHeader>
-              <SheetTitle className="flex items-center gap-2">
-                <CodeBadge code={def.code} />
-                {def.name}
-              </SheetTitle>
-              <SheetDescription>
-                {def.lines.length} equipment line
-                {def.lines.length === 1 ? "" : "s"}
-                {def.is_global ? " · Global catalog" : " · Workspace"}
-              </SheetDescription>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
-              {editing && form ? (
-                <div className="flex flex-col gap-4">
-                  <CodeFields form={form} setForm={setForm} pending={pending} />
-                  <div className="flex flex-col gap-1.5">
-                    <Label>Bill of materials</Label>
-                    <p className="text-[11px] text-muted-foreground">
-                      What this UTC brings, grouped by the enclave it serves.
-                      Unchecking an enclave removes its section — that&apos;s
-                      what lets a deployment leave a whole stack home in one
-                      click later.
-                    </p>
-                    <UtcLineEditor
-                      lines={lineDrafts}
-                      onChange={setLineDrafts}
-                      types={types}
-                      enclaves={enclaves}
-                      active={activeEnclaves}
-                      onActiveChange={setActiveEnclaves}
-                      disabled={pending}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {def.description && (
-                    <p className="text-sm text-muted-foreground">
-                      {def.description}
-                    </p>
-                  )}
-                  <Field label="Capabilities available">
-                    <CapabilityChips
-                      kinds={aggregateCapabilities(def.lines, byId)}
-                    />
-                  </Field>
-                  <div className="flex flex-col gap-3">
-                    {groupLinesByEnclave(def.lines, enclaves).map(
-                      ({ enclave, lines }) => (
-                        <div
-                          key={enclave?.id ?? "common"}
-                          className="flex flex-col gap-1.5 rounded-lg border border-border p-2.5"
-                        >
-                          <div className="flex items-center gap-2">
-                            {enclave ? (
-                              <>
-                                <span
-                                  className={cn(
-                                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                                    enclaveChipClass(enclave.color),
-                                  )}
-                                  style={enclaveChipStyle(enclave.color)}
-                                >
-                                  {enclave.short_name || enclave.name}
-                                </span>
-                                <span className="text-[11px] text-muted-foreground">
-                                  {enclave.name}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                                Common to every enclave
-                              </span>
-                            )}
-                          </div>
-                          <ul className="flex flex-col gap-1 text-sm">
-                            {lines.map((l) => (
-                              <li
-                                key={l.id}
-                                className="flex justify-between gap-2 border-b border-border/50 pb-1 last:border-b-0 last:pb-0"
-                              >
-                                <span>
-                                  {l.equipment_type_short_name ??
-                                    l.equipment_type_title}
-                                  {!l.serialized && (
-                                    <span className="ml-1 text-xs text-muted-foreground">
-                                      (bulk)
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="font-mono text-muted-foreground">
-                                  ×{l.quantity}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ),
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <SaveBar
-              editing={editing}
-              canEdit={canEdit}
-              pending={pending}
-              error={error}
-              onEdit={() => setEditing(true)}
-              onCancel={() => {
-                setEditing(false)
-                setError(null)
-                setForm({
-                  code: def.code,
-                  name: def.name,
-                  description: def.description ?? "",
-                })
-              }}
-              onSave={save}
-            />
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
-  )
 }
 
 function CodeFields({

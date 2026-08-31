@@ -84,6 +84,7 @@ function buildUtcRow(
 // ===================== the UTC item =====================
 
 function UtcItem({ utc }: { utc: UtcRow }) {
+  const { w } = useWorkspace()
   const RoleIcon = utc.role ? UTC_ROLE_HINT_ICONS[utc.role] : Boxes
   const roleLabel = utc.role ? UTC_ROLE_HINT_LABELS[utc.role] : "UTC"
   return (
@@ -96,7 +97,14 @@ function UtcItem({ utc }: { utc: UtcRow }) {
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="flex-wrap gap-2">
-          <span>{utc.def.name}</span>
+          {/* The name is the way in to what the UTC is made of, which lives on
+              the catalog's definition page rather than here. */}
+          <Link
+            href={w(`/admin/equipment-catalog/utc/${utc.def.id}`)}
+            className="hover:underline"
+          >
+            {utc.def.name}
+          </Link>
           <CodeBadge code={utc.def.code} />
         </ItemTitle>
         {utc.def.description && (
@@ -324,7 +332,12 @@ export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
             >
               <CardHeader>
                 <CardTitle className="flex flex-wrap items-center gap-2">
-                  <span>{u.def.name}</span>
+                  <Link
+                    href={w(`/admin/equipment-catalog/utc/${u.def.id}`)}
+                    className="hover:underline"
+                  >
+                    {u.def.name}
+                  </Link>
                   <CodeBadge code={u.def.code} />
                 </CardTitle>
                 {u.def.description && (

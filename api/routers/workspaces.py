@@ -477,6 +477,7 @@ def _duplicate_equipment(
             nsn=t.nsn,
             lin=t.lin,
             category=t.category,
+            subcategory=t.subcategory,
             serialized=t.serialized,
             id_prefix=t.id_prefix,
             manufacturer=t.manufacturer,
@@ -511,6 +512,7 @@ def _duplicate_equipment(
             code=d.code,
             name=d.name,
             description=d.description,
+            category=d.category,
             retired_at=d.retired_at,
         )
         db.add(new_d)
@@ -882,6 +884,7 @@ def _export_equipment(
                 nsn=t.nsn,
                 lin=t.lin,
                 category=t.category,
+                subcategory=t.subcategory,
                 serialized=t.serialized,
                 id_prefix=t.id_prefix,
                 manufacturer=t.manufacturer,
@@ -909,6 +912,7 @@ def _export_equipment(
                 code=d.code,
                 name=d.name,
                 description=d.description,
+                category=d.category,
                 lines=[
                     ExportedUtcDefLine(
                         equipment_type_title=all_type_titles.get(
@@ -1599,6 +1603,7 @@ def _import_equipment(
             nsn=t.nsn,
             lin=t.lin,
             category=t.category,
+            subcategory=t.subcategory,
             serialized=t.serialized,
             id_prefix=t.id_prefix,
             manufacturer=t.manufacturer,
@@ -1656,7 +1661,11 @@ def _import_equipment(
     utc_def_id_by_code: dict[str, int] = {}
     for d in payload.utc_defs:
         new_d = UtcDef(
-            workspace_id=ws.id, code=d.code, name=d.name, description=d.description
+            workspace_id=ws.id,
+            code=d.code,
+            name=d.name,
+            description=d.description,
+            category=d.category,
         )
         db.add(new_d)
         db.flush()

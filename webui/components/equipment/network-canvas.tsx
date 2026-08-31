@@ -120,7 +120,7 @@ interface EquipmentNodeData extends Record<string, unknown> {
 function EquipmentNode({ data }: NodeProps) {
   const d = data as EquipmentNodeData
   const eq = d.equipment
-  const Icon = equipmentIcon(eq.type_category)
+  const Icon = equipmentIcon(eq.type_subcategory)
   const rollup = equipmentRollup(eq)
   // Enclave rides the LEFT BORDER only. Status owns the node's indicator and
   // its edges, and an operator scanning for what's down must not have that

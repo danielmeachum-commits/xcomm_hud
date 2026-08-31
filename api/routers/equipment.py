@@ -225,6 +225,7 @@ def equipment_out_bulk(db: Session, rows: list[Equipment]) -> list[EquipmentOut]
             out.type_title = t.title
             out.type_short_name = t.short_name
             out.type_category = t.category
+            out.type_subcategory = t.subcategory
             out.nsn = t.nsn
         site = sites.get(eq.site_id)
         if site is not None:

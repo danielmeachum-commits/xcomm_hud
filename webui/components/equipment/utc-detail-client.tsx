@@ -363,7 +363,7 @@ function EquipmentRow({
   const [pending, setPending] = useState(false)
   const [serial, setSerial] = useState(equipment.serial_number ?? "")
   const [open, setOpen] = useState(false)
-  const Icon = equipmentIcon(equipment.type_category)
+  const Icon = equipmentIcon(equipment.type_subcategory)
 
   const type = types.find((t) => t.id === equipment.equipment_type_id)
   // Empty declaration means unrestricted, so fall back to everything.

@@ -4,7 +4,7 @@ import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { PackageDetailClient } from "@/components/equipment/package-detail-client"
 import { apiGet } from "@/lib/api"
 import { requireSession } from "@/lib/auth"
-import type { PackageDef, UtcDef } from "@/lib/types"
+import type { Enclave, PackageDef, UtcDef } from "@/lib/types"
 
 /** One package definition: what it is, and the UTCs it carries.
  *
@@ -23,9 +23,11 @@ export default async function PackageDetailPage({
 
   // The UTC catalog comes down with the package because the manage panel needs
   // every definition on offer, not just the ones already in the list.
-  const [packageDefs, utcDefs] = await Promise.all([
+  // Enclaves come down too: the peek sheet names a UTC's columns with them.
+  const [packageDefs, utcDefs, enclaves] = await Promise.all([
     apiGet<PackageDef[]>("/package-defs").catch(() => [] as PackageDef[]),
     apiGet<UtcDef[]>("/utc-defs").catch(() => [] as UtcDef[]),
+    apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
   ])
   const def = packageDefs.find((p) => String(p.id) === id)
   if (!def) notFound()
@@ -41,7 +43,12 @@ export default async function PackageDetailPage({
           { label: def.code },
         ]}
       />
-      <PackageDetailClient def={def} utcDefs={utcDefs} role={me.role} />
+      <PackageDetailClient
+        def={def}
+        utcDefs={utcDefs}
+        enclaves={enclaves}
+        role={me.role}
+      />
     </div>
   )
 }

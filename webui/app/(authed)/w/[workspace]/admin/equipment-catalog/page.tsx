@@ -2,7 +2,13 @@ import { apiGet } from "@/lib/api"
 import { requireSession } from "@/lib/auth"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { EquipmentCatalogClient } from "@/components/equipment/equipment-catalog-client"
-import type { Enclave, EquipmentType, PackageDef, UtcDef } from "@/lib/types"
+import type {
+  Enclave,
+  EquipmentType,
+  PackageDef,
+  UtcDef,
+  WorkCenter,
+} from "@/lib/types"
 
 export default async function EquipmentCatalogPage({
   params,
@@ -12,11 +18,14 @@ export default async function EquipmentCatalogPage({
   await params
   const me = await requireSession()
 
-  const [types, utcDefs, packageDefs, enclaves] = await Promise.all([
+  // Work centers come down so the type sheet can say who answers for a piece
+  // of gear without a second round trip.
+  const [types, utcDefs, packageDefs, enclaves, workCenters] = await Promise.all([
     apiGet<EquipmentType[]>("/equipment-types").catch(() => [] as EquipmentType[]),
     apiGet<UtcDef[]>("/utc-defs").catch(() => [] as UtcDef[]),
     apiGet<PackageDef[]>("/package-defs").catch(() => [] as PackageDef[]),
     apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
+    apiGet<WorkCenter[]>("/work-centers").catch(() => [] as WorkCenter[]),
   ])
 
   return (
@@ -36,6 +45,7 @@ export default async function EquipmentCatalogPage({
         utcDefs={utcDefs}
         packageDefs={packageDefs}
         enclaves={enclaves}
+        workCenters={workCenters}
         isAdmin={me.role === "admin"}
       />
     </div>

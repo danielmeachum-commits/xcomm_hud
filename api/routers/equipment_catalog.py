@@ -27,11 +27,13 @@ from models import (
     EquipmentType,
     EquipmentTypeCapability,
     EquipmentTypeEnclave,
+    EquipmentTypeWorkCenter,
     PackageDef,
     PackageDefUtc,
     User,
     UtcDef,
     UtcDefLine,
+    WorkCenter,
     Workspace,
 )
 from pubsub import notify
@@ -40,6 +42,8 @@ from schemas import (
     EquipmentTypeIn,
     EquipmentTypeOut,
     EquipmentTypePatch,
+    EquipmentTypeWorkCenterIn,
+    EquipmentTypeWorkCenterOut,
     PackageDefIn,
     PackageDefOut,
     PackageDefPatch,
@@ -95,11 +99,72 @@ def _norm_tags(tags: list[str]) -> list[str]:
     return list(seen)
 
 
-def _type_out(row: EquipmentType) -> EquipmentTypeOut:
+def _type_out(db: Session, row: EquipmentType) -> EquipmentTypeOut:
     out = EquipmentTypeOut.model_validate(row)
     out.is_global = row.workspace_id is None
     out.enclave_ids = sorted(link.enclave_id for link in row.enclave_links)
+    # Primary first, then by name — the responsible shop is the one people
+    # look for, and it should not be buried mid-list.
+    links = sorted(row.work_center_links, key=lambda l: (not l.is_primary, l.id))
+    names = {
+        w.id: w.name
+        for w in db.query(WorkCenter).filter(
+            WorkCenter.id.in_([l.work_center_id for l in links])
+        )
+    } if links else {}
+    out.work_centers = [
+        EquipmentTypeWorkCenterOut(
+            id=l.id,
+            equipment_type_id=l.equipment_type_id,
+            work_center_id=l.work_center_id,
+            is_primary=l.is_primary,
+            work_center_name=names.get(l.work_center_id),
+        )
+        for l in links
+    ]
     return out
+
+
+def _set_type_work_centers(
+    db: Session,
+    row: EquipmentType,
+    links: list[EquipmentTypeWorkCenterIn],
+    workspace: Workspace,
+) -> None:
+    """Replace the responsible-work-center set. Wholesale, like capabilities.
+
+    Scoped to the caller's workspace on both sides: the rows written carry
+    `workspace_id`, and only that workspace's work centers may be named. That
+    is what lets a workspace answer for a GLOBAL equipment type without
+    claiming to speak for anyone else's.
+
+    At most one primary survives — a second `is_primary` would trip
+    `uq_equipment_type_work_center_primary`, and silently keeping the first is
+    friendlier than a 409 about a checkbox.
+    """
+    db.query(EquipmentTypeWorkCenter).filter(
+        EquipmentTypeWorkCenter.equipment_type_id == row.id,
+        EquipmentTypeWorkCenter.workspace_id == workspace.id,
+    ).delete(synchronize_session=False)
+
+    seen_primary = False
+    for link in {l.work_center_id: l for l in links}.values():
+        wc = db.get(WorkCenter, link.work_center_id)
+        if wc is None or wc.workspace_id != workspace.id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Work center {link.work_center_id} not found",
+            )
+        primary = link.is_primary and not seen_primary
+        seen_primary = seen_primary or primary
+        db.add(
+            EquipmentTypeWorkCenter(
+                workspace_id=workspace.id,
+                equipment_type_id=row.id,
+                work_center_id=wc.id,
+                is_primary=primary,
+            )
+        )
 
 
 def _set_type_enclaves(
@@ -147,14 +212,17 @@ def list_equipment_types(
     rows = (
         db.query(EquipmentType)
         .options(
+            selectinload(EquipmentType.work_center_links),
             selectinload(EquipmentType.capabilities),
             selectinload(EquipmentType.enclave_links),
         )
         .filter(_visible(EquipmentType, workspace, include_retired))
-        .order_by(EquipmentType.category, EquipmentType.title)
+        .order_by(
+            EquipmentType.category, EquipmentType.subcategory, EquipmentType.title
+        )
         .all()
     )
-    return [_type_out(r) for r in rows]
+    return [_type_out(db, r) for r in rows]
 
 
 @router.post(
@@ -174,7 +242,9 @@ def create_equipment_type(
     owner_id = None if make_global else workspace.id
     _require_write(owner_id, current_user)
 
-    payload = body.model_dump(exclude={"capabilities", "enclave_ids"})
+    payload = body.model_dump(
+        exclude={"capabilities", "enclave_ids", "work_centers"}
+    )
     payload["tags"] = _norm_tags(payload.get("tags") or [])
     row = EquipmentType(workspace_id=owner_id, **payload)
     db.add(row)
@@ -187,10 +257,11 @@ def create_equipment_type(
             )
         )
     _set_type_enclaves(db, row, body.enclave_ids, workspace)
+    _set_type_work_centers(db, row, body.work_centers, workspace)
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(row)
+    return _type_out(db, row)
 
 
 @router.patch("/equipment-types/{type_id}", response_model=EquipmentTypeOut)
@@ -215,7 +286,7 @@ def patch_equipment_type(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(row)
+    return _type_out(db, row)
 
 
 @router.put(
@@ -255,7 +326,7 @@ def replace_type_capabilities(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(row)
+    return _type_out(db, row)
 
 
 @router.put("/equipment-types/{type_id}/enclaves", response_model=EquipmentTypeOut)
@@ -280,7 +351,7 @@ def replace_type_enclaves(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(row)
+    return _type_out(db, row)
 
 
 @router.delete("/equipment-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -419,6 +490,33 @@ def patch_utc_def(
     db.refresh(row)
     notify(background_tasks)
     return _utc_def_out(db, row)
+
+
+@router.put(
+    "/equipment-types/{type_id}/work-centers", response_model=EquipmentTypeOut
+)
+def replace_type_work_centers(
+    type_id: int,
+    body: list[EquipmentTypeWorkCenterIn],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    """Replace which work centers answer for this type, wholesale.
+
+    Note this does NOT go through `_require_write`: naming your own shop as
+    responsible for a global catalog row is a workspace-local fact, not an edit
+    to the shared catalog, and `_set_type_work_centers` only ever touches rows
+    carrying this workspace's id. Requiring admin here would mean no ordinary
+    workspace could ever say who owns a globally-catalogued radio.
+    """
+    row = _load_type(db, type_id, workspace)
+    _set_type_work_centers(db, row, body, workspace)
+    db.flush()
+    db.refresh(row)
+    notify(background_tasks)
+    return _type_out(db, row)
 
 
 @router.put("/utc-defs/{utc_def_id}/lines", response_model=UtcDefOut)

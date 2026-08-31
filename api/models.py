@@ -1612,7 +1612,17 @@ class EquipmentType(Base):
     )
     nsn: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
     lin: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
-    category: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
+    # Two levels, deliberately. `category` is the coarse one shared with
+    # `utc_def.category` (schemas.AssetCategory) so a UTC and the gear inside it
+    # can be filtered and reconciled against the same vocabulary. `subcategory`
+    # is the old `category` column: what kind of box it is. A TACLANE is
+    # comm/crypto; an ECU is environmental/environmental. See migration 0062.
+    category: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="comm", server_default=text("'comm'")
+    )
+    subcategory: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="other"
+    )
     # False = tracked as a bulk quantity (equipment_holding), not per serial.
     serialized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Prefix for the generated equipment ID: "R" + last 4 of serial = R7421.
@@ -1640,6 +1650,10 @@ class EquipmentType(Base):
     )
     enclave_links: Mapped[list["EquipmentTypeEnclave"]] = relationship(
         "EquipmentTypeEnclave",
+        cascade="all, delete-orphan",
+    )
+    work_center_links: Mapped[list["EquipmentTypeWorkCenter"]] = relationship(
+        "EquipmentTypeWorkCenter",
         cascade="all, delete-orphan",
     )
 
@@ -1671,6 +1685,60 @@ class EquipmentTypeEnclave(Base):
     )
     enclave_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("enclave.id", ondelete="CASCADE"), nullable=False
+    )
+
+
+class EquipmentTypeWorkCenter(Base):
+    """Which work center answers for a model of gear.
+
+    Usually exactly one shop owns a kind of box, but not always — a generator
+    can be shared between power and facilities — so this is a list with at most
+    one row flagged `is_primary`. A nullable `work_center_id` on
+    `equipment_type` would have said "exactly one, or none", which is the one
+    shape the real world does not take.
+
+    Carries its own `workspace_id`, and that is the whole reason this is a
+    table rather than a column. `work_center.workspace_id` is NOT NULL while
+    `equipment_type.workspace_id` is nullable — global catalog rows exist — so
+    a plain FK on the type is inexpressible: a global TACLANE row cannot point
+    at one workspace's 3rd shop. Hanging the assignment off a workspace-scoped
+    join lets each workspace answer for the shared catalog in its own terms.
+    """
+
+    __tablename__ = "equipment_type_work_center"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "equipment_type_id",
+            "work_center_id",
+            name="uq_equipment_type_work_center",
+        ),
+        # One primary per type per workspace. Partial, because the constraint
+        # is about the flagged row only — any number may be non-primary.
+        Index(
+            "uq_equipment_type_work_center_primary",
+            "workspace_id",
+            "equipment_type_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="CASCADE"), nullable=False
+    )
+    work_center_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("work_center.id", ondelete="CASCADE"), nullable=False
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
 
 
@@ -1711,7 +1779,20 @@ class EquipmentTypeCapability(Base):
 
 
 class UtcDef(Base):
-    """A Unit Type Code definition — the authorized bill of materials."""
+    """A Unit Type Code definition — the authorized bill of materials.
+
+    `category` says what KIND of thing the UTC is, and is the one field that
+    changes how the definition is read: a `comm` UTC is described enclave by
+    enclave, because that is how its gear divides, while an HVAC or PowerPro
+    set has no network to divide along and is just a list.
+
+    NOT the same fact as `package_def_utc.role_hint`, which already carries a
+    `support` value for "HVAC, PowerPro and the like". That records what a UTC
+    does IN ONE PACKAGE — a comm UTC can be the `alternate` standing by for the
+    primary — and the same UTC can hold different hints in different packages.
+    This is intrinsic and holds everywhere the UTC appears. The two correlate
+    without either being derivable from the other, so both are stored.
+    """
 
     __tablename__ = "utc_def"
     __table_args__ = (
@@ -1734,6 +1815,12 @@ class UtcDef(Base):
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # A static vocabulary (schemas.UtcCategory), not a managed lookup table —
+    # same call `EquipmentType.category` makes. Defaults to `comm` because that
+    # is what every existing row is; see migration 0061.
+    category: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="comm", server_default=text("'comm'")
+    )
     retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
