@@ -1,5 +1,5 @@
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
-import { ForceElementsClient } from "@/components/equipment/force-elements-client"
+import { ForceElementTemplatesClient } from "@/components/equipment/force-element-templates-client"
 import { apiGet } from "@/lib/api"
 import { requireSession } from "@/lib/auth"
 import type { PackageDef, UtcDef } from "@/lib/types"
@@ -10,7 +10,7 @@ import type { PackageDef, UtcDef } from "@/lib/types"
  *  equipment types, capabilities — belongs to the equipment catalog; pulling it
  *  in here buried the structure this page exists to show. Read-only: every
  *  write still goes through the catalog page's sheets. */
-export default async function ForceElementsPage({
+export default async function ForceElementTemplatesPage({
   params,
 }: {
   params: Promise<{ workspace: string }>
@@ -25,14 +25,16 @@ export default async function ForceElementsPage({
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs items={[{ label: "Force elements" }]} />
+      <PageBreadcrumbs items={[{ label: "Force element templates" }]} />
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Force elements</h1>
+        <h1 className="text-lg font-semibold tracking-tight">
+          Force element templates
+        </h1>
         <p className="text-xs text-muted-foreground">
           Every package and the UTCs it carries, with the role each one plays.
         </p>
       </div>
-      <ForceElementsClient utcDefs={utcDefs} packageDefs={packageDefs} />
+      <ForceElementTemplatesClient utcDefs={utcDefs} packageDefs={packageDefs} />
     </div>
   )
 }

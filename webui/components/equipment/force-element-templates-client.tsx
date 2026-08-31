@@ -149,7 +149,7 @@ interface Props {
   packageDefs: PackageDef[]
 }
 
-export function ForceElementsClient({ utcDefs, packageDefs }: Props) {
+export function ForceElementTemplatesClient({ utcDefs, packageDefs }: Props) {
   const { w } = useWorkspace()
   const [query, setQuery] = useState("")
 
@@ -232,7 +232,7 @@ export function ForceElementsClient({ utcDefs, packageDefs }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search package or UTC…"
           className="pl-8"
-          aria-label="Search force elements"
+          aria-label="Search force element templates"
         />
       </div>
 
@@ -319,7 +319,7 @@ export function ForceElementsClient({ utcDefs, packageDefs }: Props) {
                 assistive tech. buttonVariants gives the same styling on an
                 honest <a>. */}
             <Link
-              href={w(`/admin/force-elements/${c.def.id}`)}
+              href={w(`/admin/force-element-templates/${c.def.id}`)}
               className={cn(
                 buttonVariants({ variant: "outline" }),
                 "w-full",
@@ -341,8 +341,8 @@ export function ForceElementsClient({ utcDefs, packageDefs }: Props) {
             <span className="h-px flex-1 bg-border" />
           </div>
           {/* One card each, same shape as a package card: a UTC that no package
-              composes is still a force element in its own right, not a footnote
-              to the ones that are. */}
+              composes is still a force element template in its own right, not
+              a footnote to the ones that are. */}
           {visibleOrphans.map((u) => (
             <Card
               key={u.key}

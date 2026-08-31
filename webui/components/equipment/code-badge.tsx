@@ -6,8 +6,9 @@ import { cn } from "@/lib/utils"
  *  read as identifiers rather than prose.
  *
  *  Its own module rather than living in `catalog-detail-sheets`: the read-only
- *  Force Elements page wants the badge and nothing else, and importing it from
- *  there would drag every sheet, editor and write path along with it.
+ *  Force Element Templates page wants the badge and nothing else, and
+ *  importing it from there would drag every sheet, editor and write path along
+ *  with it.
  *
  *  Vertical centering is set by measurement, not by eye. With `leading-none`
  *  the 13px line box is shorter than Inter's ascent+descent (13 + 3), so CSS
