@@ -4,9 +4,9 @@ import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { PackageDetailClient } from "@/components/equipment/package-detail-client"
 import { apiGet } from "@/lib/api"
 import { requireSession } from "@/lib/auth"
-import type { PackageDef } from "@/lib/types"
+import type { PackageDef, UtcDef } from "@/lib/types"
 
-/** One package definition, with its properties editable in place.
+/** One package definition: what it is, and the UTCs it carries.
  *
  *  The list endpoint is the only read path — the API exposes no
  *  `GET /package-defs/{id}` — so this finds the row in the collection it
@@ -21,9 +21,12 @@ export default async function PackageDetailPage({
   const w = (path: string) => `/w/${slug}${path}`
   const me = await requireSession()
 
-  const packageDefs = await apiGet<PackageDef[]>("/package-defs").catch(
-    () => [] as PackageDef[],
-  )
+  // The UTC catalog comes down with the package because the manage panel needs
+  // every definition on offer, not just the ones already in the list.
+  const [packageDefs, utcDefs] = await Promise.all([
+    apiGet<PackageDef[]>("/package-defs").catch(() => [] as PackageDef[]),
+    apiGet<UtcDef[]>("/utc-defs").catch(() => [] as UtcDef[]),
+  ])
   const def = packageDefs.find((p) => String(p.id) === id)
   if (!def) notFound()
 
@@ -38,7 +41,7 @@ export default async function PackageDetailPage({
           { label: def.code },
         ]}
       />
-      <PackageDetailClient def={def} role={me.role} />
+      <PackageDetailClient def={def} utcDefs={utcDefs} role={me.role} />
     </div>
   )
 }
