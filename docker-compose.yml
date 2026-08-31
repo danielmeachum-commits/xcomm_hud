@@ -1,0 +1,5 @@
+# Thin wrapper so `docker compose` works too. The real service definitions
+# live in podman-compose.yml (the primary, actively-maintained file) — this
+# just includes them rather than duplicating them.
+include:
+  - podman-compose.yml
