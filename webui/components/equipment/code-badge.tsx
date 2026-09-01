@@ -2,8 +2,8 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
-/** Code pill for a UTC or package. Mirrors the transport-badge shape so codes
- *  read as identifiers rather than prose.
+/** Code pill for a UTC, a package, or an equipment type's short name. Mirrors
+ *  the transport-badge shape so codes read as identifiers rather than prose.
  *
  *  Its own module rather than living in `catalog-detail-sheets`: the read-only
  *  Packages page wants the badge and nothing else, and

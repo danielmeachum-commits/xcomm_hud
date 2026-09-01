@@ -3,7 +3,7 @@ import { CatalogCreateDialog } from "@/components/equipment/catalog-create-dialo
 import { EquipmentTypesClient } from "@/components/equipment/equipment-types-client"
 import { apiGet } from "@/lib/api"
 import { requireSession } from "@/lib/auth"
-import type { Enclave, EquipmentType, WorkCenter } from "@/lib/types"
+import type { EquipmentType } from "@/lib/types"
 
 /** Reference data for gear: what a model of equipment is and what it can do.
  *  One row per kind, not per item — the ones we actually own are the property
@@ -16,15 +16,11 @@ export default async function EquipmentTypesPage({
   await params
   const me = await requireSession()
 
-  // Work centers come down so the type sheet can say who answers for a piece
-  // of gear without a second round trip.
-  const [types, enclaves, workCenters] = await Promise.all([
-    apiGet<EquipmentType[]>("/equipment-types").catch(
-      () => [] as EquipmentType[],
-    ),
-    apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
-    apiGet<WorkCenter[]>("/work-centers").catch(() => [] as WorkCenter[]),
-  ])
+  // Just the types: enclaves and work centers belong to one row's detail
+  // page, which fetches them itself, and the list never showed them.
+  const types = await apiGet<EquipmentType[]>("/equipment-types").catch(
+    () => [] as EquipmentType[],
+  )
   const isAdmin = me.role === "admin"
 
   return (
@@ -41,12 +37,7 @@ export default async function EquipmentTypesPage({
         </div>
         <CatalogCreateDialog kind="types" types={types} isAdmin={isAdmin} />
       </div>
-      <EquipmentTypesClient
-        types={types}
-        enclaves={enclaves}
-        workCenters={workCenters}
-        isAdmin={isAdmin}
-      />
+      <EquipmentTypesClient types={types} isAdmin={isAdmin} />
     </div>
   )
 }

@@ -17,6 +17,10 @@ interface Props<T extends string> {
   options: ViewTabOption<T>[]
   variant?: ViewTabsVariant
   className?: string
+  /** Names the tablist for assistive tech. Required in practice wherever a
+   *  page carries two of these — "tab list" twice says nothing about which
+   *  is which. */
+  label?: string
 }
 
 export function ViewTabs<T extends string>({
@@ -25,11 +29,13 @@ export function ViewTabs<T extends string>({
   options,
   variant = "pill",
   className,
+  label,
 }: Props<T>) {
   if (variant === "line") {
     return (
       <div
         role="tablist"
+        aria-label={label}
         className={cn(
           "inline-flex w-full items-center gap-4 border-b border-border text-sm",
           className,
@@ -64,6 +70,7 @@ export function ViewTabs<T extends string>({
   return (
     <div
       role="tablist"
+      aria-label={label}
       className={cn(
         "inline-flex w-fit items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 text-xs",
         className,

@@ -1,13 +1,46 @@
 "use client"
 
+import {
+  closestCorners,
+  DndContext,
+  KeyboardSensor,
+  MeasuringStrategy,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core"
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers"
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { Plus, X } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
-import { TagsInput } from "@/components/equipment/tags-input"
+import { GripDots } from "@/components/equipment/grip-dots"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import {
   Sheet,
@@ -21,18 +54,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import {
   CAPABILITY_LABELS,
-  ASSET_CATEGORY_LABELS,
-  ASSET_CATEGORY_VALUES,
-  EQUIPMENT_SUBCATEGORY_LABELS,
   EQUIPMENT_SUBCATEGORY_VALUES,
   UTC_ROLE_HINT_LABELS,
   UTC_ROLE_HINT_VALUES,
-  equipmentIcon,
 } from "@/lib/equipment-meta"
 import type {
   CapabilityKind,
   Enclave,
-  AssetCategory,
   EquipmentSubcategory,
   EquipmentType,
   WorkCenter,
@@ -66,10 +94,10 @@ async function send(
   return typeof detail.detail === "string" ? detail.detail : "Failed to save"
 }
 
-const patch = (url: string, body: unknown) => send("PATCH", url, body)
-const put = (url: string, body: unknown) => send("PUT", url, body)
+export const patch = (url: string, body: unknown) => send("PATCH", url, body)
+export const put = (url: string, body: unknown) => send("PUT", url, body)
 
-function Field({
+export function Field({
   label,
   children,
   hint,
@@ -98,25 +126,51 @@ function Field({
 /** `kinds` shows the catalog's generic name for each kind — right for an
  *  aggregate across types. `caps` shows a type's own labels, which may be
  *  hand-written ("SIPR data" rather than "Data"). */
-function CapabilityChips({
+export function CapabilityChips({
   kinds,
   caps,
 }: {
   kinds?: CapabilityKind[]
-  caps?: { kind: CapabilityKind; label: string }[]
+  /** `materialize_by_default` is read where the caller has it. An aggregate
+   *  over several types does not: whether a capability comes as standard is a
+   *  fact about one model, not about a union of them. */
+  caps?: {
+    kind: CapabilityKind
+    label: string
+    materialize_by_default?: boolean
+  }[]
 }) {
   const chips =
-    caps?.map((c, i) => ({ key: `${c.kind}-${i}`, text: c.label })) ??
-    kinds?.map((k) => ({ key: k, text: CAPABILITY_LABELS[k] })) ??
+    caps?.map((c, i) => ({
+      key: `${c.kind}-${i}`,
+      text: c.label,
+      optional: c.materialize_by_default === false,
+    })) ??
+    kinds?.map((k) => ({
+      key: k,
+      text: CAPABILITY_LABELS[k],
+      optional: false,
+    })) ??
     []
   if (chips.length === 0)
     return <span className="text-xs text-muted-foreground">None</span>
   return (
     <div className="flex flex-wrap gap-1">
       {chips.map((c) => (
+        // Dashed means optional, the same way it does on the enclave chips: an
+        // outline drawn but not filled in reads as "sometimes", and it is the
+        // only mark read mode makes — the editor says it with two groups, and
+        // at rest this was the one place the distinction went missing.
+        //
+        // The title carries it for anyone who cannot see a dash: a border
+        // style is not something a screen reader announces.
         <span
           key={c.key}
-          className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+          title={c.optional ? `${c.text} — optional on this model` : undefined}
+          className={cn(
+            "rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground",
+            c.optional && "border-dashed",
+          )}
         >
           {c.text}
         </span>
@@ -189,9 +243,14 @@ export const CAPABILITY_VALUES = Object.keys(
   CAPABILITY_LABELS,
 ) as CapabilityKind[]
 
-/** Editable shape of one declared capability. No `id` — the save path replaces
- *  the whole list, so rows only need to survive until the PUT. */
+/** Editable shape of one declared capability. No server `id` — the save path
+ *  replaces the whole list, so rows only need to survive until the PUT. */
 export interface CapabilityDraft {
+  /** Identity for React and for dnd-kit, stable across a reorder — the array
+   *  index is not, and sorting by index makes the dragged row swap places with
+   *  its own ghost. Never sent: every caller builds the PUT body field by
+   *  field. */
+  uid: string
   kind: CapabilityKind
   label: string
   materialize_by_default: boolean
@@ -258,8 +317,416 @@ export function EnclaveCapabilityPicker({
   )
 }
 
+/** dnd-kit addresses every droppable by one id, and a group has to be
+ *  droppable while it is empty, so its id cannot be one of its rows'. */
+const GROUP = "group:"
+
+/** The two groups, in the order they are shown. Standard first: it is what
+ *  most capabilities are, and the list should open reading as what this gear
+ *  does rather than as what it might do. */
+const STANDARD = "standard"
+const OPTIONAL = "optional"
+type CapabilityGroupId = typeof STANDARD | typeof OPTIONAL
+
+const GROUP_LABELS: Record<CapabilityGroupId, string> = {
+  [STANDARD]: "Standard",
+  [OPTIONAL]: "Optional",
+}
+
+const GROUP_HINTS: Record<CapabilityGroupId, string> = {
+  [STANDARD]: "Every one of these boxes has it. Ticked when a kit is registered.",
+  [OPTIONAL]: "Only some boxes have it. Unticked until someone says otherwise.",
+}
+
+/** Which group a capability sits in. `materialize_by_default` is written from
+ *  the box's point of view — a capability that comes as standard is pre-ticked
+ *  when a kit is registered — so Standard is the true case. */
+function groupOf(cap: CapabilityDraft): CapabilityGroupId {
+  return cap.materialize_by_default ? STANDARD : OPTIONAL
+}
+
+let addedCapabilities = 0
+
+/** Put a new capability at the end of `group`, in the flat list.
+ *
+ *  Which kind it is gets decided here and never again: with the row's select
+ *  gone, changing your mind means removing the row and adding the one you
+ *  meant. That is the honest shape of it — a capability is not a slot whose
+ *  kind you adjust, it is a thing the gear either provides or does not. */
+function addCapability(
+  rows: CapabilityDraft[],
+  kind: CapabilityKind,
+  group: CapabilityGroupId,
+  /** Only "other" carries one: it is asked for at add time, because a row
+   *  that cannot say what it is has nothing to show in the list. */
+  label?: string,
+): CapabilityDraft[] {
+  const fresh: CapabilityDraft = {
+    uid: `new${addedCapabilities++}`,
+    kind,
+    label: label?.trim() || (kind === "other" ? "" : CAPABILITY_LABELS[kind]),
+    materialize_by_default: group === STANDARD,
+  }
+  let at = rows.length
+  rows.forEach((r, i) => {
+    if (groupOf(r) === group) at = i + 1
+  })
+  return [...rows.slice(0, at), fresh, ...rows.slice(at)]
+}
+
+/** The reason a list of capabilities cannot be saved yet, or null.
+ *
+ *  The catalog is unique on (equipment_type_id, kind, label), so two rows of
+ *  one kind have to differ by name. That only bites "other" — every other kind
+ *  is offered once — and it is why the name field exists: a second unnamed
+ *  "Other" serialises to the same label as the first and the API can only
+ *  reject it. Caught here so the bar can say which name collides, rather than
+ *  letting a save fail on a constraint nobody outside the database has read. */
+export function capabilityNameError(rows: CapabilityDraft[]): string | null {
+  const seen = new Set<string>()
+  for (const r of rows) {
+    const named = r.label.trim()
+    if (r.kind === "other" && !named)
+      return "Every Other capability needs a name."
+    const key = `${r.kind}\u0000${named.toLowerCase()}`
+    if (seen.has(key))
+      return `Two capabilities are both called \u201C${named}\u201D.`
+    seen.add(key)
+  }
+  return null
+}
+
+/** Pull a row out of the flat list and put it back in `group`, either in front
+ *  of `overUid` or at the end of that group.
+ *
+ *  The list stays flat rather than becoming two arrays: `display_order` is one
+ *  sequence across the whole type, and rebuilding it from two buckets every
+ *  save would invent an ordering nobody chose. Which group a row is in is not
+ *  stored anywhere separate — it *is* `materialize_by_default`, so the move
+ *  writes that and nothing else. */
+function moveCapability(
+  rows: CapabilityDraft[],
+  activeUid: string,
+  group: CapabilityGroupId,
+  overUid: string | null,
+): CapabilityDraft[] {
+  const active = rows.find((r) => r.uid === activeUid)
+  if (!active) return rows
+  const rest = rows.filter((r) => r.uid !== activeUid)
+  const moved = { ...active, materialize_by_default: group === STANDARD }
+  if (overUid) {
+    const at = rest.findIndex((r) => r.uid === overUid)
+    if (at >= 0) return [...rest.slice(0, at), moved, ...rest.slice(at)]
+  }
+  // Dropped on the group itself rather than on one of its rows: land after
+  // whatever it already holds, or at the end when it holds nothing.
+  let at = rest.length
+  rest.forEach((r, i) => {
+    if (groupOf(r) === group) at = i + 1
+  })
+  return [...rest.slice(0, at), moved, ...rest.slice(at)]
+}
+
+/** One declared capability: what it is, and nothing else.
+ *
+ *  No control for the kind. It used to be a select, which invited you to
+ *  rewrite a row into a different capability entirely — a thing you almost
+ *  never mean, and one that quietly carried the row's group and position with
+ *  it. Changing your mind is now remove-and-add, which is the same number of
+ *  clicks and says what it does.
+ *
+ *  Standard-or-optional is likewise not on the row: it is the group the row
+ *  sits in, the way the package page carries a UTC's role. So a row is down to
+ *  a handle, a name and a way to delete it. */
+function CapabilityRow({
+  cap,
+  disabled,
+  onRemove,
+  onRename,
+}: {
+  cap: CapabilityDraft
+  disabled: boolean
+  onRemove: () => void
+  onRename: (label: string) => void
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: cap.uid })
+
+  // The stored label where there is one, which is what read mode shows and
+  // what the write path saves. Nothing edits it any more, but a type that
+  // already calls this "SATCOM (TSM/DAMA)" should still say so here.
+  const name = cap.label.trim() || CAPABILITY_LABELS[cap.kind]
+
+  return (
+    <Item
+      variant="outline"
+      size="sm"
+      render={
+        <div
+          ref={setNodeRef}
+          style={{ transform: CSS.Transform.toString(transform), transition }}
+          className={cn(
+            // Lifted off the stack while it travels, so it reads as the thing
+            // being moved rather than a row the list is shuffling around.
+            isDragging && "z-10 shadow-lg",
+          )}
+        />
+      }
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`Move ${name}`}
+        disabled={disabled}
+        className="flex cursor-grab items-center self-stretch rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 active:cursor-grabbing disabled:pointer-events-none disabled:opacity-50"
+      >
+        <GripDots />
+      </button>
+
+      <ItemContent className="min-w-0">
+        {cap.kind === "other" ? (
+          // The one kind the label table cannot name. "Other" is the bucket
+          // for everything not enumerated, so the row says nothing until
+          // someone says what it actually is. The named kinds stay read-only
+          // on purpose — a field there only invites typing "SATCOM" into a
+          // row already called SATCOM.
+          <Input
+            value={cap.label}
+            onChange={(e) => onRename(e.target.value)}
+            disabled={disabled}
+            placeholder="What is it?"
+            aria-label="Name for this capability"
+            maxLength={96}
+            className="h-7 rounded-full px-2.5 md:text-sm"
+          />
+        ) : (
+          <ItemTitle className="font-normal">{name}</ItemTitle>
+        )}
+      </ItemContent>
+
+      <ItemActions>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Remove ${name}`}
+          disabled={disabled}
+          onClick={onRemove}
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        >
+          <X className="size-4" />
+        </Button>
+      </ItemActions>
+    </Item>
+  )
+}
+
+/** Add a capability straight into one group.
+ *
+ *  One per group rather than a single button below both, because the group is
+ *  now the only thing that says standard-or-optional: adding from inside
+ *  Optional is how you declare an optional capability without a second step.
+ *
+ *  Kinds already on this type are left out. With no way to rename a row, two
+ *  rows of the same kind would be two rows nobody could tell apart. */
+function AddCapability({
+  group,
+  taken,
+  disabled,
+  onAdd,
+}: {
+  group: CapabilityGroupId
+  taken: Set<CapabilityKind>
+  disabled: boolean
+  onAdd: (kind: CapabilityKind, label?: string) => void
+}) {
+  // The name for an "Other" being added, or null when the menu is at rest.
+  // Asked for here rather than on the row, so the list never holds a row that
+  // cannot say what it is — which is also the shape the catalog's
+  // (type, kind, label) uniqueness needs to hold.
+  const [naming, setNaming] = useState<string | null>(null)
+  // "Other" is offered however many are already declared: it is the bucket for
+  // everything the vocabulary does not name, and one model can easily carry two
+  // unrelated ones. Its rows are told apart by the name typed into them, which
+  // is exactly what the catalog's (type, kind, label) uniqueness wants. Every
+  // named kind is still offered once — a second SATCOM row would duplicate the
+  // first with nothing to tell them apart.
+  const offered = CAPABILITY_VALUES.filter(
+    (k) => k === "other" || !taken.has(k),
+  )
+
+  function commit() {
+    const label = (naming ?? "").trim()
+    if (!label) return
+    onAdd("other", label)
+    setNaming(null)
+  }
+
+  if (naming !== null) {
+    return (
+      // Deliberately not a <form>: this sits inside one on the create dialog,
+      // and a nested form is not markup a browser will honour.
+      <div className="flex items-center gap-1.5 self-stretch pt-1">
+        <Input
+          autoFocus
+          value={naming}
+          onChange={(e) => setNaming(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              commit()
+            } else if (e.key === "Escape") {
+              e.preventDefault()
+              setNaming(null)
+            }
+          }}
+          disabled={disabled}
+          placeholder="What is it?"
+          aria-label="Name for the new capability"
+          // The catalog stores 96 characters; stopping here beats a 500.
+          maxLength={96}
+          className="h-8"
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={commit}
+          disabled={disabled || !naming.trim()}
+        >
+          Add
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setNaming(null)}
+          disabled={disabled}
+        >
+          Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="self-start text-muted-foreground"
+            disabled={disabled}
+            title={`Add a ${GROUP_LABELS[group].toLowerCase()} capability`}
+          />
+        }
+      >
+        <Plus className="size-4" />
+        Add
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-48">
+        {offered.map((k) => (
+          <DropdownMenuItem
+            key={k}
+            onClick={() => (k === "other" ? setNaming("") : onAdd(k))}
+          >
+            {CAPABILITY_LABELS[k]}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** One of the two groups. Both are always on screen, even empty: with only two
+ *  of them the empty one is the other half of the choice, a destination you
+ *  cannot see is one you will not drag to, and its Add is the only way to
+ *  declare a capability straight into it. */
+function CapabilityGroup({
+  group,
+  rows,
+  taken,
+  disabled,
+  onAdd,
+  onRemove,
+  onRename,
+}: {
+  group: CapabilityGroupId
+  rows: CapabilityDraft[]
+  taken: Set<CapabilityKind>
+  disabled: boolean
+  onAdd: (kind: CapabilityKind, label?: string) => void
+  onRemove: (uid: string) => void
+  onRename: (uid: string, label: string) => void
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `${GROUP}${group}` })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex flex-col gap-2 rounded-2xl border border-transparent p-2 transition-colors",
+        isOver && "border-ring/40 bg-muted/50",
+      )}
+    >
+      <div className="flex flex-col px-1">
+        <h3 className="text-sm font-medium">{GROUP_LABELS[group]}</h3>
+        <p className="text-[11px] text-muted-foreground">
+          {GROUP_HINTS[group]}
+        </p>
+      </div>
+
+      <SortableContext
+        items={rows.map((r) => r.uid)}
+        strategy={verticalListSortingStrategy}
+      >
+        {rows.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
+            Nothing here. Drop one in, or add one.
+          </p>
+        ) : (
+          <ItemGroup>
+            {rows.map((cap) => (
+              <CapabilityRow
+                key={cap.uid}
+                cap={cap}
+                disabled={disabled}
+                onRemove={() => onRemove(cap.uid)}
+                onRename={(label) => onRename(cap.uid, label)}
+              />
+            ))}
+          </ItemGroup>
+        )}
+      </SortableContext>
+
+      <AddCapability
+        group={group}
+        taken={taken}
+        disabled={disabled}
+        onAdd={onAdd}
+      />
+    </div>
+  )
+}
+
 /** Rows the operator edits in place. Order is meaningful: it becomes
- *  `display_order` server-side. */
+ *  `display_order` server-side.
+ *
+ *  Two groups you drag between rather than a checkbox per row. "Optional" was
+ *  a tick you had to read on every row to learn the shape of the thing; as a
+ *  group it is one glance. Same arrangement as the package page's roles, and
+ *  the same flat list underneath.
+ *
+ *  Both groups render even when the type declares nothing at all, because each
+ *  group's Add is the only way in. */
 export function CapabilityEditor({
   value,
   onChange,
@@ -269,8 +736,76 @@ export function CapabilityEditor({
   onChange: (next: CapabilityDraft[]) => void
   disabled: boolean
 }) {
-  function update(index: number, patch: Partial<CapabilityDraft>) {
-    onChange(value.map((c, i) => (i === index ? { ...c, ...patch } : c)))
+  /** The list as it stood when the drag began, so Escape can put it back:
+   *  the drag has been rearranging it the whole way across. */
+  const beforeDrag = useRef<CapabilityDraft[] | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  )
+
+  const taken = new Set(value.map((c) => c.kind))
+
+  /** Which group the pointer is over — the group itself when it is over the
+   *  group's own padding, otherwise the group of the row under it. */
+  function groupUnder(overId: string): CapabilityGroupId | undefined {
+    if (overId.startsWith(GROUP))
+      return overId.slice(GROUP.length) as CapabilityGroupId
+    const row = value.find((r) => r.uid === overId)
+    return row && groupOf(row)
+  }
+
+  /** Crossing into the other group moves the row *now*, while the pointer is
+   *  still down: each group is its own SortableContext, and dnd-kit previews a
+   *  reflow only within one, so leaving the move until drop showed nothing at
+   *  all until it was too late to change your mind. */
+  function handleDragOver({ active, over }: DragOverEvent) {
+    if (!over) return
+    const activeUid = String(active.id)
+    const overId = String(over.id)
+    if (activeUid === overId) return
+    const row = value.find((r) => r.uid === activeUid)
+    if (!row) return
+    const target = groupUnder(overId)
+    if (!target || target === groupOf(row)) return
+    onChange(
+      moveCapability(
+        value,
+        activeUid,
+        target,
+        overId.startsWith(GROUP) ? null : overId,
+      ),
+    )
+  }
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    beforeDrag.current = null
+    if (!over) return
+    const activeUid = String(active.id)
+    const overId = String(over.id)
+    if (activeUid === overId) return
+    const row = value.find((r) => r.uid === activeUid)
+    if (!row) return
+    const target = groupUnder(overId)
+    if (!target) return
+    // Usually a no-op by now — the row crossed during the drag — but it is what
+    // settles its final position inside the group.
+    onChange(
+      moveCapability(
+        value,
+        activeUid,
+        target,
+        overId.startsWith(GROUP) ? null : overId,
+      ),
+    )
+  }
+
+  function handleDragCancel() {
+    if (beforeDrag.current) onChange(beforeDrag.current)
+    beforeDrag.current = null
   }
 
   return (
@@ -281,84 +816,44 @@ export function CapabilityEditor({
           become the checkboxes when a kit is registered.
         </p>
       )}
-      {value.map((cap, i) => (
-        <div key={i} className="flex flex-col gap-1.5 rounded-md border p-2">
-          <div className="flex gap-1.5">
-            <select
-              aria-label="Capability kind"
-              className={cn(SELECT_CLASS, "flex-1")}
-              value={cap.kind}
+      <DndContext
+        sensors={sensors}
+        // Corners rather than centers: with a group stacked under another, an
+        // empty group's center is a long way from a row being dragged past it
+        // and closestCenter skips over it.
+        collisionDetection={closestCorners}
+        // An empty group has to be measured during the drag, not before it, or
+        // the placeholder box it shows is not a target yet.
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+        modifiers={[restrictToVerticalAxis]}
+        onDragStart={() => {
+          beforeDrag.current = value
+        }}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className="flex flex-col gap-1">
+          {([STANDARD, OPTIONAL] as CapabilityGroupId[]).map((g) => (
+            <CapabilityGroup
+              key={g}
+              group={g}
+              rows={value.filter((c) => groupOf(c) === g)}
+              taken={taken}
               disabled={disabled}
-              onChange={(e) => {
-                const kind = e.target.value as CapabilityKind
-                // Keep a hand-written label, but retitle one the operator
-                // never touched so it follows the kind they just picked.
-                const renamed =
-                  cap.label === CAPABILITY_LABELS[cap.kind] || !cap.label.trim()
-                update(i, {
-                  kind,
-                  ...(renamed ? { label: CAPABILITY_LABELS[kind] } : {}),
-                })
-              }}
-            >
-              {CAPABILITY_VALUES.map((k) => (
-                <option key={k} value={k}>
-                  {CAPABILITY_LABELS[k]}
-                </option>
-              ))}
-            </select>
-            <Input
-              aria-label="Capability label"
-              className="flex-1"
-              value={cap.label}
-              placeholder="Label"
-              disabled={disabled}
-              onChange={(e) => update(i, { label: e.target.value })}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label="Remove capability"
-              disabled={disabled}
-              onClick={() => onChange(value.filter((_, x) => x !== i))}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={cap.materialize_by_default}
-              disabled={disabled}
-              onChange={(e) =>
-                update(i, { materialize_by_default: e.target.checked })
+              onAdd={(kind, label) =>
+                onChange(addCapability(value, kind, g, label))
+              }
+              onRemove={(uid) => onChange(value.filter((c) => c.uid !== uid))}
+              onRename={(uid, label) =>
+                onChange(
+                  value.map((c) => (c.uid === uid ? { ...c, label } : c)),
+                )
               }
             />
-            Checked by default when a kit is registered
-          </label>
+          ))}
         </div>
-      ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="self-start"
-        disabled={disabled}
-        onClick={() =>
-          onChange([
-            ...value,
-            {
-              kind: "other",
-              label: CAPABILITY_LABELS.other,
-              materialize_by_default: true,
-            },
-          ])
-        }
-      >
-        <Plus className="size-4" />
-        Add capability
-      </Button>
+      </DndContext>
     </div>
   )
 }
@@ -468,533 +963,6 @@ export function WorkCenterPicker({
   )
 }
 
-/** Order counts — it becomes `display_order` — so compare positionally. */
-function capabilitiesChanged(
-  type: EquipmentType,
-  drafts: CapabilityDraft[],
-): boolean {
-  if (type.capabilities.length !== drafts.length) return true
-  return type.capabilities.some((c, i) => {
-    const d = drafts[i]
-    return (
-      c.kind !== d.kind ||
-      c.label !== (d.label.trim() || CAPABILITY_LABELS[d.kind]) ||
-      c.materialize_by_default !== d.materialize_by_default
-    )
-  })
-}
-
-interface TypeForm {
-  title: string
-  short_name: string
-  /** The coarse level, shared with UTCs. */
-  category: AssetCategory
-  /** What kind of box it is, under `category`. */
-  subcategory: EquipmentSubcategory
-  aliases: string
-  tags: string[]
-  nsn: string
-  lin: string
-  manufacturer: string
-  model: string
-  id_prefix: string
-  serialized: boolean
-  description: string
-  capabilities: CapabilityDraft[]
-  enclave_ids: number[]
-  work_centers: WorkCenterDraft[]
-}
-
-function typeForm(t: EquipmentType): TypeForm {
-  return {
-    title: t.title,
-    short_name: t.short_name ?? "",
-    category: t.category,
-    subcategory: t.subcategory,
-    work_centers: t.work_centers.map((w) => ({
-      work_center_id: w.work_center_id,
-      is_primary: w.is_primary,
-    })),
-    aliases: t.aliases.join(", "),
-    tags: [...t.tags],
-    nsn: t.nsn ?? "",
-    lin: t.lin ?? "",
-    manufacturer: t.manufacturer ?? "",
-    model: t.model ?? "",
-    id_prefix: t.id_prefix,
-    serialized: t.serialized,
-    description: t.description ?? "",
-    capabilities: t.capabilities.map((c) => ({
-      kind: c.kind,
-      label: c.label,
-      materialize_by_default: c.materialize_by_default,
-    })),
-    enclave_ids: [...t.enclave_ids],
-  }
-}
-
-export function EquipmentTypeSheet({
-  type,
-  canEdit,
-  enclaves = [],
-  workCenters = [],
-  tagSuggestions = [],
-  onClose,
-}: {
-  type: EquipmentType | null
-  canEdit: boolean
-  enclaves?: Enclave[]
-  workCenters?: WorkCenter[]
-  tagSuggestions?: string[]
-  onClose: () => void
-}) {
-  const router = useRouter()
-  const [editing, setEditing] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState<TypeForm | null>(null)
-
-  useEffect(() => {
-    setEditing(false)
-    setError(null)
-    setForm(type ? typeForm(type) : null)
-  }, [type])
-
-  async function save() {
-    if (!type || !form) return
-    setPending(true)
-    setError(null)
-    const err = await patch(`/api/be/equipment-types/${type.id}`, {
-      title: form.title.trim(),
-      short_name: form.short_name.trim() || null,
-      category: form.category,
-      aliases: form.aliases
-        .split(",")
-        .map((a) => a.trim())
-        .filter(Boolean),
-      tags: form.tags,
-      nsn: form.nsn.trim() || null,
-      lin: form.lin.trim() || null,
-      manufacturer: form.manufacturer.trim() || null,
-      model: form.model.trim() || null,
-      id_prefix: form.id_prefix.trim() || "X",
-      serialized: form.serialized,
-      description: form.description.trim() || null,
-    })
-    if (err) {
-      setPending(false)
-      setError(err)
-      return
-    }
-    // Capabilities live on their own endpoint (wholesale replace), so this is
-    // a second call. Only make it when the list actually changed — an
-    // unnecessary replace churns rows other UTCs read.
-    const enclavesChanged =
-      [...form.enclave_ids].sort().join(",") !==
-      [...type.enclave_ids].sort().join(",")
-    const encErr = enclavesChanged
-      ? await put(
-          `/api/be/equipment-types/${type.id}/enclaves`,
-          form.enclave_ids,
-        )
-      : null
-    if (encErr) {
-      setPending(false)
-      setError(`Details saved, but enclaves failed: ${encErr}`)
-      router.refresh()
-      return
-    }
-    const wcSig = (rows: WorkCenterDraft[]) =>
-      [...rows]
-        .sort((a, b) => a.work_center_id - b.work_center_id)
-        .map((r) => `${r.work_center_id}:${r.is_primary}`)
-        .join(",")
-    const wcErr =
-      wcSig(form.work_centers) !==
-      wcSig(
-        type.work_centers.map((w) => ({
-          work_center_id: w.work_center_id,
-          is_primary: w.is_primary,
-        })),
-      )
-        ? await put(
-            `/api/be/equipment-types/${type.id}/work-centers`,
-            form.work_centers,
-          )
-        : null
-    if (wcErr) {
-      setPending(false)
-      setError(`Details saved, but work centers failed: ${wcErr}`)
-      router.refresh()
-      return
-    }
-    const capsErr = capabilitiesChanged(type, form.capabilities)
-      ? await put(
-          `/api/be/equipment-types/${type.id}/capabilities`,
-          form.capabilities.map((c) => ({
-            kind: c.kind,
-            label: c.label.trim() || CAPABILITY_LABELS[c.kind],
-            materialize_by_default: c.materialize_by_default,
-          })),
-        )
-      : null
-    setPending(false)
-    if (capsErr) {
-      // The type fields already saved; say so rather than implying a rollback.
-      setError(`Details saved, but capabilities failed: ${capsErr}`)
-      router.refresh()
-      return
-    }
-    setEditing(false)
-    router.refresh()
-  }
-
-  const Icon = type ? equipmentIcon(type.subcategory) : null
-
-  return (
-    <Sheet open={!!type} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full sm:max-w-md">
-        {type && (
-          <>
-            <SheetHeader>
-              <SheetTitle className="flex items-center gap-2">
-                {Icon && <Icon className="size-5 text-muted-foreground" />}
-                {type.title}
-              </SheetTitle>
-              <SheetDescription>
-                {ASSET_CATEGORY_LABELS[type.category]}
-                {" · "}
-                {EQUIPMENT_SUBCATEGORY_LABELS[type.subcategory]}
-                {type.is_global ? " · Global catalog" : " · Workspace"}
-              </SheetDescription>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
-              {editing && form ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="eq-title">Title</Label>
-                    <Input
-                      id="eq-title"
-                      value={form.title}
-                      onChange={(e) =>
-                        setForm({ ...form, title: e.target.value })
-                      }
-                      disabled={pending}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-short">Short name</Label>
-                      <Input
-                        id="eq-short"
-                        value={form.short_name}
-                        onChange={(e) =>
-                          setForm({ ...form, short_name: e.target.value })
-                        }
-                        disabled={pending}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-category">Category</Label>
-                      <select
-                        id="eq-category"
-                        className={SELECT_CLASS}
-                        value={form.category}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            category: e.target.value as AssetCategory,
-                          })
-                        }
-                        disabled={pending}
-                      >
-                        {ASSET_CATEGORY_VALUES.map((c) => (
-                          <option key={c} value={c}>
-                            {ASSET_CATEGORY_LABELS[c]}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-subcategory">Subcategory</Label>
-                      <select
-                        id="eq-subcategory"
-                        className={SELECT_CLASS}
-                        value={form.subcategory}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            subcategory: e.target.value as EquipmentSubcategory,
-                          })
-                        }
-                        disabled={pending}
-                      >
-                        {CATEGORY_VALUES.map((c) => (
-                          <option key={c} value={c}>
-                            {EQUIPMENT_SUBCATEGORY_LABELS[c]}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="eq-aliases">Aliases</Label>
-                    <Input
-                      id="eq-aliases"
-                      value={form.aliases}
-                      onChange={(e) =>
-                        setForm({ ...form, aliases: e.target.value })
-                      }
-                      placeholder="Comma separated"
-                      disabled={pending}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="eq-tags">Tags</Label>
-                    <TagsInput
-                      id="eq-tags"
-                      value={form.tags}
-                      onChange={(tags) => setForm({ ...form, tags })}
-                      suggestions={tagSuggestions}
-                      disabled={pending}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-nsn">NSN</Label>
-                      <Input
-                        id="eq-nsn"
-                        placeholder="5820-01-523-9937"
-                        value={form.nsn}
-                        onChange={(e) =>
-                          setForm({ ...form, nsn: e.target.value })
-                        }
-                        disabled={pending}
-                      />
-                      <span className="text-[11px] text-muted-foreground">
-                        National Stock Number — identifies this model of gear,
-                        not an individual unit. Every one of these shares it;
-                        serials tell them apart.
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-lin">LIN</Label>
-                      <Input
-                        id="eq-lin"
-                        placeholder="R31103"
-                        value={form.lin}
-                        onChange={(e) =>
-                          setForm({ ...form, lin: e.target.value })
-                        }
-                        disabled={pending}
-                      />
-                      <span className="text-[11px] text-muted-foreground">
-                        Line Item Number — the property-book grouping for
-                        interchangeable items. Optional.
-                      </span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-manufacturer">Manufacturer</Label>
-                      <Input
-                        id="eq-manufacturer"
-                        value={form.manufacturer}
-                        onChange={(e) =>
-                          setForm({ ...form, manufacturer: e.target.value })
-                        }
-                        disabled={pending}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-model">Model</Label>
-                      <Input
-                        id="eq-model"
-                        value={form.model}
-                        onChange={(e) =>
-                          setForm({ ...form, model: e.target.value })
-                        }
-                        disabled={pending}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-end gap-3">
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="eq-prefix">ID prefix</Label>
-                      <Input
-                        id="eq-prefix"
-                        className="w-20"
-                        value={form.id_prefix}
-                        onChange={(e) =>
-                          setForm({ ...form, id_prefix: e.target.value })
-                        }
-                        disabled={pending || !form.serialized}
-                      />
-                    </div>
-                    <label className="flex h-9 items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={form.serialized}
-                        onChange={(e) =>
-                          setForm({ ...form, serialized: e.target.checked })
-                        }
-                        disabled={pending}
-                      />
-                      Tracked by serial
-                    </label>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="eq-desc">Description</Label>
-                    <Textarea
-                      id="eq-desc"
-                      rows={3}
-                      value={form.description}
-                      onChange={(e) =>
-                        setForm({ ...form, description: e.target.value })
-                      }
-                      disabled={pending}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label>Enclaves this gear can serve</Label>
-                    <EnclaveCapabilityPicker
-                      enclaves={enclaves}
-                      value={form.enclave_ids}
-                      onChange={(enclave_ids) =>
-                        setForm({ ...form, enclave_ids })
-                      }
-                      disabled={pending}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label>Responsible work centers</Label>
-                    <p className="text-[11px] text-muted-foreground">
-                      Usually one shop owns a kind of gear, but it can be
-                      shared. The primary is who gets asked first.
-                    </p>
-                    <WorkCenterPicker
-                      workCenters={workCenters}
-                      value={form.work_centers}
-                      onChange={(work_centers) =>
-                        setForm({ ...form, work_centers })
-                      }
-                      disabled={pending}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label>Capabilities</Label>
-                    <CapabilityEditor
-                      value={form.capabilities}
-                      onChange={(capabilities) =>
-                        setForm({ ...form, capabilities })
-                      }
-                      disabled={pending}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {type.description && (
-                    <p className="text-sm text-muted-foreground">
-                      {type.description}
-                    </p>
-                  )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Short name">{type.short_name || "—"}</Field>
-                    <Field label="Tracking">
-                      {type.serialized
-                        ? `Serialized · IDs start ${type.id_prefix}`
-                        : "Bulk (no serial)"}
-                    </Field>
-                    <Field
-                      label="NSN"
-                      hint="National Stock Number — identifies the model, not an individual unit"
-                    >
-                      {type.nsn || "—"}
-                    </Field>
-                    <Field
-                      label="LIN"
-                      hint="Line Item Number — property-book grouping for interchangeable items"
-                    >
-                      {type.lin || "—"}
-                    </Field>
-                    <Field label="Manufacturer">
-                      {type.manufacturer || "—"}
-                    </Field>
-                    <Field label="Model">{type.model || "—"}</Field>
-                  </div>
-                  <Field label="Also called">
-                    {type.aliases.length > 0 ? type.aliases.join(", ") : "—"}
-                  </Field>
-                  <Field label="Tags">
-                    {type.tags.length > 0 ? (
-                      <span className="flex flex-wrap gap-1">
-                        {type.tags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded-full bg-muted px-2 py-0.5 text-xs"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </Field>
-                  <Field label="Enclaves">
-                    {type.enclave_ids.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">
-                        Any — none declared
-                      </span>
-                    ) : (
-                      <span className="flex flex-wrap gap-1">
-                        {type.enclave_ids.map((id) => {
-                          const en = enclaves.find((e) => e.id === id)
-                          if (!en) return null
-                          return (
-                            <span
-                              key={id}
-                              className={cn(
-                                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                                enclaveChipClass(en.color),
-                              )}
-                              style={enclaveChipStyle(en.color)}
-                            >
-                              {en.short_name || en.name}
-                            </span>
-                          )
-                        })}
-                      </span>
-                    )}
-                  </Field>
-                  <Field label="Capabilities">
-                    <CapabilityChips caps={type.capabilities} />
-                  </Field>
-                </div>
-              )}
-            </div>
-
-            <SaveBar
-              editing={editing}
-              canEdit={canEdit}
-              pending={pending}
-              error={error}
-              onEdit={() => setEditing(true)}
-              onCancel={() => {
-                setEditing(false)
-                setError(null)
-                setForm(typeForm(type))
-              }}
-              onSave={save}
-            />
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
-  )
-}
 
 // ===================== UTC definition =====================
 
