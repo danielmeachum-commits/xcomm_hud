@@ -5,6 +5,7 @@ import Link from "next/link"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
 import { UtcDefContents } from "@/components/equipment/utc-def-contents"
+import { UtcManforContents } from "@/components/equipment/utc-manfor-contents"
 import { buttonVariants } from "@/components/ui/button"
 import {
   Sheet,
@@ -16,6 +17,7 @@ import {
 import {
   ASSET_CATEGORY_ICONS,
   ASSET_CATEGORY_LABELS,
+  MEFPAK_HALVES,
 } from "@/lib/equipment-meta"
 import type { Enclave, UtcDef } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -69,8 +71,18 @@ export function UtcDefPeekSheet({
               </SheetDescription>
             </SheetHeader>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-2">
-              <UtcDefContents def={def} enclaves={enclaves} />
+            {/* Both halves, MANFOR first — the question this sheet answers is
+                "what does that one put on the ground", and a packing list with
+                nobody to unpack it is half an answer. */}
+            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-2">
+              <section className="flex flex-col gap-2">
+                <HalfHeading half="manfor" />
+                <UtcManforContents def={def} />
+              </section>
+              <section className="flex min-w-0 flex-col gap-2">
+                <HalfHeading half="logdet" />
+                <UtcDefContents def={def} enclaves={enclaves} />
+              </section>
             </div>
 
             <div className="flex justify-end px-6 pt-2 pb-6">
@@ -88,5 +100,20 @@ export function UtcDefPeekSheet({
         )}
       </SheetContent>
     </Sheet>
+  )
+}
+
+/** Both names and the icon, at sheet scale — the same pairing the definition
+ *  page shows, one type size down. */
+function HalfHeading({ half }: { half: keyof typeof MEFPAK_HALVES }) {
+  const { plain, code, icon: Icon } = MEFPAK_HALVES[half]
+  return (
+    <h3 className="flex items-center gap-1.5 text-xs font-medium">
+      <Icon className="size-3.5 text-muted-foreground" />
+      {plain}
+      <span className="font-semibold uppercase tracking-widest text-muted-foreground">
+        {code}
+      </span>
+    </h3>
   )
 }

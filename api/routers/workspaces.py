@@ -45,6 +45,7 @@ from models import (
     User,
     UtcDef,
     UtcDefLine,
+    UtcDefManforLine,
     UtcInstance,
     WorkCenter,
     Workspace,
@@ -72,6 +73,7 @@ from schemas import (
     ExportedUnit,
     ExportedUtcDef,
     ExportedUtcDefLine,
+    ExportedUtcDefManforLine,
     ExportedUtcInstance,
     ExportedWorkCenter,
     ExportedWorkspaceMeta,
@@ -533,6 +535,22 @@ def _duplicate_equipment(
                     display_order=line.display_order,
                 )
             )
+        # The MANFOR copies verbatim — a position references nothing that gets
+        # remapped, so there is no id to translate.
+        for position in (
+            db.query(UtcDefManforLine)
+            .filter(UtcDefManforLine.utc_def_id == d.id)
+            .all()
+        ):
+            db.add(
+                UtcDefManforLine(
+                    utc_def_id=new_d.id,
+                    work_center=position.work_center,
+                    skill_level=position.skill_level,
+                    quantity=position.quantity,
+                    display_order=position.display_order,
+                )
+            )
 
     package_def_map: dict[int, int] = {}
     for pd in db.query(PackageDef).filter(PackageDef.workspace_id == source.id).all():
@@ -929,6 +947,17 @@ def _export_equipment(
                     .filter(UtcDefLine.utc_def_id == d.id)
                     .order_by(UtcDefLine.display_order)
                     if all_type_titles.get(line.equipment_type_id)
+                ],
+                manfor=[
+                    ExportedUtcDefManforLine(
+                        work_center=position.work_center,
+                        skill_level=position.skill_level,
+                        quantity=position.quantity,
+                        display_order=position.display_order,
+                    )
+                    for position in db.query(UtcDefManforLine)
+                    .filter(UtcDefManforLine.utc_def_id == d.id)
+                    .order_by(UtcDefManforLine.display_order)
                 ],
             )
             for d in local_utc_defs
@@ -1682,6 +1711,16 @@ def _import_equipment(
                     if line.enclave_name
                     else None,
                     notes=line.notes,
+                    display_order=order,
+                )
+            )
+        for order, position in enumerate(d.manfor):
+            db.add(
+                UtcDefManforLine(
+                    utc_def_id=new_d.id,
+                    work_center=position.work_center,
+                    skill_level=position.skill_level,
+                    quantity=position.quantity,
                     display_order=order,
                 )
             )

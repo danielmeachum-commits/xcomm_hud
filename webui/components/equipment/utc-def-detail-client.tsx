@@ -21,7 +21,6 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import {
-  Check,
   GripVertical,
   Info,
   Minus,
@@ -34,6 +33,8 @@ import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
+import { ManageBar } from "@/components/equipment/manage-bar"
+import { UtcManforSection } from "@/components/equipment/utc-manfor-section"
 import {
   ColumnHeading,
   UtcDefContents,
@@ -75,6 +76,7 @@ import {
   ASSET_CATEGORY_ICONS,
   ASSET_CATEGORY_LABELS,
   ASSET_CATEGORY_VALUES,
+  MEFPAK_HALVES,
   utcUsesEnclaves,
 } from "@/lib/equipment-meta"
 import type {
@@ -83,8 +85,11 @@ import type {
   Role,
   AssetCategory,
   UtcDef,
+  WorkCenter,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+const LOGDET = MEFPAK_HALVES.logdet
 
 const CODE_HINT = "Short-hand for the UTC — what gets said on a load plan."
 
@@ -280,11 +285,14 @@ export function UtcDefDetailClient({
   def,
   types,
   enclaves,
+  workCenters,
   role,
 }: {
   def: UtcDef
   types: EquipmentType[]
   enclaves: Enclave[]
+  /** This workspace's shops, for the MANFOR picker. */
+  workCenters: WorkCenter[]
   role: Role
 }) {
   const router = useRouter()
@@ -579,10 +587,27 @@ export function UtcDefDetailClient({
         )}
       </header>
 
+      {/* MANFOR first, LOGDET second — the order MEFPAK names the two halves
+          in, and the order a deployment is actually built: people, then the
+          gear they take. */}
+      <UtcManforSection
+        def={def}
+        workCenters={workCenters}
+        editable={editable}
+      />
+
       <section className="flex min-w-0 flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-medium">Bill of materials</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="flex items-center gap-1.5 text-sm font-medium">
+                <LOGDET.icon className="size-4 text-muted-foreground" />
+                {LOGDET.plain}
+              </h2>
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                {LOGDET.code}
+              </span>
+            </div>
             <p className="text-xs text-muted-foreground">
               {usesEnclaves
                 ? "What this UTC brings, by the enclave it serves."
@@ -712,45 +737,19 @@ export function UtcDefDetailClient({
               )}
             </DndContext>
 
-            {/* Sticky to the bottom of the scrolling pane: with several columns
-                open the bar is well below the fold, and an action bar you have
-                to scroll to find is one you will not find. */}
-            <div className="sticky bottom-0 z-20 flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-background/85 p-2 pl-3.5 shadow-lg backdrop-blur-sm">
-              <p
-                className={cn(
-                  "mr-auto text-xs",
-                  error ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
-                {error ??
-                  notice ??
-                  (dirty
-                    ? "Unsaved changes."
-                    : usesEnclaves
-                      ? "Drag an item between enclaves, or add one."
-                      : "Add or remove items.")}
-              </p>
-              {dirty ? (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={cancel}
-                    disabled={pending}
-                  >
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={save} disabled={pending}>
-                    {pending ? "Saving…" : "Save"}
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" onClick={cancel}>
-                  <Check data-icon="inline-start" />
-                  Done
-                </Button>
-              )}
-            </div>
+            <ManageBar
+              hint={
+                usesEnclaves
+                  ? "Drag an item between enclaves, or add one."
+                  : "Add or remove items."
+              }
+              notice={notice}
+              error={error}
+              dirty={dirty}
+              pending={pending}
+              onCancel={cancel}
+              onSave={save}
+            />
           </>
         ) : (
           /* Read mode is the shared renderer, so this page and the peek sheet

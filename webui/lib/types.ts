@@ -913,6 +913,23 @@ export interface UtcDefLine {
   serialized: boolean
 }
 
+/** One authorized position on a UTC's MANFOR — the manpower half of MEFPAK,
+ *  where `UtcDefLine` is the LOGDET. A shop, a qualification, and how many;
+ *  who fills it is decided per deployment. */
+export interface UtcDefManforLine {
+  id: number
+  utc_def_id: number
+  /** The shop that provides the body, by name. A name and not an id because
+   *  work centers are workspace-scoped and a UTC definition can be global —
+   *  see the model docstring. Resolved against `WorkCenter.name` for display. */
+  work_center: string
+  /** Same 1/3/5/7/9 vocabulary as `Personnel.skill_level`. Null for officer
+   *  and civilian slots, which qualify differently. */
+  skill_level: number | null
+  quantity: number
+  display_order: number
+}
+
 export interface UtcDef {
   id: number
   workspace_id: number | null
@@ -921,7 +938,11 @@ export interface UtcDef {
   description: string | null
   category: AssetCategory
   retired_at: string | null
+  /** The LOGDET — what this UTC deploys with. Named `lines` because the table
+   *  is; the UI calls it LOGDET. */
   lines: UtcDefLine[]
+  /** The MANFOR — who deploys with it. */
+  manfor: UtcDefManforLine[]
   is_global: boolean
 }
 

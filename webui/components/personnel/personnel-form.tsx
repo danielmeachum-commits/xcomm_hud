@@ -874,7 +874,7 @@ export function PersonnelForm({
                           <option value="">— None —</option>
                           {SKILL_LEVELS.map((l) => (
                             <option key={l} value={l}>
-                              {l} — {SKILL_LEVEL_LABELS[l]}
+                              {l} lvl — {SKILL_LEVEL_LABELS[l]}
                             </option>
                           ))}
                         </select>

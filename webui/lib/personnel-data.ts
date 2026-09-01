@@ -356,12 +356,17 @@ export const SKILL_LEVEL_LABELS: Record<SkillLevel, string> = {
   9: "Superintendent",
 }
 
-/** "7 — Craftsman" for display; null-safe for people without one. */
+/** "7 lvl — Craftsman" for display; null-safe for people without one.
+ *
+ *  The "lvl" is not decoration: a bare number beside a rank and a grade is one
+ *  more unlabelled figure to work out, and "7 lvl" is what gets said out loud
+ *  anyway. */
 export function skillLevelLabel(level: number | null): string | null {
   if (level == null) return null
   const name = SKILL_LEVEL_LABELS[level as SkillLevel]
-  return name ? `${level} — ${name}` : String(level)
+  return name ? `${level} lvl — ${name}` : `${level} lvl`
 }
+
 
 /** Pay grade for a person's rank ("E-5", "O-3", …), from the branch catalog.
  *  Falls back to parsing the rank string itself (covers civilian "GS-13" and

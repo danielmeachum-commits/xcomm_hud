@@ -4,7 +4,7 @@ import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { UtcDefDetailClient } from "@/components/equipment/utc-def-detail-client"
 import { apiGet } from "@/lib/api"
 import { requireSession } from "@/lib/auth"
-import type { Enclave, EquipmentType, UtcDef } from "@/lib/types"
+import type { Enclave, EquipmentType, UtcDef, WorkCenter } from "@/lib/types"
 
 /** One UTC definition: what it is, and the equipment it brings.
  *
@@ -24,13 +24,15 @@ export default async function UtcDefDetailPage({
 
   // Types and enclaves come down with the definition because the manage board
   // needs every type on offer and every enclave that could be a column, not
-  // just the ones already in the lines.
-  const [utcDefs, types, enclaves] = await Promise.all([
+  // just the ones already in the lines. Work centers come down for the MANFOR
+  // picker, which names the shop each position is sourced from.
+  const [utcDefs, types, enclaves, workCenters] = await Promise.all([
     apiGet<UtcDef[]>("/utc-defs").catch(() => [] as UtcDef[]),
     apiGet<EquipmentType[]>("/equipment-types").catch(
       () => [] as EquipmentType[],
     ),
     apiGet<Enclave[]>("/enclaves").catch(() => [] as Enclave[]),
+    apiGet<WorkCenter[]>("/work-centers").catch(() => [] as WorkCenter[]),
   ])
   const def = utcDefs.find((d) => String(d.id) === id)
   if (!def) notFound()
@@ -52,6 +54,7 @@ export default async function UtcDefDetailPage({
         def={def}
         types={types}
         enclaves={enclaves}
+        workCenters={workCenters}
         role={me.role}
       />
     </div>

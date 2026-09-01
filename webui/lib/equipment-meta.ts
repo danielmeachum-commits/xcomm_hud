@@ -17,6 +17,7 @@ import {
   Satellite,
   Server,
   Thermometer,
+  Users,
   Video,
   Waypoints,
   Wifi,
@@ -26,12 +27,15 @@ import {
 
 import type {
   CapabilityKind,
+  Enclave,
   Equipment,
   AssetCategory,
   EquipmentSubcategory,
   EquipmentLinkDirection,
   EquipmentLinkKind,
   EquipmentStatus,
+  UtcDef,
+  UtcDefLine,
   UtcRole,
   UtcRoleHint,
 } from "./types"
@@ -234,10 +238,60 @@ export const ASSET_CATEGORY_ICONS: Record<AssetCategory, LucideIcon> = {
   other: Boxes,
 }
 
+/** The two halves MEFPAK registers a UTC as, each under both names it goes by.
+ *
+ *  The acronym alone is unreadable to anyone who has not been taught it, and
+ *  the plain word alone throws away the term that appears on every document
+ *  the UTC touches — so both are shown everywhere, plain word first. Icons are
+ *  the ones Personnel and Equipment already carry in the site tabs and the
+ *  sidebar, because these ARE those two things, scoped to one UTC.
+ *
+ *  A table rather than four inline literals: the pairing shows up on the
+ *  definition page and in the package page's peek sheet, and a heading that
+ *  said "Personnel" in one and "Manpower" in the other would read as two
+ *  different sections. */
+export const MEFPAK_HALVES = {
+  manfor: { plain: "Personnel", code: "MANFOR", icon: Users },
+  logdet: { plain: "Equipment", code: "LOGDET", icon: Package },
+} as const satisfies Record<
+  string,
+  { plain: string; code: string; icon: LucideIcon }
+>
+
 /** Only a comm UTC divides its bill of materials by enclave. Everything else
  *  gets one plain list, so this is the single question the page asks. */
 export function utcUsesEnclaves(category: AssetCategory): boolean {
   return category === "comm"
+}
+
+/** A comm UTC's bill of materials divided into enclave columns: catalog order,
+ *  Common last — the tail of the packing list, not the headline. A column
+ *  holding nothing says nothing, so an enclave the UTC is silent about does
+ *  not appear at all.
+ *
+ *  A line tagged with an enclave the caller wasn't handed (retired, or from
+ *  another workspace) falls through to Common. Wrong but visible, where
+ *  dropping it silently is not.
+ *
+ *  Shared by the bill of materials and the package structure diagram so the
+ *  two can never divide the same UTC differently. */
+export function utcEnclaveColumns(
+  def: UtcDef,
+  enclaves: Enclave[],
+): { enclave: Enclave | null; lines: UtcDefLine[] }[] {
+  const lines = [...def.lines].sort((a, b) => a.display_order - b.display_order)
+  const columns = enclaves
+    .map((e) => ({
+      enclave: e as Enclave | null,
+      lines: lines.filter((l) => l.enclave_id === e.id),
+    }))
+    .filter((c) => c.lines.length > 0)
+  const known = new Set(enclaves.map((e) => e.id))
+  const common = lines.filter(
+    (l) => l.enclave_id === null || !known.has(l.enclave_id),
+  )
+  if (common.length > 0) columns.push({ enclave: null, lines: common })
+  return columns
 }
 
 export const UTC_ROLE_LABELS: Record<UtcRole, string> = {

@@ -5,7 +5,7 @@ import {
   enclaveHeadingClass,
   enclaveHeadingStyle,
 } from "@/lib/enclave-meta"
-import { utcUsesEnclaves } from "@/lib/equipment-meta"
+import { utcEnclaveColumns, utcUsesEnclaves } from "@/lib/equipment-meta"
 import type { Enclave, UtcDef, UtcDefLine } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -48,24 +48,7 @@ export function UtcDefContents({
     )
   }
 
-  /** Columns in catalog order, with Common last — the tail of the packing
-   *  list, not the headline. A column holding nothing says nothing, so an
-   *  enclave the UTC is silent about doesn't appear at all. */
-  const columns: { enclave: Enclave | null; lines: UtcDefLine[] }[] = enclaves
-    .map((e) => ({
-      enclave: e as Enclave | null,
-      lines: lines.filter((l) => l.enclave_id === e.id),
-    }))
-    .filter((c) => c.lines.length > 0)
-
-  // A line tagged with an enclave this view wasn't handed (retired, or from
-  // another workspace) still has to appear — falling through to Common is
-  // wrong but visible, where dropping it silently is not.
-  const known = new Set(enclaves.map((e) => e.id))
-  const common = lines.filter(
-    (l) => l.enclave_id === null || !known.has(l.enclave_id),
-  )
-  if (common.length > 0) columns.push({ enclave: null, lines: common })
+  const columns = utcEnclaveColumns(def, enclaves)
 
   return (
     <HorizontalScroller

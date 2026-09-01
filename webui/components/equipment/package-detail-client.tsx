@@ -23,7 +23,6 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import {
   ChevronLeft,
-  Check,
   Info,
   Pencil,
   Plus,
@@ -34,6 +33,9 @@ import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { CodeBadge } from "@/components/equipment/code-badge"
+import { GripDots } from "@/components/equipment/grip-dots"
+import { PackageStructureSheet } from "@/components/equipment/package-structure-sheet"
+import { ManageBar } from "@/components/equipment/manage-bar"
 import { UtcDefPeekSheet } from "@/components/equipment/utc-def-peek-sheet"
 import { Button } from "@/components/ui/button"
 import {
@@ -80,6 +82,7 @@ import {
 } from "@/lib/equipment-meta"
 import type {
   Enclave,
+  EquipmentType,
   PackageDef,
   PackageDefUtc,
   Role,
@@ -251,13 +254,16 @@ export function PackageDetailClient({
   def,
   utcDefs,
   enclaves,
+  types,
   role,
 }: {
   def: PackageDef
   utcDefs: UtcDef[]
-  /** Only used to name the columns in the peek sheet — the package itself has
-   *  no enclave dimension. */
+  /** Names the columns in the peek sheet and the enclave level of the
+   *  structure diagram — the package itself has no enclave dimension. */
   enclaves: Enclave[]
+  /** Structure diagram only, and only for the icon on a piece of gear. */
+  types: EquipmentType[]
   role: Role
 }) {
   const router = useRouter()
@@ -463,7 +469,9 @@ export function PackageDetailClient({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
+    // Narrow again: the structure chart lives in a sheet, so the page itself
+    // is only ever the list of UTCs, which reads better narrow.
+    <div className="mx-auto flex w-full min-w-0 max-w-lg flex-col gap-6">
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <h1 className="flex flex-wrap items-center gap-2 text-lg font-semibold tracking-tight">
@@ -476,19 +484,27 @@ export function PackageDetailClient({
             <p className="text-sm text-muted-foreground/60">No description.</p>
           )}
         </div>
-        {editable && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setForm(formOf(def))
-              setEditingProperties(true)
-            }}
-          >
-            <Pencil data-icon="inline-start" />
-            Edit
-          </Button>
-        )}
+        <div className="flex shrink-0 gap-2">
+          <PackageStructureSheet
+            def={def}
+            utcDefs={utcDefs}
+            enclaves={enclaves}
+            types={types}
+          />
+          {editable && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setForm(formOf(def))
+                setEditingProperties(true)
+              }}
+            >
+              <Pencil data-icon="inline-start" />
+              Edit
+            </Button>
+          )}
+        </div>
       </header>
 
       <section className="flex flex-col gap-3">
@@ -546,46 +562,14 @@ export function PackageDetailClient({
               onAdd={addUtc}
             />
 
-            {/* Always on while editing, so leaving the mode is never something
-                you have to go looking for. Its buttons follow the state:
-                nothing to save yet means one Done, and the moment there is,
-                Cancel and Save take over. */}
-            {/* Sticky to the bottom of the scrolling pane: with five groups
-                open the bar is well below the fold, and an action bar you have
-                to scroll to find is one you will not find. */}
-            <div className="sticky bottom-0 z-20 flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-background/85 p-2 pl-3.5 shadow-lg backdrop-blur-sm">
-              <p
-                className={cn(
-                  "mr-auto text-xs",
-                  error ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
-                {error ??
-                  (dirty
-                    ? "Unsaved changes."
-                    : "Drag a UTC between roles, or add one.")}
-              </p>
-              {dirty ? (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={cancelUtcs}
-                    disabled={pending}
-                  >
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={saveUtcs} disabled={pending}>
-                    {pending ? "Saving…" : "Save"}
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" onClick={cancelUtcs}>
-                  <Check data-icon="inline-start" />
-                  Done
-                </Button>
-              )}
-            </div>
+            <ManageBar
+              hint="Drag a UTC between roles, or add one."
+              error={error}
+              dirty={dirty}
+              pending={pending}
+              onCancel={cancelUtcs}
+              onSave={saveUtcs}
+            />
           </>
         ) : links.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
@@ -829,24 +813,6 @@ function UtcEditorRow({
         </Button>
       </div>
     </div>
-  )
-}
-
-/** lucide's GripVertical at this size renders as two thin strokes rather than
- *  the six dots the icon is meant to be, which reads as a divider next to a
- *  real one. Drawn here so the handle looks like something you grab. */
-function GripDots() {
-  return (
-    <svg
-      viewBox="0 0 10 16"
-      className="size-4 fill-current"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {[3, 8, 13].map((y) =>
-        [3, 7].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.1" />),
-      )}
-    </svg>
   )
 }
 

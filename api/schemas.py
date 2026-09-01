@@ -415,6 +415,19 @@ class ExportedUtcDefLine(BaseModel):
     display_order: int = 0
 
 
+class ExportedUtcDefManforLine(BaseModel):
+    """A MANFOR position in an export bundle.
+
+    Travels verbatim: the shop is already a name rather than an id, which is
+    the same by-name cross-reference every other row in the envelope uses.
+    """
+
+    work_center: str
+    skill_level: Optional[int] = None
+    quantity: int = 1
+    display_order: int = 0
+
+
 class ExportedUtcDef(BaseModel):
     code: str
     name: str
@@ -423,6 +436,9 @@ class ExportedUtcDef(BaseModel):
     # same value the migration backfills.
     category: AssetCategory = "comm"
     lines: list[ExportedUtcDefLine] = Field(default_factory=list)
+    # Defaulted for the same reason: a bundle written before 0063 has no
+    # MANFOR, and importing it must land an empty one rather than fail.
+    manfor: list[ExportedUtcDefManforLine] = Field(default_factory=list)
 
 
 class ExportedPackageDefUtc(BaseModel):
@@ -1974,12 +1990,40 @@ class UtcDefLineOut(_ORM):
     serialized: bool = True
 
 
+class UtcDefManforLineIn(BaseModel):
+    """One authorized position on the MANFOR.
+
+    `work_center` is the shop by name — see `UtcDefManforLine` for why it is a
+    name and not an FK. Trimmed in the router rather than here, matching how
+    `tags` are handled: the schema stays a plain field list.
+    """
+
+    work_center: str
+    # Reuses the personnel vocabulary on purpose: the point of storing the
+    # requirement is comparing it against `Personnel.skill_level`.
+    skill_level: Optional[SkillLevel] = None
+    quantity: int = 1
+    display_order: int = 0
+
+
+class UtcDefManforLineOut(_ORM):
+    id: int
+    utc_def_id: int
+    work_center: str
+    skill_level: Optional[int] = None
+    quantity: int
+    display_order: int = 0
+
+
 class UtcDefIn(BaseModel):
     code: str
     name: str
     description: Optional[str] = None
     category: AssetCategory = "comm"
+    # The two halves MEFPAK registers a UTC as: what it deploys with (LOGDET)
+    # and who deploys with it (MANFOR).
     lines: list[UtcDefLineIn] = Field(default_factory=list)
+    manfor: list[UtcDefManforLineIn] = Field(default_factory=list)
 
 
 class UtcDefPatch(BaseModel):
@@ -1999,6 +2043,7 @@ class UtcDefOut(_ORM):
     category: AssetCategory = "comm"
     retired_at: Optional[datetime.datetime] = None
     lines: list[UtcDefLineOut] = Field(default_factory=list)
+    manfor: list[UtcDefManforLineOut] = Field(default_factory=list)
     is_global: bool = False
 
 

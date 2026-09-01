@@ -8,6 +8,7 @@ import {
   CATEGORY_VALUES,
   CapabilityEditor,
   EnclaveCapabilityPicker,
+  capabilityNameError,
   type CapabilityDraft,
 } from "@/components/equipment/catalog-detail-sheets"
 import { TagsInput } from "@/components/equipment/tags-input"
@@ -177,8 +178,14 @@ export function CatalogCreateDialog({
     setError(null)
   }
 
+  // Same (kind, label) uniqueness the detail page guards: an unnamed second
+  // "Other" cannot be created any more than it can be saved.
+  const capsError = kind === "types" ? capabilityNameError(capabilities) : null
+
   const canSubmit =
-    name.trim().length > 0 && (kind === "types" || code.trim().length > 0)
+    name.trim().length > 0 &&
+    (kind === "types" || code.trim().length > 0) &&
+    capsError === null
 
   async function submit() {
     setPending(true)
@@ -414,11 +421,13 @@ export function CatalogCreateDialog({
 
           {kind === "utcs" && (
             <div className="flex flex-col gap-1">
-              <Label>Bill of materials</Label>
+              <Label>LOGDET</Label>
               <p className="text-xs text-muted-foreground">
                 {utcCategory === "comm"
                   ? "What this UTC brings, grouped by the enclave it serves. Gear every enclave needs — power, cables, the RF shot — goes under Common."
-                  : "What this UTC brings. No enclaves: this kind of UTC doesn't divide along a network."}
+                  : "What this UTC brings. No enclaves: this kind of UTC doesn't divide along a network."}{" "}
+                The MANFOR — who deploys with it — is set on the definition
+                page once this exists.
               </p>
               <div className="mt-1">
                 <UtcLineEditor
@@ -552,7 +561,9 @@ export function CatalogCreateDialog({
             </label>
           )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {(error ?? capsError) && (
+            <p className="text-sm text-destructive">{error ?? capsError}</p>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button

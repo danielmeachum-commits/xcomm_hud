@@ -33,6 +33,7 @@ from models import (
     User,
     UtcDef,
     UtcDefLine,
+    UtcDefManforLine,
     WorkCenter,
     Workspace,
 )
@@ -49,6 +50,7 @@ from schemas import (
     PackageDefPatch,
     UtcDefIn,
     UtcDefLineIn,
+    UtcDefManforLineIn,
     UtcDefOut,
     UtcDefPatch,
 )
@@ -391,6 +393,47 @@ def delete_equipment_type(
 # ---------- UTC definitions ----------
 
 
+def _merge_manfor(lines: list[UtcDefManforLineIn]) -> list[UtcDefManforLineIn]:
+    """Fold duplicate (shop, skill level) pairs into one line, summing the count.
+
+    `uq_utc_def_manfor_shop_level` would reject the second row outright, and a
+    500 about a unique index is a worse answer than storing what the caller
+    plainly meant: two requests for a Sys Ops 7-level are a request for two.
+    Same instinct as `_set_type_work_centers` keeping the first primary rather
+    than 409-ing about a checkbox.
+
+    Keyed on the trimmed name exactly as the constraint sees it, so the router
+    and the database never disagree about what counts as a duplicate. Order of
+    first appearance is kept — the MANFOR is an ordered list.
+    """
+    merged: dict[tuple[str, int | None], UtcDefManforLineIn] = {}
+    for line in lines:
+        key = (line.work_center.strip(), line.skill_level)
+        first = merged.get(key)
+        if first is None:
+            merged[key] = line.model_copy()
+        else:
+            first.quantity += line.quantity
+    return list(merged.values())
+
+
+def _manfor_row(
+    utc_def_id: int, line: UtcDefManforLineIn, order: int
+) -> UtcDefManforLine:
+    """One authorized position, normalized.
+
+    The shop is trimmed but NOT case-folded: it is a work center's name, and
+    names are shown as their owner wrote them.
+    """
+    return UtcDefManforLine(
+        utc_def_id=utc_def_id,
+        work_center=line.work_center.strip(),
+        skill_level=line.skill_level,
+        quantity=line.quantity,
+        display_order=order,
+    )
+
+
 def _utc_def_out(db: Session, row: UtcDef) -> UtcDefOut:
     out = UtcDefOut.model_validate(row)
     out.is_global = row.workspace_id is None
@@ -428,7 +471,7 @@ def list_utc_defs(
 ):
     rows = (
         db.query(UtcDef)
-        .options(selectinload(UtcDef.lines))
+        .options(selectinload(UtcDef.lines), selectinload(UtcDef.manfor))
         .filter(_visible(UtcDef, workspace, include_retired))
         .order_by(UtcDef.code)
         .all()
@@ -449,7 +492,9 @@ def create_utc_def(
 ):
     owner_id = None if make_global else workspace.id
     _require_write(owner_id, current_user)
-    row = UtcDef(workspace_id=owner_id, **body.model_dump(exclude={"lines"}))
+    row = UtcDef(
+        workspace_id=owner_id, **body.model_dump(exclude={"lines", "manfor"})
+    )
     db.add(row)
     db.flush()
     for order, line in enumerate(body.lines):
@@ -463,6 +508,8 @@ def create_utc_def(
                 },
             )
         )
+    for order, position in enumerate(_merge_manfor(body.manfor)):
+        db.add(_manfor_row(row.id, position, order))
     db.flush()
     db.refresh(row)
     notify(background_tasks)
@@ -548,6 +595,36 @@ def replace_utc_def_lines(
                 display_order=order,
             )
         )
+    db.flush()
+    db.refresh(row)
+    notify(background_tasks)
+    return _utc_def_out(db, row)
+
+
+@router.put("/utc-defs/{utc_def_id}/manfor", response_model=UtcDefOut)
+def replace_utc_def_manfor(
+    utc_def_id: int,
+    body: list[UtcDefManforLineIn],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    """Replace the UTC's authorized positions, wholesale.
+
+    Same shape as `/lines` next door: the MANFOR is edited as a list and saved
+    as one, so a reorder and a removal are one write rather than three. No
+    RESTRICT foreign key points at a position — a position authorizes a slot
+    rather than naming a person — so delete-and-reinsert is safe here in a way
+    it would not be for equipment.
+    """
+    row = _load_utc_def(db, utc_def_id, workspace)
+    _require_write(row.workspace_id, current_user)
+    db.query(UtcDefManforLine).filter(UtcDefManforLine.utc_def_id == row.id).delete(
+        synchronize_session=False
+    )
+    for order, position in enumerate(_merge_manfor(body)):
+        db.add(_manfor_row(row.id, position, order))
     db.flush()
     db.refresh(row)
     notify(background_tasks)

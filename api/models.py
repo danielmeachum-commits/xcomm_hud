@@ -1831,11 +1831,21 @@ class UtcDef(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
+    # The LOGDET — what the UTC deploys WITH. Still named `lines` because real
+    # rows point at `utc_def_line` and renaming a table to match a heading is
+    # not worth the migration; the UI says LOGDET.
     lines: Mapped[list["UtcDefLine"]] = relationship(
         "UtcDefLine",
         back_populates="utc_def",
         cascade="all, delete-orphan",
         order_by="UtcDefLine.display_order",
+    )
+    # The MANFOR — who deploys with it.
+    manfor: Mapped[list["UtcDefManforLine"]] = relationship(
+        "UtcDefManforLine",
+        back_populates="utc_def",
+        cascade="all, delete-orphan",
+        order_by="UtcDefManforLine.display_order",
     )
 
 
@@ -1886,6 +1896,77 @@ class UtcDefLine(Base):
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="lines")
+
+
+class UtcDefManforLine(Base):
+    """One authorized position on a UTC's MANFOR — the manpower half.
+
+    MEFPAK registers a UTC as two halves. The LOGDET (`utc_def_line`) says what
+    equipment deploys; this says who deploys with it. A position is an
+    AUTHORIZATION, not a person: it names a specialty and a qualification, and
+    who fills it is decided per deployment against the roster.
+
+    The shop is a NAME rather than an FK to `work_center`, and that is forced:
+    `work_center.workspace_id` is NOT NULL while `utc_def.workspace_id` is
+    nullable, so a global UTC cannot point at any one workspace's shop.
+    `EquipmentTypeWorkCenter` met the same collision and answered it with a
+    workspace-scoped join table, but which shop provides a body is part of the
+    template rather than a local staffing choice, so it travels with the row —
+    by name, like every cross-reference in an export bundle.
+
+    There is an AFSC behind every real slot; this deliberately doesn't hold it.
+    A shop plus a skill level is what the people doing the sourcing actually
+    say out loud, and a specialty code nobody outside the career field can read
+    is a field that goes stale unfilled.
+
+    Three columns and no more, deliberately. Grade, duty title, SEI and who
+    leads the team were all tried here and taken back out: the first two are
+    implied closely enough by the shop and the level not to be worth typing
+    twice, and the last two are facts about a DEPLOYMENT rather than the
+    template — which of two 7-levels runs this particular site is decided when
+    the package goes out.
+
+    One row per (shop, skill level), enforced. A position is set when it is
+    added and read-only afterwards, so two rows saying "Sys Ops 7-level" can
+    only ever be a mistake — the second one means three of them, and
+    `quantity` is how a MANFOR says three. Borrowed in two pieces from
+    `utc_def_line`, for the same reason it needed two.
+    """
+
+    __tablename__ = "utc_def_manfor_line"
+    __table_args__ = (
+        UniqueConstraint(
+            "utc_def_id",
+            "work_center",
+            "skill_level",
+            name="uq_utc_def_manfor_shop_level",
+        ),
+        # NULLs are distinct in a UNIQUE constraint, so the level-less slice
+        # needs its own guard — that case really is a duplicate.
+        Index(
+            "uq_utc_def_manfor_shop_no_level",
+            "utc_def_id",
+            "work_center",
+            unique=True,
+            postgresql_where=text("skill_level IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_def_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("utc_def.id", ondelete="CASCADE"), nullable=False
+    )
+    # The shop that provides the body, by name — matched against this
+    # workspace's `work_center` rows for display and, later, for sourcing.
+    work_center: Mapped[str] = mapped_column(String(128), nullable=False)
+    # AFSC skill level (1 Helper, 3 Apprentice, 5 Journeyman, 7 Craftsman,
+    # 9 Superintendent) — the same vocabulary as `personnel.skill_level`, which
+    # is what makes the two comparable. Null for officer and civilian slots.
+    skill_level: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="manfor")
 
 
 class PackageDef(Base):
