@@ -13,7 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import type { EquipmentKit, PackageInstance } from "@/lib/types"
+import type { ForceElement, PackageInstance } from "@/lib/types"
 
 const inputClass =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -35,29 +35,29 @@ async function send(
   return typeof detail === "string" ? detail : `Request failed (${res.status})`
 }
 
-/** Save a live package as a reusable kit.
+/** Save a live package as a reusable force element.
  *
  *  The path that matters. Configure the FCP once by hand — unavoidable the
  *  first time — then keep it, so the next deployment checks items off instead
- *  of retyping serials. Authoring a kit from an empty form uses the same
+ *  of retyping serials. Authoring a force element from an empty form uses the same
  *  tables, but nobody would. */
-export function SaveAsKitButton({
+export function SaveAsForceElementButton({
   packageInstance,
   pinnedCount,
-  existingKits,
+  existingForceElements,
 }: {
   packageInstance: PackageInstance
   pinnedCount: number
-  existingKits: EquipmentKit[]
+  existingForceElements: ForceElement[]
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(packageInstance.name)
   const [description, setDescription] = useState("")
-  // Refreshing an existing kit rather than making another one: the real-world
-  // set changes (a radio goes to depot, a replacement arrives) and the kit
+  // Refreshing an existing force element rather than making another one: the real-world
+  // set changes (a radio goes to depot, a replacement arrives) and the force element
   // should follow rather than accumulating near-duplicates.
-  const [targetKitId, setTargetKitId] = useState<number | "new">("new")
+  const [targetId, setTargetId] = useState<number | "new">("new")
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -65,13 +65,13 @@ export function SaveAsKitButton({
     setPending(true)
     setError(null)
     const err =
-      targetKitId === "new"
-        ? await send("/api/be/kits/capture", "POST", {
+      targetId === "new"
+        ? await send("/api/be/force-elements/capture", "POST", {
             package_instance_id: packageInstance.id,
             name: name.trim(),
             description: description.trim() || null,
           })
-        : await send(`/api/be/kits/${targetKitId}/refresh`, "POST", {
+        : await send(`/api/be/force-elements/${targetId}/refresh`, "POST", {
             package_instance_id: packageInstance.id,
           })
     setPending(false)
@@ -98,11 +98,11 @@ export function SaveAsKitButton({
         render={<Button size="sm" variant="ghost" className="gap-1.5" />}
       >
         <Save className="size-3.5" />
-        Save as kit
+        Save as force element
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Save “{packageInstance.name}” as a kit</DialogTitle>
+          <DialogTitle>Save “{packageInstance.name}” as a force element</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
@@ -112,20 +112,20 @@ export function SaveAsKitButton({
             blank form. Nothing about this deployment changes.
           </p>
 
-          {existingKits.length > 0 && (
+          {existingForceElements.length > 0 && (
             <div>
               <label className="mb-1 block text-xs font-medium">Save to</label>
               <select
                 className={inputClass}
-                value={targetKitId}
+                value={targetId}
                 onChange={(e) =>
-                  setTargetKitId(
+                  setTargetId(
                     e.target.value === "new" ? "new" : Number(e.target.value),
                   )
                 }
               >
-                <option value="new">A new kit</option>
-                {existingKits.map((k) => (
+                <option value="new">A new force element</option>
+                {existingForceElements.map((k) => (
                   <option key={k.id} value={k.id}>
                     Replace “{k.name}” ({k.item_count} pinned)
                   </option>
@@ -134,11 +134,11 @@ export function SaveAsKitButton({
             </div>
           )}
 
-          {targetKitId === "new" && (
+          {targetId === "new" && (
             <>
               <div>
                 <label className="mb-1 block text-xs font-medium">
-                  Kit name
+                  Force element name
                 </label>
                 <input
                   value={name}
@@ -177,13 +177,13 @@ export function SaveAsKitButton({
             type="button"
             size="sm"
             onClick={run}
-            disabled={pending || (targetKitId === "new" && !name.trim())}
+            disabled={pending || (targetId === "new" && !name.trim())}
           >
             {pending
               ? "Saving…"
-              : targetKitId === "new"
-                ? "Save kit"
-                : "Replace kit contents"}
+              : targetId === "new"
+                ? "Save force element"
+                : "Replace force element contents"}
           </Button>
         </div>
       </DialogContent>
@@ -191,7 +191,7 @@ export function SaveAsKitButton({
   )
 }
 
-/** Can we field this kit right now?
+/** Can we field this force element right now?
  *
  *  Three numbers answering different questions. `free` is gear no picture is
  *  currently using. `committed` is gear some picture already has in play —
@@ -201,12 +201,12 @@ export function SaveAsKitButton({
  *  nothing is taken from anyone, but worth knowing when planning around a
  *  finite pool. `retired` is a pin whose asset has been struck from the
  *  property book, which is the one that actually blocks. */
-function kitHealth(kit: EquipmentKit) {
+function forceElementHealth(forceElement: ForceElement) {
   let free = 0
   let committed = 0
   let retired = 0
-  for (const ku of kit.utcs) {
-    for (const item of ku.items) {
+  for (const slot of forceElement.utcs) {
+    for (const item of slot.items) {
       if (item.retired) retired++
       else if (item.commitments.length > 0) committed++
       else free++
@@ -215,22 +215,26 @@ function kitHealth(kit: EquipmentKit) {
   return { free, committed, retired }
 }
 
-export function KitsView({ kits }: { kits: EquipmentKit[] }) {
+export function ForceElementsView({
+  forceElements,
+}: {
+  forceElements: ForceElement[]
+}) {
   const router = useRouter()
   const [busyId, setBusyId] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
 
-  async function remove(kit: EquipmentKit) {
+  async function remove(forceElement: ForceElement) {
     if (
       !confirm(
-        `Delete the kit “${kit.name}”? No equipment is deleted — only the saved roster.`,
+        `Delete the force element “${forceElement.name}”? No equipment is deleted — only the saved roster.`,
       )
     )
       return
-    setBusyId(kit.id)
+    setBusyId(forceElement.id)
     setError(null)
-    const err = await send(`/api/be/kits/${kit.id}`, "DELETE")
+    const err = await send(`/api/be/force-elements/${forceElement.id}`, "DELETE")
     setBusyId(null)
     if (err) {
       setError(err)
@@ -239,16 +243,16 @@ export function KitsView({ kits }: { kits: EquipmentKit[] }) {
     router.refresh()
   }
 
-  if (kits.length === 0) {
+  if (forceElements.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-12 text-center">
         <Boxes className="size-6 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">No kits saved yet.</p>
+        <p className="text-sm text-muted-foreground">No force elements saved yet.</p>
         <p className="max-w-md text-xs text-muted-foreground">
-          A kit remembers which UTCs go out and exactly which gear is in them,
-          by name, from the unit&apos;s property book. Kits are global — save
+          A force element remembers which UTCs go out and exactly which gear is in them,
+          by name, from the unit&apos;s property book. They are global — save
           one here and every workspace can deploy it. Build a package the hard
-          way once, then use <span className="font-medium">Save as kit</span> on
+          way once, then use <span className="font-medium">Save as force element</span> on
           the UTCs tab.
         </p>
       </div>
@@ -258,44 +262,44 @@ export function KitsView({ kits }: { kits: EquipmentKit[] }) {
   return (
     <div className="flex flex-col gap-3">
       {error && <p className="text-xs text-destructive">{error}</p>}
-      {kits.map((kit) => {
-        const health = kitHealth(kit)
-        const isOpen = expanded === kit.id
+      {forceElements.map((forceElement) => {
+        const health = forceElementHealth(forceElement)
+        const isOpen = expanded === forceElement.id
         return (
-          <section key={kit.id} className="rounded-xl border border-border p-4">
+          <section key={forceElement.id} className="rounded-xl border border-border p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setExpanded(isOpen ? null : kit.id)}
+                    onClick={() => setExpanded(isOpen ? null : forceElement.id)}
                     className="font-medium hover:underline"
                   >
-                    {kit.name}
+                    {forceElement.name}
                   </button>
-                  {kit.package_def_code && (
+                  {forceElement.package_def_code && (
                     <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                      {kit.package_def_code}
+                      {forceElement.package_def_code}
                     </span>
                   )}
                   <span className="text-[11px] text-muted-foreground">
-                    {kit.is_global ? "Global" : "This workspace"}
+                    {forceElement.is_global ? "Global" : "This workspace"}
                   </span>
-                  {kit.retired_at && (
+                  {forceElement.retired_at && (
                     <span className="text-[11px] text-muted-foreground">
                       retired
                     </span>
                   )}
                 </div>
-                {kit.description && (
+                {forceElement.description && (
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {kit.description}
+                    {forceElement.description}
                   </p>
                 )}
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {kit.utcs.length} UTC{kit.utcs.length === 1 ? "" : "s"} ·{" "}
-                  {kit.item_count} serialized
-                  {kit.bulk_count > 0 && ` · ${kit.bulk_count} bulk units`}
+                  {forceElement.utcs.length} UTC{forceElement.utcs.length === 1 ? "" : "s"} ·{" "}
+                  {forceElement.item_count} serialized
+                  {forceElement.bulk_count > 0 && ` · ${forceElement.bulk_count} bulk units`}
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
@@ -303,9 +307,9 @@ export function KitsView({ kits }: { kits: EquipmentKit[] }) {
                   type="button"
                   size="sm"
                   variant="ghost"
-                  aria-label="Delete kit"
-                  disabled={busyId === kit.id}
-                  onClick={() => remove(kit)}
+                  aria-label="Delete force element"
+                  disabled={busyId === forceElement.id}
+                  onClick={() => remove(forceElement)}
                 >
                   <Trash2 className="size-3.5" />
                 </Button>
@@ -341,21 +345,21 @@ export function KitsView({ kits }: { kits: EquipmentKit[] }) {
 
             {isOpen && (
               <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
-                {kit.utcs.map((ku) => (
-                  <div key={ku.id}>
+                {forceElement.utcs.map((slot) => (
+                  <div key={slot.id}>
                     <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">{ku.name}</span>
-                      {ku.utc_def_code && (
+                      <span className="text-sm font-medium">{slot.name}</span>
+                      {slot.utc_def_code && (
                         <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                          {ku.utc_def_code}
+                          {slot.utc_def_code}
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">
-                        {ku.role_hint}
+                        {slot.role_hint}
                       </span>
                     </div>
                     <ul className="flex flex-col gap-0.5 text-xs">
-                      {ku.items.map((item) => (
+                      {slot.items.map((item) => (
                         <li
                           key={item.id}
                           className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-0.5 last:border-b-0"
@@ -389,7 +393,7 @@ export function KitsView({ kits }: { kits: EquipmentKit[] }) {
                           </span>
                         </li>
                       ))}
-                      {ku.bulk.map((b) => (
+                      {slot.bulk.map((b) => (
                         <li
                           key={`b-${b.id}`}
                           className="flex justify-between gap-2 text-muted-foreground"
@@ -398,7 +402,7 @@ export function KitsView({ kits }: { kits: EquipmentKit[] }) {
                           <span className="font-mono">×{b.quantity}</span>
                         </li>
                       ))}
-                      {ku.items.length === 0 && ku.bulk.length === 0 && (
+                      {slot.items.length === 0 && slot.bulk.length === 0 && (
                         <li className="text-muted-foreground">
                           Nothing pinned.
                         </li>

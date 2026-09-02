@@ -21,7 +21,7 @@ import type {
   Enclave,
   Equipment,
   EquipmentAsset,
-  EquipmentKit,
+  ForceElement,
   EquipmentType,
   Gateway,
   PackageDef,
@@ -72,7 +72,7 @@ function chipClass(on: boolean): string {
 interface ItemDraft {
   equipment_type_id: number
   /** Set when this row draws a box from the global property book. The normal
-   *  path from a kit — this workspace's row is materialized from the asset at
+   *  path from a force element — this workspace's row is materialized from the asset at
    *  deploy, carrying the serial and ID that were typed once, globally. */
   asset_id: number | null
   /** Set when this row claims gear THIS workspace already registered. The
@@ -82,7 +82,7 @@ interface ItemDraft {
   /** Unchecked rows are left home — they never reach the payload, and so
    *  never reach the deployment's expectation snapshot either. This is the
    *  "check off the items actually going" interaction; deleting the row would
-   *  work too, but re-adding a kit item afterwards would mean finding it
+   *  work too, but re-adding a pinned item afterwards would mean finding it
    *  again. */
   included: boolean
   serial_number: string
@@ -175,12 +175,12 @@ interface Props {
   packageDefs: PackageDef[]
   /** Saved rosters. Deploying from one is what turns "retype nine serials"
    *  into "uncheck the two that aren't going". */
-  kits: EquipmentKit[]
+  forceElements: ForceElement[]
   /** Everything the workspace has already registered, for the local half of
    *  the picker. Carries `utc_name` and `site_name` already, so "held by
    *  FCP-2 (Site Bravo)" needs no extra round-trip. */
   equipment: Equipment[]
-  /** The unit's property book. The other half of the picker, and where kit
+  /** The unit's property book. The other half of the picker, and where force element
    *  pins resolve from. */
   assets: EquipmentAsset[]
   services: Service[]
@@ -197,7 +197,7 @@ export function DeployUtcWizard({
   utcDefs,
   packages,
   packageDefs,
-  kits,
+  forceElements,
   equipment,
   assets,
   services,
@@ -225,9 +225,9 @@ export function DeployUtcWizard({
 
   // step 1 — package and the UTCs going out under it
   const [packageMode, setPackageMode] = useState<
-    "kit" | "existing" | "new" | "none"
-  >(kits.length > 0 ? "kit" : "new")
-  const [kitId, setKitId] = useState<number | "">("")
+    "force-element" | "existing" | "new" | "none"
+  >(forceElements.length > 0 ? "force-element" : "new")
+  const [forceElementId, setForceElementId] = useState<number | "">("")
   const [packageId, setPackageId] = useState<number | "">("")
   const [newPackageName, setNewPackageName] = useState("")
   const [newPackageDefId, setNewPackageDefId] = useState<number | "">("")
@@ -319,12 +319,12 @@ export function DeployUtcWizard({
     return out.length > 0 ? out : [emptyDraft()]
   }
 
-  /** Expand a saved kit into one draft per UTC slot, with its pinned gear
-   *  already claimed and checked. This is the whole point of kits: the
+  /** Expand a saved force element into one draft per UTC slot, with its pinned gear
+   *  already claimed and checked. This is the whole point of forceElements: the
    *  operator arrives at the Serialized step with nine rows filled in and
    *  unchecks the two staying home, instead of typing nine serials. */
-  function draftsFromKit(kit: EquipmentKit): UtcDraft[] {
-    const ordered = [...kit.utcs].sort(
+  function draftsFromForceElement(forceElement: ForceElement): UtcDraft[] {
+    const ordered = [...forceElement.utcs].sort(
       (a, b) => a.display_order - b.display_order,
     )
     const out: UtcDraft[] = ordered.map((ku) => {
@@ -342,7 +342,7 @@ export function DeployUtcWizard({
             serial_number: pin.serial_number ?? "",
             equipment_code: pin.equipment_code ?? "",
             // Enclave is a property of THIS deployment, not of the box — the
-            // kit is global and knows nothing about this workspace's networks.
+            // force element is global and knows nothing about this workspace's networks.
             // Left unset so the enclave step is a real decision.
             enclave_id: null,
             // The asset's own capabilities, not the type's declaration: a box
@@ -359,7 +359,7 @@ export function DeployUtcWizard({
       return {
         ...base,
         name: ku.name,
-        // The kit named these; keeping the name means the suggestion machinery
+        // The force element named these; keeping the name means the suggestion machinery
         // doesn't overwrite something the operator already curated.
         nameTouched: true,
         items,
@@ -372,8 +372,8 @@ export function DeployUtcWizard({
   function reset() {
     setStep(0)
     setMaxVisited(0)
-    setPackageMode(kits.length > 0 ? "kit" : "new")
-    setKitId("")
+    setPackageMode(forceElements.length > 0 ? "force-element" : "new")
+    setForceElementId("")
     setReassigned([])
     setSubmitted(false)
     setPackageId("")
@@ -402,7 +402,7 @@ export function DeployUtcWizard({
    *  so repeats get numbered. */
   const suggestedNames = useMemo(() => {
     const packageBase =
-      packageMode === "new" || packageMode === "kit"
+      packageMode === "new" || packageMode === "force-element"
         ? newPackageName.trim()
         : packageMode === "existing" && packageId
           ? (packages.find((p) => p.id === packageId)?.name ?? "")
@@ -591,7 +591,7 @@ export function DeployUtcWizard({
     return proposals
   }
 
-  /** Site services bucketed by enclave, with the ones matching this kit first
+  /** Site services bucketed by enclave, with the ones matching this force element first
    *  so the right answer is the first thing in the list. Nothing is hidden —
    *  an operator wiring a shared box across enclaves still needs the others. */
   function serviceGroupsFor(enclaveId: number | null) {
@@ -741,7 +741,7 @@ export function DeployUtcWizard({
   }
 
   /** Copy one capability's targets onto every other capability of the same
-   *  kit. A TACLANE's crypto and routing back the same services far more often
+   *  forceElement. A TACLANE's crypto and routing back the same services far more often
    *  than not, and setting them one at a time is the tedious part. */
   function matchAcrossCapabilities(itemIndex: number, kind: string) {
     if (!current) return
@@ -798,14 +798,14 @@ export function DeployUtcWizard({
     const joinExisting =
       packageInstanceId ??
       (packageMode === "existing" && packageId ? Number(packageId) : null)
-    // Deploying from a kit creates a package too — the kit is the roster, not
+    // Deploying from a force element creates a package too — it is the roster, not
     // the deployment, and its gear still has to land under something.
     const creatingNew =
       joinExisting === null &&
-      (packageMode === "new" || packageMode === "kit")
-    const selectedKit =
-      packageMode === "kit" && kitId
-        ? kits.find((k) => k.id === kitId)
+      (packageMode === "new" || packageMode === "force-element")
+    const selectedForceElement =
+      packageMode === "force-element" && forceElementId
+        ? forceElements.find((k) => k.id === forceElementId)
         : undefined
     return {
       site_id: Number(d.siteId),
@@ -816,7 +816,7 @@ export function DeployUtcWizard({
       new_package_name:
         creatingNew && newPackageName.trim() ? newPackageName.trim() : null,
       new_package_def_id: creatingNew
-        ? (selectedKit?.package_def_id ??
+        ? (selectedForceElement?.package_def_id ??
           (newPackageDefId ? Number(newPackageDefId) : null))
         : null,
       items: shipping.map((ii) => {
@@ -958,7 +958,7 @@ export function DeployUtcWizard({
         return (
           drafts.length > 0 &&
           (packageMode !== "existing" || packageId !== "") &&
-          (packageMode !== "kit" || kitId !== "")
+          (packageMode !== "force-element" || forceElementId !== "")
         )
       case "site":
         return !!current?.siteId && nameOf(active).trim().length > 0
@@ -1091,8 +1091,8 @@ export function DeployUtcWizard({
                 belong to the same one.
               </p>
               <div className="flex flex-wrap gap-2">
-                {(["kit", "new", "existing", "none"] as const)
-                  .filter((m) => m !== "kit" || kits.length > 0)
+                {(["force-element", "new", "existing", "none"] as const)
+                  .filter((m) => m !== "force-element" || forceElements.length > 0)
                   .map((m) => (
                     <Button
                       key={m}
@@ -1103,8 +1103,8 @@ export function DeployUtcWizard({
                       onClick={() => setPackageMode(m)}
                     >
                       {packageMode === m && <Check className="size-3.5" />}
-                      {m === "kit"
-                        ? "From a kit"
+                      {m === "force-element"
+                        ? "From a force element"
                         : m === "new"
                           ? "New package"
                           : m === "existing"
@@ -1114,24 +1114,24 @@ export function DeployUtcWizard({
                   ))}
               </div>
 
-              {packageMode === "kit" && (
+              {packageMode === "force-element" && (
                 <div className="space-y-2">
                   <select
-                    value={kitId}
+                    value={forceElementId}
                     onChange={(e) => {
                       const id = e.target.value ? Number(e.target.value) : ""
-                      setKitId(id)
-                      const kit = id ? kits.find((k) => k.id === id) : null
-                      if (kit) {
-                        setDrafts(draftsFromKit(kit))
+                      setForceElementId(id)
+                      const forceElement = id ? forceElements.find((k) => k.id === id) : null
+                      if (forceElement) {
+                        setDrafts(draftsFromForceElement(forceElement))
                         setActive(0)
-                        if (!newPackageName.trim()) setNewPackageName(kit.name)
+                        if (!newPackageName.trim()) setNewPackageName(forceElement.name)
                       }
                     }}
                     className={selectClass}
                   >
-                    <option value="">Select a kit…</option>
-                    {kits.map((k) => (
+                    <option value="">Select a force element…</option>
+                    {forceElements.map((k) => (
                       <option key={k.id} value={k.id}>
                         {k.name} — {k.utcs.length} UTC
                         {k.utcs.length === 1 ? "" : "s"}, {k.item_count} item
@@ -1140,11 +1140,11 @@ export function DeployUtcWizard({
                     ))}
                   </select>
                   {(() => {
-                    const kit = kitId ? kits.find((k) => k.id === kitId) : null
-                    if (!kit) {
+                    const forceElement = forceElementId ? forceElements.find((k) => k.id === forceElementId) : null
+                    if (!forceElement) {
                       return (
                         <p className="text-xs text-muted-foreground">
-                          A kit remembers which UTCs go out and exactly which
+                          A force element remembers which UTCs go out and exactly which
                           gear is in them, so this deployment only has to check
                           off what is actually going.
                         </p>
@@ -1154,30 +1154,30 @@ export function DeployUtcWizard({
                       <div className="space-y-1.5 rounded-lg border border-border p-2.5">
                         <div className="flex items-center gap-2 text-xs">
                           <Boxes className="size-3.5 text-muted-foreground" />
-                          <span className="font-medium">{kit.name}</span>
-                          {kit.package_def_code && (
+                          <span className="font-medium">{forceElement.name}</span>
+                          {forceElement.package_def_code && (
                             <span className="text-muted-foreground">
-                              {kit.package_def_code}
+                              {forceElement.package_def_code}
                             </span>
                           )}
                         </div>
                         <p className="text-[11px] text-muted-foreground">
-                          {kit.item_count} serialized item
-                          {kit.item_count === 1 ? "" : "s"} pinned
-                          {kit.bulk_count > 0 &&
-                            `, ${kit.bulk_count} bulk unit${
-                              kit.bulk_count === 1 ? "" : "s"
+                          {forceElement.item_count} serialized item
+                          {forceElement.item_count === 1 ? "" : "s"} pinned
+                          {forceElement.bulk_count > 0 &&
+                            `, ${forceElement.bulk_count} bulk unit${
+                              forceElement.bulk_count === 1 ? "" : "s"
                             }`}
                           .
                         </p>
-                        {kit.committed_count > 0 && (
+                        {forceElement.committed_count > 0 && (
                           /* Not a warning. Gear moving between packages is the
                              normal workflow for a unit that owns one of
                              something — this is here so the number isn't a
                              surprise on the review step. */
                           <p className="text-[11px] text-muted-foreground">
-                            {kit.committed_count} of them{" "}
-                            {kit.committed_count === 1 ? "is" : "are"} currently
+                            {forceElement.committed_count} of them{" "}
+                            {forceElement.committed_count === 1 ? "is" : "are"} currently
                             on another deployment and will move here.
                           </p>
                         )}
@@ -2182,7 +2182,7 @@ export function DeployUtcWizard({
               <dl className="grid grid-cols-3 gap-y-2">
                 <dt className="text-xs text-muted-foreground">Package</dt>
                 <dd className="col-span-2">
-                  {packageMode === "new" || packageMode === "kit"
+                  {packageMode === "new" || packageMode === "force-element"
                     ? newPackageName || "—"
                     : packageMode === "existing"
                       ? (packages.find((p) => p.id === packageId)?.name ?? "—")
@@ -2190,12 +2190,12 @@ export function DeployUtcWizard({
                   {/* Only worth saying when the two differ — the package name
                       is seeded from the kit's, so the common case would read
                       "FCP-1 from FCP-1". */}
-                  {packageMode === "kit" &&
-                    kitId &&
-                    kits.find((k) => k.id === kitId)?.name !==
+                  {packageMode === "force-element" &&
+                    forceElementId &&
+                    forceElements.find((k) => k.id === forceElementId)?.name !==
                       newPackageName.trim() && (
                       <span className="ml-2 text-xs text-muted-foreground">
-                        from {kits.find((k) => k.id === kitId)?.name}
+                        from {forceElements.find((k) => k.id === forceElementId)?.name}
                       </span>
                     )}
                 </dd>

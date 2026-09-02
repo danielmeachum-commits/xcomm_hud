@@ -1,21 +1,22 @@
-"""Equipment kits — saved rosters of the gear a package actually brings.
+"""Force elements — saved rosters of the gear a package actually brings.
 
-See docs/design/equipment-kits.md.
+See docs/design/force-elements.md.
 
-Kits sit between doctrine and deployment. `package_def` says a Flyaway Comms
-Package carries two AN/TSC-198s; a kit says *ours are these two*, by pinning
+Force elements sit between doctrine and deployment. `package_def` says a Flyaway Comms
+Package carries two AN/TSC-198s; a force element says *ours are these two*, by pinning
 `equipment_asset` rows from the property book.
 
-Kits follow the same global-or-workspace shape as enclaves and the equipment
+Force elements follow the same global-or-workspace shape as enclaves and the equipment
 catalog: `workspace_id IS NULL` is a global, admin-managed row, a non-null one
 is a local addition, and reads merge both. Global is the normal case — a
-workspace is an operating picture, not a tenant, so a kit describing the unit's
+workspace is an operating picture, not a tenant, so a force element describing the unit's
 gear outlives any one exercise.
 
 Two facts about pinning shape most of this file:
 
 * A pin is non-exclusive in both directions. One TACLANE can be listed by every
-  kit that would use it; and the same asset can be materialized into several
+  force element that would use it; and the same asset can be materialized
+  into several
   workspaces at once, because planning next month's exercise while this
   month's is live is ordinary.
 * A pin is not a reservation. `commitments` reports which pictures already hold
@@ -38,10 +39,10 @@ from models import (
     EquipmentAsset,
     EquipmentAssetCapability,
     EquipmentHolding,
-    EquipmentKit,
-    EquipmentKitBulk,
-    EquipmentKitItem,
-    EquipmentKitUtc,
+    ForceElement,
+    ForceElementBulk,
+    ForceElementItem,
+    ForceElementUtc,
     EquipmentType,
     PackageDef,
     PackageInstance,
@@ -54,19 +55,19 @@ from models import (
 from pubsub import notify
 from schemas import (
     AssetCommitment,
-    EquipmentKitIn,
-    EquipmentKitOut,
-    EquipmentKitPatch,
-    EquipmentKitUtcIn,
-    EquipmentKitUtcOut,
-    EquipmentKitBulkOut,
-    EquipmentKitItemOut,
+    ForceElementIn,
+    ForceElementOut,
+    ForceElementPatch,
+    ForceElementUtcIn,
+    ForceElementUtcOut,
+    ForceElementBulkOut,
+    ForceElementItemOut,
     KitCaptureIn,
     KitRefreshIn,
     SubjectKinds,
 )
 
-router = APIRouter(prefix="/kits", tags=["equipment-kits"])
+router = APIRouter(prefix="/force-elements", tags=["equipment-force-elements"])
 
 
 def _now() -> datetime.datetime:
@@ -74,7 +75,7 @@ def _now() -> datetime.datetime:
 
 
 def _require_write(row_workspace_id: int | None, user: User) -> None:
-    """Global kits are admin-only; workspace kits need operator.
+    """Global force_elements are admin-only; workspace force_elements need operator.
 
     Mirrors equipment_catalog._require_write and enclaves._require_write — the
     route dependency already established `operator`, so this only adds the bar
@@ -83,26 +84,26 @@ def _require_write(row_workspace_id: int | None, user: User) -> None:
     if row_workspace_id is None and user.role != "admin":
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Editing a global kit requires admin",
+            "Editing a global force_element requires admin",
         )
 
 
-def _load_kit(db: Session, kit_id: int, workspace: Workspace) -> EquipmentKit:
+def _load_kit(db: Session, force_element_id: int, workspace: Workspace) -> ForceElement:
     row = (
-        db.query(EquipmentKit)
+        db.query(ForceElement)
         .options(
-            selectinload(EquipmentKit.utcs).selectinload(EquipmentKitUtc.items),
-            selectinload(EquipmentKit.utcs).selectinload(EquipmentKitUtc.bulk),
+            selectinload(ForceElement.utcs).selectinload(ForceElementUtc.items),
+            selectinload(ForceElement.utcs).selectinload(ForceElementUtc.bulk),
         )
-        .filter(EquipmentKit.id == kit_id)
+        .filter(ForceElement.id == force_element_id)
         .first()
     )
-    # Global rows are visible from every workspace; a workspace's own kit is
+    # Global rows are visible from every workspace; a workspace's own is
     # visible only from it.
     if row is None or (
         row.workspace_id is not None and row.workspace_id != workspace.id
     ):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kit not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Force element not found")
     return row
 
 
@@ -117,20 +118,21 @@ def _load_package(db: Session, package_id: int, workspace: Workspace) -> Package
 
 
 class _KitContext:
-    """Everything needed to fatten a kit's items, loaded once per response.
+    """Everything needed to fatten a force element's items, loaded once per response.
 
-    A kit of three UTCs carrying nine radios each would otherwise issue a query
+    A force element of three UTCs carrying nine radios each would otherwise
+    issue a query
     per item for the asset, another for every workspace holding it, and another
     for that workspace's UTC. Built in the bulk style `routers/status.py::rollup`
     established.
     """
 
-    def __init__(self, db: Session, workspace: Workspace, kits: list[EquipmentKit]):
+    def __init__(self, db: Session, workspace: Workspace, force_elements: list[ForceElement]):
         asset_ids: set[int] = set()
         type_ids: set[int] = set()
         def_ids: set[int] = set()
-        for kit in kits:
-            for ku in kit.utcs:
+        for force_element in force_elements:
+            for ku in force_element.utcs:
                 if ku.utc_def_id:
                     def_ids.add(ku.utc_def_id)
                 for item in ku.items:
@@ -206,17 +208,17 @@ class _KitContext:
                 )
 
         self.package_defs: dict[int, PackageDef] = {}
-        pd_ids = {k.package_def_id for k in kits if k.package_def_id}
+        pd_ids = {k.package_def_id for k in force_elements if k.package_def_id}
         if pd_ids:
             for pd in db.query(PackageDef).filter(PackageDef.id.in_(pd_ids)):
                 self.package_defs[pd.id] = pd
 
 
-def _item_out(row: EquipmentKitItem, ctx: _KitContext) -> EquipmentKitItemOut:
-    out = EquipmentKitItemOut.model_validate(row)
+def _item_out(row: ForceElementItem, ctx: _KitContext) -> ForceElementItemOut:
+    out = ForceElementItemOut.model_validate(row)
     asset = ctx.assets.get(row.asset_id)
     if asset is None:
-        # The FK cascades, so this should be unreachable — but a kit rendering
+        # The FK cascades, so this should be unreachable — but a force element rendering
         # a blank row is a better failure than a 500.
         return out
     out.equipment_code = asset.equipment_code
@@ -233,8 +235,8 @@ def _item_out(row: EquipmentKitItem, ctx: _KitContext) -> EquipmentKitItemOut:
     return out
 
 
-def _bulk_out(row: EquipmentKitBulk, ctx: _KitContext) -> EquipmentKitBulkOut:
-    out = EquipmentKitBulkOut.model_validate(row)
+def _bulk_out(row: ForceElementBulk, ctx: _KitContext) -> ForceElementBulkOut:
+    out = ForceElementBulkOut.model_validate(row)
     t = ctx.types.get(row.equipment_type_id)
     if t is not None:
         out.type_title = t.title
@@ -242,8 +244,8 @@ def _bulk_out(row: EquipmentKitBulk, ctx: _KitContext) -> EquipmentKitBulkOut:
     return out
 
 
-def _kit_utc_out(row: EquipmentKitUtc, ctx: _KitContext) -> EquipmentKitUtcOut:
-    out = EquipmentKitUtcOut.model_validate(row)
+def _kit_utc_out(row: ForceElementUtc, ctx: _KitContext) -> ForceElementUtcOut:
+    out = ForceElementUtcOut.model_validate(row)
     if row.utc_def_id is not None:
         d = ctx.utc_defs.get(row.utc_def_id)
         if d is not None:
@@ -254,8 +256,8 @@ def _kit_utc_out(row: EquipmentKitUtc, ctx: _KitContext) -> EquipmentKitUtcOut:
     return out
 
 
-def _kit_out(row: EquipmentKit, ctx: _KitContext) -> EquipmentKitOut:
-    out = EquipmentKitOut.model_validate(row)
+def _kit_out(row: ForceElement, ctx: _KitContext) -> ForceElementOut:
+    out = ForceElementOut.model_validate(row)
     out.is_global = row.workspace_id is None
     if row.package_def_id is not None:
         pd = ctx.package_defs.get(row.package_def_id)
@@ -277,7 +279,7 @@ def _kit_out(row: EquipmentKit, ctx: _KitContext) -> EquipmentKitOut:
 def _validate_asset_ids(db: Session, asset_ids: list[int]) -> None:
     """Every pin must be a real property-book asset.
 
-    Checked in one query rather than per item: a kit captured from a large
+    Checked in one query rather than per item: a force element captured from a large
     package pins dozens at once, and the failure worth reporting is the whole
     set, not whichever tripped first.
     """
@@ -298,16 +300,16 @@ def _validate_asset_ids(db: Session, asset_ids: list[int]) -> None:
 
 
 def _write_kit_utcs(
-    db: Session, workspace: Workspace, kit: EquipmentKit, utcs: list[EquipmentKitUtcIn]
+    db: Session, workspace: Workspace, force_element: ForceElement, utcs: list[ForceElementUtcIn]
 ) -> None:
-    """Replace a kit's whole UTC tree.
+    """Replace a force element's whole UTC tree.
 
     Wholesale replace rather than diff, matching `utc_def`'s lines endpoint.
-    Kit rows carry no state anything else points at — no FK targets them — so
+    Force element rows carry no state anything else points at — no FK targets them — so
     churning their ids costs nothing, and the alternative is reconciliation
     logic with no payoff.
     """
-    kit.utcs.clear()
+    force_element.utcs.clear()
     db.flush()
 
     _validate_asset_ids(db, [i.asset_id for u in utcs for i in u.items])
@@ -322,8 +324,8 @@ def _write_kit_utcs(
                     status.HTTP_404_NOT_FOUND,
                     f"UTC definition {u.utc_def_id} not found",
                 )
-        row = EquipmentKitUtc(
-            kit_id=kit.id,
+        row = ForceElementUtc(
+            force_element_id=force_element.id,
             utc_def_id=u.utc_def_id,
             name=u.name,
             role_hint=u.role_hint,
@@ -341,8 +343,8 @@ def _write_kit_utcs(
                 continue
             seen.add(item.asset_id)
             db.add(
-                EquipmentKitItem(
-                    kit_utc_id=row.id,
+                ForceElementItem(
+                    force_element_utc_id=row.id,
                     asset_id=item.asset_id,
                     display_order=item.display_order or i_order,
                 )
@@ -364,17 +366,17 @@ def _write_kit_utcs(
                     raise HTTPException(
                         status.HTTP_404_NOT_FOUND, f"Enclave {b.enclave_id} not found"
                     )
-                # A global kit pointing at one workspace's enclave would be
+                # A global force element pointing at one workspace's enclave would be
                 # broken for every other picture that deploys it.
-                if kit.workspace_id is None and e.workspace_id is not None:
+                if force_element.workspace_id is None and e.workspace_id is not None:
                     raise HTTPException(
                         status.HTTP_400_BAD_REQUEST,
-                        f"Global kits can only use global enclaves — "
+                        f"Global force_elements can only use global enclaves — "
                         f"'{e.name}' belongs to a workspace.",
                     )
             db.add(
-                EquipmentKitBulk(
-                    kit_utc_id=row.id,
+                ForceElementBulk(
+                    force_element_utc_id=row.id,
                     equipment_type_id=b.equipment_type_id,
                     quantity=b.quantity,
                     enclave_id=b.enclave_id,
@@ -386,7 +388,8 @@ def _write_kit_utcs(
 def _promote_to_asset(db: Session, eq: Equipment) -> EquipmentAsset | None:
     """The property-book row for this piece of gear, creating it if needed.
 
-    This is what makes "Save as kit" work from a workspace that predates the
+    This is what makes "Save as force element" work from a workspace that
+    predates the
     property book: the serials already typed into an operating picture become
     the unit's inventory, once, instead of being retyped globally.
 
@@ -445,18 +448,18 @@ def _promote_to_asset(db: Session, eq: Equipment) -> EquipmentAsset | None:
 
 def _capture_utcs(
     db: Session, workspace: Workspace, package: PackageInstance
-) -> tuple[list[EquipmentKitUtcIn], list[str]]:
-    """Read a live package back out as kit input, promoting its gear.
+) -> tuple[list[ForceElementUtcIn], list[str]]:
+    """Read a live package back out as force_element input, promoting its gear.
 
     Reads from what is physically attached (`equipment`, `equipment_holding`),
     not from `utc_instance_line`. The snapshot records what the deployment
-    *meant* to bring; a kit should record what it actually took, since that is
+    *meant* to bring; a force element should record what it actually took, since that is
     the configuration worth repeating.
 
     Returns the slots plus any gear that could not be promoted, so the caller
     can say so rather than silently dropping it.
     """
-    from schemas import EquipmentKitBulkIn, EquipmentKitItemIn
+    from schemas import ForceElementBulkIn, ForceElementItemIn
 
     utcs = (
         db.query(UtcInstance)
@@ -467,7 +470,7 @@ def _capture_utcs(
         .order_by(UtcInstance.display_order, UtcInstance.id)
         .all()
     )
-    out: list[EquipmentKitUtcIn] = []
+    out: list[ForceElementUtcIn] = []
     skipped: list[str] = []
     for order, u in enumerate(utcs):
         gear = (
@@ -481,7 +484,7 @@ def _capture_utcs(
             .filter(EquipmentHolding.utc_instance_id == u.id)
             .all()
         )
-        items: list[EquipmentKitItemIn] = []
+        items: list[ForceElementItemIn] = []
         for i, eq in enumerate(gear):
             asset = _promote_to_asset(db, eq)
             if asset is None:
@@ -490,9 +493,9 @@ def _capture_utcs(
                     f"book under a different serial"
                 )
                 continue
-            items.append(EquipmentKitItemIn(asset_id=asset.id, display_order=i))
+            items.append(ForceElementItemIn(asset_id=asset.id, display_order=i))
         out.append(
-            EquipmentKitUtcIn(
+            ForceElementUtcIn(
                 utc_def_id=u.utc_def_id,
                 name=u.name,
                 # A deployment committed to a role; as doctrine for next time
@@ -501,9 +504,9 @@ def _capture_utcs(
                 display_order=order,
                 items=items,
                 bulk=[
-                    EquipmentKitBulkIn(
+                    ForceElementBulkIn(
                         equipment_type_id=h.equipment_type_id,
-                        # Authorized, not on-hand: the kit is the plan, and
+                        # Authorized, not on-hand: the force element is the plan, and
                         # planning next deployment around this one's shortfall
                         # would make the shortage permanent.
                         quantity=h.authorized_qty or h.on_hand_qty,
@@ -519,7 +522,7 @@ def _capture_utcs(
 # ---------- endpoints ----------
 
 
-@router.get("", response_model=list[EquipmentKitOut])
+@router.get("", response_model=list[ForceElementOut])
 def list_kits(
     include_retired: bool = Query(default=False),
     db: Session = Depends(get_db),
@@ -527,150 +530,150 @@ def list_kits(
     _: User = Depends(requires("viewer")),
 ):
     q = (
-        db.query(EquipmentKit)
+        db.query(ForceElement)
         .options(
-            selectinload(EquipmentKit.utcs).selectinload(EquipmentKitUtc.items),
-            selectinload(EquipmentKit.utcs).selectinload(EquipmentKitUtc.bulk),
+            selectinload(ForceElement.utcs).selectinload(ForceElementUtc.items),
+            selectinload(ForceElement.utcs).selectinload(ForceElementUtc.bulk),
         )
         .filter(
-            (EquipmentKit.workspace_id.is_(None))
-            | (EquipmentKit.workspace_id == workspace.id)
+            (ForceElement.workspace_id.is_(None))
+            | (ForceElement.workspace_id == workspace.id)
         )
     )
     if not include_retired:
-        q = q.filter(EquipmentKit.retired_at.is_(None))
-    rows = q.order_by(EquipmentKit.name).all()
+        q = q.filter(ForceElement.retired_at.is_(None))
+    rows = q.order_by(ForceElement.name).all()
     ctx = _KitContext(db, workspace, rows)
     return [_kit_out(r, ctx) for r in rows]
 
 
-@router.get("/{kit_id}", response_model=EquipmentKitOut)
+@router.get("/{force_element_id}", response_model=ForceElementOut)
 def get_kit(
-    kit_id: int,
+    force_element_id: int,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     _: User = Depends(requires("viewer")),
 ):
-    row = _load_kit(db, kit_id, workspace)
+    row = _load_kit(db, force_element_id, workspace)
     return _kit_out(row, _KitContext(db, workspace, [row]))
 
 
-@router.post("", response_model=EquipmentKitOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ForceElementOut, status_code=status.HTTP_201_CREATED)
 def create_kit(
-    body: EquipmentKitIn,
+    body: ForceElementIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    # Kits describe the unit's gear, so global is the default and a
-    # workspace-local kit is the opt-out.
+    # Force elements describe the unit's gear, so global is the default and a
+    # a workspace-local force element is the opt-out.
     local: bool = Query(default=False),
     current_user: User = Depends(requires("operator")),
 ):
     owner_id = workspace.id if local else None
     _require_write(owner_id, current_user)
-    kit = EquipmentKit(
+    force_element = ForceElement(
         workspace_id=owner_id,
         name=body.name,
         description=body.description,
         package_def_id=body.package_def_id,
     )
-    db.add(kit)
+    db.add(force_element)
     db.flush()
-    _write_kit_utcs(db, workspace, kit, body.utcs)
+    _write_kit_utcs(db, workspace, force_element, body.utcs)
     record_action(
         db,
-        action_slug="kit.saved",
+        action_slug="force_element.saved",
         workspace_id=owner_id,
-        subject_kind=SubjectKinds.EQUIPMENT_KIT,
-        subject_id=kit.id,
-        subject_label=kit.name,
+        subject_kind=SubjectKinds.FORCE_ELEMENT,
+        subject_id=force_element.id,
+        subject_label=force_element.name,
         user_id=current_user.id,
         note=f"{sum(len(u.items) for u in body.utcs)} item(s) pinned",
     )
     db.flush()
-    db.refresh(kit)
+    db.refresh(force_element)
     notify(background_tasks)
-    return _kit_out(kit, _KitContext(db, workspace, [kit]))
+    return _kit_out(force_element, _KitContext(db, workspace, [force_element]))
 
 
-@router.patch("/{kit_id}", response_model=EquipmentKitOut)
+@router.patch("/{force_element_id}", response_model=ForceElementOut)
 def patch_kit(
-    kit_id: int,
-    body: EquipmentKitPatch,
+    force_element_id: int,
+    body: ForceElementPatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     _: User = Depends(requires("operator")),
 ):
-    kit = _load_kit(db, kit_id, workspace)
-    _require_write(kit.workspace_id, current_user)
+    force_element = _load_kit(db, force_element_id, workspace)
+    _require_write(force_element.workspace_id, current_user)
     data = body.model_dump(exclude_unset=True)
     retired = data.pop("retired", None)
     for field, value in data.items():
-        setattr(kit, field, value)
+        setattr(force_element, field, value)
     if retired is not None:
-        kit.retired_at = _now() if retired else None
+        force_element.retired_at = _now() if retired else None
     db.flush()
     notify(background_tasks)
-    return _kit_out(kit, _KitContext(db, workspace, [kit]))
+    return _kit_out(force_element, _KitContext(db, workspace, [force_element]))
 
 
-@router.put("/{kit_id}/utcs", response_model=EquipmentKitOut)
+@router.put("/{force_element_id}/utcs", response_model=ForceElementOut)
 def replace_kit_utcs(
-    kit_id: int,
-    body: list[EquipmentKitUtcIn],
+    force_element_id: int,
+    body: list[ForceElementUtcIn],
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    """Wholesale-replace a kit's contents, mirroring `PUT /utc-defs/{id}/lines`."""
-    kit = _load_kit(db, kit_id, workspace)
-    _require_write(kit.workspace_id, current_user)
-    _write_kit_utcs(db, workspace, kit, body)
-    db.refresh(kit)
+    """Wholesale-replace a force element's contents, mirroring `PUT /utc-defs/{id}/lines`."""
+    force_element = _load_kit(db, force_element_id, workspace)
+    _require_write(force_element.workspace_id, current_user)
+    _write_kit_utcs(db, workspace, force_element, body)
+    db.refresh(force_element)
     notify(background_tasks)
-    return _kit_out(kit, _KitContext(db, workspace, [kit]))
+    return _kit_out(force_element, _KitContext(db, workspace, [force_element]))
 
 
-@router.delete("/{kit_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{force_element_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_kit(
-    kit_id: int,
+    force_element_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    """Hard-delete a kit.
+    """Hard-delete a force element.
 
-    Unlike the catalog, nothing holds a RESTRICT reference to a kit and no
-    deployment depends on one having survived — a kit is a convenience, and a
+    Unlike the catalog, nothing holds a RESTRICT reference to a force element and no
+    deployment depends on one having survived — a force element is a convenience, and a
     deployment made from it is complete on its own. `retired` on the PATCH
-    endpoint is there for kits worth keeping out of the picker without losing.
+    endpoint is there for force_elements worth keeping out of the picker without losing.
     """
-    kit = _load_kit(db, kit_id, workspace)
-    _require_write(kit.workspace_id, current_user)
-    pinned = sum(len(u.items) for u in kit.utcs)
+    force_element = _load_kit(db, force_element_id, workspace)
+    _require_write(force_element.workspace_id, current_user)
+    pinned = sum(len(u.items) for u in force_element.utcs)
     record_action(
         db,
-        action_slug="kit.deleted",
-        workspace_id=kit.workspace_id,
-        subject_kind=SubjectKinds.EQUIPMENT_KIT,
-        subject_id=kit.id,
-        subject_label=kit.name,
+        action_slug="force_element.deleted",
+        workspace_id=force_element.workspace_id,
+        subject_kind=SubjectKinds.FORCE_ELEMENT,
+        subject_id=force_element.id,
+        subject_label=force_element.name,
         user_id=current_user.id,
         note=(
             f"{pinned} pinned item(s) released; no equipment was deleted"
             if pinned
-            else "Kit held no pinned equipment"
+            else "Force element held no pinned equipment"
         ),
     )
-    db.delete(kit)
+    db.delete(force_element)
     notify(background_tasks)
 
 
 @router.post(
-    "/capture", response_model=EquipmentKitOut, status_code=status.HTTP_201_CREATED
+    "/capture", response_model=ForceElementOut, status_code=status.HTTP_201_CREATED
 )
 def capture_kit(
     body: KitCaptureIn,
@@ -680,7 +683,7 @@ def capture_kit(
     local: bool = Query(default=False),
     current_user: User = Depends(requires("operator")),
 ):
-    """Save a live package as a kit — the way kits actually get made.
+    """Save a live package as a force element — the way force_elements actually get made.
 
     Also promotes the package's gear into the property book, so a workspace
     that typed its serials before assets existed contributes them once instead
@@ -695,22 +698,22 @@ def capture_kit(
             status.HTTP_400_BAD_REQUEST,
             f"'{package.name}' has no deployed UTCs to capture.",
         )
-    kit = EquipmentKit(
+    force_element = ForceElement(
         workspace_id=owner_id,
         name=body.name,
         description=body.description,
         package_def_id=body.package_def_id or package.package_def_id,
     )
-    db.add(kit)
+    db.add(force_element)
     db.flush()
-    _write_kit_utcs(db, workspace, kit, utcs)
+    _write_kit_utcs(db, workspace, force_element, utcs)
     record_action(
         db,
-        action_slug="kit.saved",
+        action_slug="force_element.saved",
         workspace_id=owner_id,
-        subject_kind=SubjectKinds.EQUIPMENT_KIT,
-        subject_id=kit.id,
-        subject_label=kit.name,
+        subject_kind=SubjectKinds.FORCE_ELEMENT,
+        subject_id=force_element.id,
+        subject_label=force_element.name,
         user_id=current_user.id,
         note=(
             f"Captured from '{package.name}' — {len(utcs)} UTC(s), "
@@ -719,23 +722,23 @@ def capture_kit(
         ),
     )
     db.flush()
-    db.refresh(kit)
+    db.refresh(force_element)
     notify(background_tasks)
-    return _kit_out(kit, _KitContext(db, workspace, [kit]))
+    return _kit_out(force_element, _KitContext(db, workspace, [force_element]))
 
 
-@router.post("/{kit_id}/refresh", response_model=EquipmentKitOut)
+@router.post("/{force_element_id}/refresh", response_model=ForceElementOut)
 def refresh_kit(
-    kit_id: int,
+    force_element_id: int,
     body: KitRefreshIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
 ):
-    """Re-pin an existing kit from a live package, replacing its contents."""
-    kit = _load_kit(db, kit_id, workspace)
-    _require_write(kit.workspace_id, current_user)
+    """Re-pin an existing force_element from a live package, replacing its contents."""
+    force_element = _load_kit(db, force_element_id, workspace)
+    _require_write(force_element.workspace_id, current_user)
     package = _load_package(db, body.package_instance_id, workspace)
     utcs, skipped = _capture_utcs(db, workspace, package)
     if not utcs:
@@ -743,19 +746,19 @@ def refresh_kit(
             status.HTTP_400_BAD_REQUEST,
             f"'{package.name}' has no deployed UTCs to capture.",
         )
-    _write_kit_utcs(db, workspace, kit, utcs)
+    _write_kit_utcs(db, workspace, force_element, utcs)
     record_action(
         db,
-        action_slug="kit.saved",
-        workspace_id=kit.workspace_id,
-        subject_kind=SubjectKinds.EQUIPMENT_KIT,
-        subject_id=kit.id,
-        subject_label=kit.name,
+        action_slug="force_element.saved",
+        workspace_id=force_element.workspace_id,
+        subject_kind=SubjectKinds.FORCE_ELEMENT,
+        subject_id=force_element.id,
+        subject_label=force_element.name,
         user_id=current_user.id,
         note=f"Refreshed from '{package.name}' — {len(utcs)} UTC(s)"
         + (f"; {len(skipped)} skipped" if skipped else ""),
     )
     db.flush()
-    db.refresh(kit)
+    db.refresh(force_element)
     notify(background_tasks)
-    return _kit_out(kit, _KitContext(db, workspace, [kit]))
+    return _kit_out(force_element, _KitContext(db, workspace, [force_element]))

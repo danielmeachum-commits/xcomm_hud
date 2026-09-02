@@ -6,7 +6,7 @@ import type {
   Enclave,
   Equipment,
   EquipmentAsset,
-  EquipmentKit,
+  ForceElement,
   EquipmentType,
   Gateway,
   NetworkTopology,
@@ -38,7 +38,7 @@ export default async function EquipmentPage({
     services,
     gateways,
     topology,
-    kits,
+    forceElements,
     assets,
   ] = await Promise.all([
     apiGet<Equipment[]>("/equipment").catch(() => [] as Equipment[]),
@@ -63,7 +63,7 @@ export default async function EquipmentPage({
           gateway_derived: {},
         }) as NetworkTopology,
     ),
-    apiGet<EquipmentKit[]>("/kits").catch(() => [] as EquipmentKit[]),
+    apiGet<ForceElement[]>("/force-elements").catch(() => [] as ForceElement[]),
     apiGet<EquipmentAsset[]>("/assets").catch(() => [] as EquipmentAsset[]),
   ])
 
@@ -79,7 +79,7 @@ export default async function EquipmentPage({
         types={types}
         utcDefs={utcDefs}
         packageDefs={packageDefs}
-        kits={kits}
+        forceElements={forceElements}
         assets={assets}
         services={services}
         gateways={gateways}

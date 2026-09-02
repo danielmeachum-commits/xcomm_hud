@@ -1,6 +1,6 @@
 """The property book — every physical box the unit owns, once, globally.
 
-See docs/design/equipment-kits.md §9.
+See docs/design/force-elements.md §9.
 
 A workspace is an operating picture, not a tenant, so the radio in the rack is
 a fact about the unit rather than about any one exercise. This router owns that
@@ -198,7 +198,8 @@ def materialize_asset(
 
     Returns `(row, created)`.
 
-    Find-or-create rather than always-create: redeploying the same kit into the
+    Find-or-create rather than always-create: redeploying the same force
+    element into the
     same picture must not register the radio twice. When the row already exists
     it is moved — site, UTC and enclave are properties of this deployment, not
     of the box.

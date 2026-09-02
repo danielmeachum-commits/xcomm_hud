@@ -1,9 +1,9 @@
-# Equipment kits — deploying the gear we already own
+# Equipment force elements — deploying the gear we already own
 
 Status: **SHIPPED** (2026-08-08), migrations 0058 and 0059.
 
 §1–§8 describe the workspace-scoped first cut (0058). **§9 supersedes its
-scoping**: kits are global, pinning a global property book, and deploy
+scoping**: force elements are global, pinning a global property book, and deploy
 materializes into a workspace. Read §9 before trusting §2's table or §3's
 conflict discussion.
 
@@ -68,64 +68,64 @@ Two gaps, and the first blocks the second:
 
 Doctrine and reality are already separated, and the split is load-bearing
 (`UtcInstanceLine`'s docstring, `api/models.py:1957`, is the clearest statement
-of it). Kits slot in as a fourth layer between doctrine and deployment:
+of it). Force elements slot in as a fourth layer between doctrine and deployment:
 
 | layer | table | holds | scope |
 | --- | --- | --- | --- |
 | doctrine | `utc_def`, `package_def` | types + quantities | global **or** workspace |
-| **kit** *(new)* | `equipment_kit` | **specific serials** | workspace |
+| **force element** *(new)* | `force_element` | **specific serials** | workspace |
 | plan | `utc_instance_line` | what we meant to bring | one deployment |
 | reality | `equipment`, `equipment_holding` | what is actually there | one deployment |
 
-**A kit is not a `PackageDef` field.** `package_def.workspace_id` is nullable
+**A force element is not a `PackageDef` field.** `package_def.workspace_id` is nullable
 (`models.py:1819`) — package definitions can be global catalog entries, and
 serial numbers must never live on a row that another workspace can read.
-Doctrine says *a Flyaway Comms Package carries two AN/TSC-198s*; a kit says
+Doctrine says *a Flyaway Comms Package carries two AN/TSC-198s*; a force element says
 *ours are S/N 4417 and S/N 4420*. Those are different facts with different
 owners and different lifetimes.
 
 ### New tables
 
 ```
-equipment_kit
+force_element
   id, workspace_id → workspace (CASCADE)
-  package_def_id  → package_def (SET NULL, nullable)   -- doctrine this kit realizes
+  package_def_id  → package_def (SET NULL, nullable)   -- doctrine this force element realizes
   name, description, retired_at, created_at, updated_at
   UNIQUE (workspace_id, name)
 
-equipment_kit_utc            -- one queued UTC per row; quantity is expressed
-  id, kit_id → equipment_kit (CASCADE)                 -- as repeated rows, so each
+force_element_utc            -- one queued UTC per row; quantity is expressed
+  id, kit_id → force_element (CASCADE)                 -- as repeated rows, so each
   utc_def_id → utc_def (SET NULL, nullable)            -- gets its own pinned gear
   name, role_hint, display_order
 
-equipment_kit_item           -- the pinned serials
-  id, kit_utc_id → equipment_kit_utc (CASCADE)
-  equipment_id → equipment (CASCADE)                   -- gear sold off leaves the kit
+force_element_item           -- the pinned serials
+  id, force_element_utc_id → force_element_utc (CASCADE)
+  equipment_id → equipment (CASCADE)                   -- gear sold off leaves the force element
   display_order
-  UNIQUE (kit_utc_id, equipment_id)
+  UNIQUE (force_element_utc_id, equipment_id)
 
-equipment_kit_bulk           -- bulk is counted, never pinned
-  id, kit_utc_id → equipment_kit_utc (CASCADE)
+force_element_bulk           -- bulk is counted, never pinned
+  id, force_element_utc_id → force_element_utc (CASCADE)
   equipment_type_id → equipment_type (RESTRICT)
   quantity, enclave_id → enclave (SET NULL, nullable)
-  UNIQUE (kit_utc_id, equipment_type_id, enclave_id)
+  UNIQUE (force_element_utc_id, equipment_type_id, enclave_id)
 ```
 
 Two deliberate choices:
 
 **`utc_def_id` is nullable.** Hand-built UTCs are a first-class path in the
 wizard today (`deploy-utc-wizard.tsx:392` — "Building by hand: there is no bill
-of materials to derive from"). A kit captured from one must survive.
+of materials to derive from"). A force element captured from one must survive.
 
-**No `enclave_id` on `equipment_kit_item`.** The gear already carries its own
+**No `enclave_id` on `force_element_item`.** The gear already carries its own
 (`equipment.enclave_id`, `models.py:2069`). Snapshotting it here would create a
 second source of truth that drifts the moment someone re-tags a radio.
 
 ### Pinning is non-exclusive
 
-The same TACLANE belongs to the FCP kit *and* the JIP kit. A unit that owns one
-of something puts it in every kit that would use it — that is what owning one
-means. The constraint is not "which kits may list it" but "which live
+The same TACLANE belongs to the FCP force element *and* the JIP force element. A unit that owns one
+of something puts it in every force element that would use it — that is what owning one
+means. The constraint is not "which force elements may list it" but "which live
 deployment currently holds it," and that is enforced at deploy, not at pin.
 
 ---
@@ -139,7 +139,7 @@ When set, the item is a **claim on existing gear** rather than a registration:
 - `serial_number`, `equipment_code`, and `capability_kinds` are ignored — the
   row already has them, and its capabilities are already materialized
   (`EquipmentCapability`, `models.py:2132`). Re-picking them would silently
-  overwrite an operator's earlier edit, like the deleted `los_rf` on a kit that
+  overwrite an operator's earlier edit, like the deleted `los_rf` on a force element that
   shipped without its antenna.
 - Validation, in the existing pre-write pass (`deployments.py:773-829`, which
   already resolves everything before touching the database): same workspace,
@@ -168,7 +168,7 @@ on its own, without a gate.
 
 So the requirement is disclosure, not prevention:
 
-- The pool picker and the kit's Serialized step label held gear inline —
+- The pool picker and the force element's Serialized step label held gear inline —
   *"R7421 · held by FCP-2 (Site Bravo)"* — so the operator sees it before
   choosing, not after.
 - `UtcDeployOut` returns a `reassigned` list (equipment ID, previous UTC,
@@ -183,13 +183,13 @@ tear down last week's deployment before standing up this week's.
 
 ---
 
-## 4. Kit → deployment (G2)
+## 4. Force element → deployment (G2)
 
 The wizard's first step already chooses between a package definition, an
 existing package instance, and nothing (`deploy-utc-wizard.tsx:181`). Add
-**kit** as a fourth source.
+**force element** as a fourth source.
 
-Selecting one queues a draft per `equipment_kit_utc`, exactly as
+Selecting one queues a draft per `force_element_utc`, exactly as
 `draftsFromPackageDef` does today (`deploy-utc-wizard.tsx:259`) — but with the
 Serialized step already populated and every pinned item **checked**.
 
@@ -197,7 +197,7 @@ The Serialized step becomes three row states instead of one:
 
 | state | shows | operator action |
 | --- | --- | --- |
-| **pinned** (from kit) | ID, serial, current holder | uncheck to leave it home |
+| **pinned** (from force element) | ID, serial, current holder | uncheck to leave it home |
 | **from pool** | picker filtered to the line's type, unassigned gear first | pick one |
 | **new** | today's serial + ID fields | type it |
 
@@ -212,18 +212,18 @@ operate on the resolved item list without caring how each row got there.
 
 ---
 
-## 5. How kits actually get made
+## 5. How force elements actually get made
 
-**Capture from a live deployment.** A "Save as kit" action on a `PackageInstance`
+**Capture from a live deployment.** A "Save as force element" action on a `PackageInstance`
 walks its UTCs, pins every attached `Equipment` row, and copies bulk quantities
 off `EquipmentHolding`.
 
 This is the path that matters. Configure the FCP once by hand — which the
-operator has to do anyway the first time — then save it. Authoring a kit from
+operator has to do anyway the first time — then save it. Authoring a force element from
 an empty form is supported by the same tables, but nobody will do it, and the
 feature should not be designed around the path nobody takes.
 
-**Refresh from a deployment.** Re-capturing onto an existing kit updates the
+**Refresh from a deployment.** Re-capturing onto an existing force element updates the
 pins after the real-world set changes (a radio goes to depot, a replacement
 arrives). Cheaper than editing pin-by-pin.
 
@@ -235,18 +235,18 @@ arrives). Cheaper than editing pin-by-pin.
 reassign path, the conflict 409, and the pool picker in the Serialized step. No
 migration beyond the new event type. This is independently valuable and is most
 of the user's actual pain: *"we already own this radio"* stops being a dead end,
-kit or no kit.
+force element or no force element.
 
-**Step 2 — kit tables + CRUD.** Migration 0058. List, read, rename, retire.
+**Step 2 — force element tables + CRUD.** Migration 0058. List, read, rename, retire.
 
-**Step 3 — capture from deployment.** "Save as kit" and refresh. Kits become
+**Step 3 — capture from deployment.** "Save as force element" and refresh. Force elements become
 reachable without an authoring UI.
 
-**Step 4 — kit as a wizard source.** The fourth source and the three-state
+**Step 4 — force element as a wizard source.** The fourth source and the three-state
 Serialized step.
 
-**Step 5 — kit health.** What is pinned, what is currently deployed elsewhere,
-what has been retired out from under the kit. The finite-pool question turned
+**Step 5 — force element health.** What is pinned, what is currently deployed elsewhere,
+what has been retired out from under the force element. The finite-pool question turned
 into a screen: *can we actually field this package right now?*
 
 Steps 1 and 2–4 are separable. If only one thing gets built, it should be step 1.
@@ -262,12 +262,12 @@ Steps 1 and 2–4 are separable. If only one thing gets built, it should be step
 
 ### Still open
 
-1. **Do kits pin bulk quantities?** Recommended yes (`equipment_kit_bulk`) —
+1. **Do force elements pin bulk quantities?** Recommended yes (`force_element_bulk`) —
    otherwise every deployment re-enters cable and battery counts, which is the
    same retyping complaint one tier down.
-3. **Retire vs. delete kits.** `retired_at` matches `package_def`
+3. **Retire vs. delete force elements.** `retired_at` matches `package_def`
    (`models.py:1828`); recommended for consistency.
-4. **Does a kit pin a site?** Recommended no. The same FCP deploys wherever it
+4. **Does a force element pin a site?** Recommended no. The same FCP deploys wherever it
    is sent, and `UtcInstance.site_id` is a per-deployment fact.
 
 ---
@@ -278,9 +278,9 @@ All five steps, in one pass. Migration **0058**.
 
 ### API
 
-* `equipment_kit` / `equipment_kit_utc` / `equipment_kit_item` /
-  `equipment_kit_bulk` (`api/models.py`), plus the `equipment_kit` subject kind
-  and the `equipment.reassigned`, `kit.saved`, `kit.deleted` event types.
+* `force_element` / `force_element_utc` / `force_element_item` /
+  `force_element_bulk` (`api/models.py`), plus the `force_element` subject kind
+  and the `equipment.reassigned`, `force element.saved`, `force element.deleted` event types.
 * `UtcDeployItemIn.equipment_id` and the reassign path in `deploy_utc`
   (`api/routers/deployments.py`). Validated in the existing pre-write pass, so
   a bad claim still writes nothing. Rejects a type mismatch (409) and the same
@@ -288,21 +288,21 @@ All five steps, in one pass. Migration **0058**.
   another live UTC — see §3.
 * `UtcDeployOut.reassigned`, the disclosure list.
 * `api/routers/equipment_kits.py` — list/get/create/patch/delete, wholesale
-  `PUT /kits/{id}/utcs`, `POST /kits/capture`, `POST /kits/{id}/refresh`.
+  `PUT /force elements/{id}/utcs`, `POST /force elements/capture`, `POST /force elements/{id}/refresh`.
 
 ### Web UI
 
-* Deploy wizard: **From a kit** as a fourth package source; the Serialized step
+* Deploy wizard: **From a force element** as a fourth package source; the Serialized step
   rebuilt around three row states (pinned, pulled from the pool, newly
   registered) with an include checkbox per row; a pool picker on every
   serialized row, sorted idle-first and labelled with the current holder;
   review-step disclosure of what will move; a post-deploy summary of what
   actually did.
-* **Kits** tab on `/equipment`, with the fieldability chips (ready in the pool
+* **Force elements** tab on `/equipment`, with the fieldability chips (ready in the pool
   / out on another deployment / no longer in inventory) and an expandable
   roster.
-* **Save as kit** on each package in the UTCs tab, which also offers to refresh
-  an existing kit rather than accumulate near-duplicates.
+* **Save as force element** on each package in the UTCs tab, which also offers to refresh
+  an existing force element rather than accumulate near-duplicates.
 
 ### Things worth remembering
 
@@ -326,38 +326,38 @@ ignores `capability_kinds` for claimed items for the same reason.
 Against the dev DB (rolled back): capture pins 9 items across 2 UTCs with bulk;
 a deploy claiming 4 of them creates **no** new `equipment` rows, reports 4
 moves, and leaves the source UTC at `status=short` with correct per-type deltas;
-type mismatch and duplicate claim both 409. Driven in the browser: kit capture,
-the Kits tab and its chips, kit-sourced deploy through to review, including the
+type mismatch and duplicate claim both 409. Driven in the browser: force element capture,
+the Force elements tab and its chips, force element-sourced deploy through to review, including the
 include-checkbox counter (`4 of 4 going` → `3 of 4 going`) and the
 eight-item move disclosure.
 
 ### Still open
 
-The `retired` flag on kits has no UI — `PATCH /kits/{id}` accepts it, but the
-Kits tab only offers delete. Fine while a workspace has a handful of kits;
+The `retired` flag on force elements has no UI — `PATCH /force elements/{id}` accepts it, but the
+Force elements tab only offers delete. Fine while a workspace has a handful of force elements;
 worth a filter once it doesn't.
 
 
 ---
 
-## 9. Re-scope: global kits over a property book — SHIPPED (0059)
+## 9. Re-scope: global force elements over a property book — SHIPPED (0059)
 
-0058 scoped kits to a workspace. That was one level too low, and the app
+0058 scoped force elements to a workspace. That was one level too low, and the app
 already said so: the workspaces admin page describes a workspace as *"one
 operating picture"* and tells you to *"duplicate a workspace to seed the next
 exercise."* A workspace is an exercise, not a tenant. The radio in the rack is
-a fact about the unit, so a kit describing the unit's gear belongs in the
+a fact about the unit, so a force element describing the unit's gear belongs in the
 global tier beside enclaves and the equipment catalog.
 
 ### The obstacle, and why the fix is a new layer
 
 `equipment` is workspace-scoped — workspace-unique serial and equipment ID, and
-a NOT NULL `site_id` pointing at a workspace's site. A global kit cannot pin one
+a NOT NULL `site_id` pointing at a workspace's site. A global force element cannot pin one
 of those rows. Three ways out were considered:
 
 | | approach | verdict |
 | --- | --- | --- |
-| A | global kit holds types + quantities only | within a rounding error of `PackageDef`; doesn't stop anyone retyping serials, so it fails the original ask |
+| A | global force element holds types + quantities only | within a rounding error of `PackageDef`; doesn't stop anyone retyping serials, so it fails the original ask |
 | B | `equipment` itself becomes global, one assignment | delivers the ask, but a single `utc_instance_id` makes the pool exclusive across workspaces — you could not plan next month's exercise with gear currently deployed |
 | **C** | **global `equipment_asset`; workspaces materialize from it** | **shipped** |
 
@@ -378,14 +378,14 @@ equipment_asset_capability   -- which capabilities THIS box has (no status)
   asset_id → equipment_asset (CASCADE), kind, display_order
 
 equipment.asset_id           -- which asset this picture's row came from (SET NULL)
-equipment_kit.workspace_id   -- now NULLABLE; NULL = global, admin-managed
-equipment_kit_item.asset_id  -- pins an ASSET, not a workspace equipment row
+force_element.workspace_id   -- now NULLABLE; NULL = global, admin-managed
+force_element_item.asset_id  -- pins an ASSET, not a workspace equipment row
 ```
 
 `equipment_asset_capability` deliberately carries **no status**. Status is a
 fact about a deployment ("the data port is down at Bravo"); the same box can be
 healthy in one picture and degraded in another. What belongs on the asset is
-only the shape of the box, so a kit that shipped without its antenna
+only the shape of the box, so a force element that shipped without its antenna
 materializes without `los_rf` everywhere it lands.
 
 `equipment.asset_id` is SET NULL, not CASCADE: striking a box from the property
@@ -395,12 +395,12 @@ book must never delete an operating picture's record of having used it.
 
 `UtcDeployItemIn.asset_id` creates *this workspace's* row from the asset,
 carrying its serial, ID and capabilities. It is find-or-create: redeploying the
-same kit into the same picture moves the row it already made rather than
+same force element into the same picture moves the row it already made rather than
 registering the radio twice.
 
 Three item paths now exist, and they are genuinely different:
 
-* `asset_id` — materialize from the property book (the kit path)
+* `asset_id` — materialize from the property book (the force element path)
 * `equipment_id` — claim a row this workspace already registered, moving it
   between UTCs (§3's warn-and-proceed, unchanged, still within one workspace)
 * neither — register something new
@@ -414,50 +414,50 @@ Only the middle one moves anything, and only ever within one workspace.
   workspace already typed — matching by serial then equipment ID, linking
   rather than duplicating, so running it twice is a no-op. That is the bridge
   from pre-0059 data.
-* **Kits tab**: kits are marked Global, and the health chips became
+* **Force elements tab**: force elements are marked Global, and the health chips became
   free / in use / struck from the property book. "In use" is not a shortage —
   the gear is still deployable here.
 * **Deploy wizard**: the Serialized picker is grouped `Property book` /
-  `Already in this workspace`, and a kit-pinned row says either "Free" or
+  `Already in this workspace`, and a force element-pinned row says either "Free" or
   "Also in Fort Pickett." Review lists shared boxes under *"also in another
   workspace"*, distinct from the *"will move here"* list, because nothing is
   taken.
 
 Enclave selection, service and gateway matching, and wiring are unchanged and
-still happen per deployment — a global kit knows nothing about any workspace's
-networks, which is exactly why `equipment_kit_item` stores no `enclave_id` and
-kit-sourced rows arrive with the enclave unset.
+still happen per deployment — a global force element knows nothing about any workspace's
+networks, which is exactly why `force_element_item` stores no `enclave_id` and
+force element-sourced rows arrive with the enclave unset.
 
 ### Things worth remembering
 
-**Global rows can only reference global rows.** A global kit's bulk line may
+**Global rows can only reference global rows.** A global force element's bulk line may
 only point at a global enclave; pointing at one workspace's enclave would break
-the kit for every other picture. Enforced in `_write_kit_utcs`.
+the force element for every other picture. Enforced in `_write_kit_utcs`.
 
-**Capture promotes.** "Save as kit" now walks the package's gear into the
+**Capture promotes.** "Save as force element" now walks the package's gear into the
 property book before pinning it, so a workspace that predates assets
 contributes its serials once. An equipment ID that already exists globally
 under a *different* serial is refused rather than merged — that is two boxes
 colliding in the namespace, not one box.
 
 **Admin gates the global tier**, matching `equipment_catalog._require_write`
-and `enclaves._require_write`. Workspace-local kits remain possible via
+and `enclaves._require_write`. Workspace-local force elements remain possible via
 `?local=true` and need only operator.
 
 ### Verified
 
 Against the dev DB (rolled back): import promotes 10 items and is idempotent on
-a second run; capture produces a global kit (`workspace_id IS NULL`); the kit is
+a second run; capture produces a global force element (`workspace_id IS NULL`); the force element is
 visible from a second workspace with `in_this_workspace=false`; deploying it
 there materializes 6 rows **while the first workspace keeps all 10** — the
 shared-pool property C exists for; the pin then reports commitments in both
 pictures; redeploying into the same workspace reuses rather than duplicating;
-and a non-admin is 403'd from writing a global kit. Driven in the browser:
-property book page and import (10 added), global kit saved and marked Global,
-the same kit listed and selectable from `fort-pickett`.
+and a non-admin is 403'd from writing a global force element. Driven in the browser:
+property book page and import (10 added), global force element saved and marked Global,
+the same force element listed and selectable from `fort-pickett`.
 
 ### Still open
 
 `equipment_asset` has no bulk-edit or CSV import — fine for a few hundred boxes
-entered once, worth revisiting at property-book scale. And `retired` on kits
+entered once, worth revisiting at property-book scale. And `retired` on force elements
 still has no UI (carried over from §8).

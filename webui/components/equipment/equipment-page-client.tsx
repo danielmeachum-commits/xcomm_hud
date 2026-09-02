@@ -13,7 +13,7 @@ import {
   enclaveHeadingStyle,
   enclaveLabel,
 } from "@/lib/enclave-meta"
-import { KitsView, SaveAsKitButton } from "@/components/equipment/kits-view"
+import { ForceElementsView, SaveAsForceElementButton } from "@/components/equipment/force-elements-view"
 import { UtcCompletenessPanel } from "@/components/equipment/utc-completeness-panel"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import {
@@ -29,7 +29,7 @@ import type {
   Enclave,
   Equipment,
   EquipmentAsset,
-  EquipmentKit,
+  ForceElement,
   EquipmentType,
   Gateway,
   NetworkTopology,
@@ -41,7 +41,7 @@ import type {
   UtcInstance,
 } from "@/lib/types"
 
-type View = "list" | "topology" | "utcs" | "kits"
+type View = "list" | "topology" | "utcs" | "force-elements"
 
 interface Props {
   equipment: Equipment[]
@@ -52,7 +52,7 @@ interface Props {
   types: EquipmentType[]
   utcDefs: UtcDef[]
   packageDefs: PackageDef[]
-  kits: EquipmentKit[]
+  forceElements: ForceElement[]
   assets: EquipmentAsset[]
   services: Service[]
   gateways: Gateway[]
@@ -68,7 +68,7 @@ export function EquipmentPageClient({
   types,
   utcDefs,
   packageDefs,
-  kits,
+  forceElements,
   assets,
   services,
   gateways,
@@ -279,7 +279,7 @@ export function EquipmentPageClient({
           utcDefs={utcDefs}
           packages={packages}
           packageDefs={packageDefs}
-          kits={kits}
+          forceElements={forceElements}
           equipment={equipment}
           assets={assets}
           services={services}
@@ -295,7 +295,7 @@ export function EquipmentPageClient({
           options={[
             { value: "list", label: "List", icon: List },
             { value: "utcs", label: "UTCs", icon: Boxes },
-            { value: "kits", label: "Kits", icon: Package },
+            { value: "force-elements", label: "Force elements", icon: Package },
             { value: "topology", label: "Topology", icon: Network },
           ]}
         />
@@ -385,8 +385,8 @@ export function EquipmentPageClient({
 
       {view === "topology" ? (
         <NetworkCanvas topology={topology} enclaves={enclaves} />
-      ) : view === "kits" ? (
-        <KitsView kits={kits} />
+      ) : view === "force-elements" ? (
+        <ForceElementsView forceElements={forceElements} />
       ) : view === "utcs" ? (
         utcs.length === 0 && packages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-12 text-center">
@@ -410,7 +410,7 @@ export function EquipmentPageClient({
                   </span>
                   {g.package && (
                     <>
-                      <SaveAsKitButton
+                      <SaveAsForceElementButton
                         packageInstance={g.package}
                         pinnedCount={
                           equipment.filter(
@@ -419,7 +419,7 @@ export function EquipmentPageClient({
                               g.utcs.some((u) => u.id === e.utc_instance_id),
                           ).length
                         }
-                        existingKits={kits}
+                        existingForceElements={forceElements}
                       />
                       <PackageTeardown
                         packageInstance={g.package}

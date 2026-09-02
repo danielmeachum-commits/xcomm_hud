@@ -2650,37 +2650,44 @@ class EquipmentAssetCapability(Base):
     )
 
 
-# ===================== Equipment: saved kits =====================
+# ===================== Equipment: force elements =====================
 
 
-class EquipmentKit(Base):
-    """A reusable roster: the UTCs a package brings, and the *specific* gear
-    that goes in them.
+class ForceElement(Base):
+    """A reusable roster: the UTCs a force element brings, and the *specific*
+    gear that goes in them.
 
-    The fourth layer between doctrine and deployment. `package_def` says a
-    Flyaway Comms Package carries two AN/TSC-198s; a kit says ours are the ones
-    with these serials — by pinning `equipment_asset` rows from the property
-    book.
+    The layer between doctrine and deployment. A UTC definition says a Flyaway
+    Comms Package carries two AN/TSC-198s; a force element says ours are the
+    ones with these serials — by pinning `equipment_asset` rows from the
+    property book.
 
     Global by default (`workspace_id IS NULL`), like enclaves and the equipment
-    catalog: the kit describes the unit's gear, and the unit's gear outlives
-    any one operating picture. A workspace may still own a local kit, and reads
-    merge both — the same global-or-workspace shape used everywhere else.
+    catalog: the force element describes the unit's gear, and the unit's gear
+    outlives any one operating picture. A workspace may still own a local one,
+    and reads merge both — the same global-or-workspace shape used everywhere
+    else.
 
-    Kits pin no site and no workspace contents. Where the gear went, which
-    enclaves were supported, and what it was wired to are all per-deployment
-    facts settled in the wizard against the target workspace.
+    That global default is also why nothing here points at `personnel`.
+    `personnel.workspace_id` is NOT NULL, so a global force element cannot name
+    a person without borrowing one workspace's roster. Assigning people is a
+    workspace-scoped question and has to be answered somewhere that is allowed
+    to know the answer.
+
+    Force elements pin no site and no workspace contents. Where the gear went,
+    which enclaves were supported, and what it was wired to are all
+    per-deployment facts settled in the wizard against the target workspace.
     """
 
-    __tablename__ = "equipment_kit"
+    __tablename__ = "force_element"
     __table_args__ = (
         Index(
-            "uq_equipment_kit_global_name",
+            "uq_force_element_global_name",
             "name",
             unique=True,
             postgresql_where=text("workspace_id IS NULL"),
         ),
-        UniqueConstraint("workspace_id", "name", name="uq_equipment_kit_name"),
+        UniqueConstraint("workspace_id", "name", name="uq_force_element_name"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -2690,14 +2697,16 @@ class EquipmentKit(Base):
         nullable=True,
         index=True,
     )
-    # The doctrine this kit realizes, when there is one. Nullable because a kit
+    # The doctrine this force element realizes, when there is one. Nullable
+    # because one
     # captured from a hand-built deployment answers to no package definition.
     package_def_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("package_def.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Retire rather than delete, matching `package_def`: a kit that fielded a
+    # Retire rather than delete, matching `package_def`: a force element that
+    # fielded a
     # past deployment is part of how that deployment is explained.
     retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -2709,34 +2718,35 @@ class EquipmentKit(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
-    utcs: Mapped[list["EquipmentKitUtc"]] = relationship(
-        "EquipmentKitUtc",
-        back_populates="kit",
+    utcs: Mapped[list["ForceElementUtc"]] = relationship(
+        "ForceElementUtc",
+        back_populates="force_element",
         cascade="all, delete-orphan",
-        order_by="EquipmentKitUtc.display_order",
+        order_by="ForceElementUtc.display_order",
     )
 
 
-class EquipmentKitUtc(Base):
-    """One UTC slot in a kit.
+class ForceElementUtc(Base):
+    """One UTC slot in a force element.
 
     There is no `quantity` here, unlike `package_def_utc`. A package definition
-    can say "two extensions" because it is talking about types; a kit is
+    can say "two extensions" because it is talking about types; a force element is
     talking about specific boxes, and the two extensions carry different
     radios. Quantity is expressed as repeated rows so each slot owns its own
     pinned gear.
 
     `utc_def_id` is nullable: building a UTC by hand is a first-class path in
-    the deploy wizard, and a kit captured from one has no definition to point
+    the deploy wizard, and a force element captured from one has no definition
+    to point
     at.
     """
 
-    __tablename__ = "equipment_kit_utc"
+    __tablename__ = "force_element_utc"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    kit_id: Mapped[int] = mapped_column(
+    force_element_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("equipment_kit.id", ondelete="CASCADE"),
+        ForeignKey("force_element.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -2748,33 +2758,34 @@ class EquipmentKitUtc(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    kit: Mapped["EquipmentKit"] = relationship("EquipmentKit", back_populates="utcs")
-    items: Mapped[list["EquipmentKitItem"]] = relationship(
-        "EquipmentKitItem",
-        back_populates="kit_utc",
+    force_element: Mapped["ForceElement"] = relationship("ForceElement", back_populates="utcs")
+    items: Mapped[list["ForceElementItem"]] = relationship(
+        "ForceElementItem",
+        back_populates="force_element_utc",
         cascade="all, delete-orphan",
-        order_by="EquipmentKitItem.display_order",
+        order_by="ForceElementItem.display_order",
     )
-    bulk: Mapped[list["EquipmentKitBulk"]] = relationship(
-        "EquipmentKitBulk",
-        back_populates="kit_utc",
+    bulk: Mapped[list["ForceElementBulk"]] = relationship(
+        "ForceElementBulk",
+        back_populates="force_element_utc",
         cascade="all, delete-orphan",
     )
 
 
-class EquipmentKitItem(Base):
+class ForceElementItem(Base):
     """One pinned asset from the property book.
 
     Points at `equipment_asset`, not at a workspace's `equipment` row — that is
-    what lets a kit be global. A workspace row is an operating picture's copy
+    what lets a force element be global. A workspace row is an operating
+    picture's copy
     of a box; the asset is the box.
 
-    CASCADE on `asset_id`: gear struck from the property book leaves every kit
-    that listed it, rather than leaving the kit promising a radio the unit no
+    CASCADE on `asset_id`: gear struck from the property book leaves every force
+    element that listed it, rather than leaving one promising a radio the unit no
     longer owns.
 
     Pinning is deliberately non-exclusive, in two directions. The same TACLANE
-    belongs to the FCP kit and the JIP kit because the unit owns one and both
+    belongs to the FCP and the JIP because the unit owns one and both
     packages would use it; and the same asset may be materialized into several
     workspaces at once, because planning next month's exercise while this
     month's is live is normal. Cross-workspace commitment is reported, never
@@ -2784,15 +2795,15 @@ class EquipmentKitItem(Base):
     settled in the wizard against the target workspace's enclaves.
     """
 
-    __tablename__ = "equipment_kit_item"
+    __tablename__ = "force_element_item"
     __table_args__ = (
-        UniqueConstraint("kit_utc_id", "asset_id", name="uq_equipment_kit_item_pair"),
+        UniqueConstraint("force_element_utc_id", "asset_id", name="uq_force_element_item_pair"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    kit_utc_id: Mapped[int] = mapped_column(
+    force_element_utc_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("equipment_kit_utc.id", ondelete="CASCADE"),
+        ForeignKey("force_element_utc.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -2804,32 +2815,34 @@ class EquipmentKitItem(Base):
     )
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    kit_utc: Mapped["EquipmentKitUtc"] = relationship(
-        "EquipmentKitUtc", back_populates="items"
+    force_element_utc: Mapped["ForceElementUtc"] = relationship(
+        "ForceElementUtc", back_populates="items"
     )
 
 
-class EquipmentKitBulk(Base):
-    """Bulk gear a kit slot expects. Counted, never pinned — there is no such
+class ForceElementBulk(Base):
+    """Bulk gear a force element slot expects. Counted, never pinned — there is
+    no such
     thing as a specific cable.
 
     Unlike `equipment_holding`, this keeps `enclave_id` in its uniqueness: the
     holding folds per-enclave lines together because a deployed box of cables
-    serves everything, but a kit is a plan, and "six SIPR patch cables and six
+    serves everything, but a force element is a plan, and "six SIPR patch cables
+    and six
     NIPR" is a meaningful thing to plan.
     """
 
-    __tablename__ = "equipment_kit_bulk"
+    __tablename__ = "force_element_bulk"
     __table_args__ = (
         UniqueConstraint(
-            "kit_utc_id",
+            "force_element_utc_id",
             "equipment_type_id",
             "enclave_id",
-            name="uq_equipment_kit_bulk_type_enclave",
+            name="uq_force_element_bulk_type_enclave",
         ),
         Index(
-            "uq_equipment_kit_bulk_type_no_enclave",
-            "kit_utc_id",
+            "uq_force_element_bulk_type_no_enclave",
+            "force_element_utc_id",
             "equipment_type_id",
             unique=True,
             postgresql_where=text("enclave_id IS NULL"),
@@ -2837,9 +2850,9 @@ class EquipmentKitBulk(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    kit_utc_id: Mapped[int] = mapped_column(
+    force_element_utc_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("equipment_kit_utc.id", ondelete="CASCADE"),
+        ForeignKey("force_element_utc.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -2847,13 +2860,14 @@ class EquipmentKitBulk(Base):
         BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    # Enclaves are themselves global-or-workspace, so a global kit can only
+    # Enclaves are themselves global-or-workspace, so a global force element
+    # can only
     # safely reference a global one. The router enforces that; SET NULL keeps a
     # retired enclave from taking the line with it.
     enclave_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
     )
 
-    kit_utc: Mapped["EquipmentKitUtc"] = relationship(
-        "EquipmentKitUtc", back_populates="bulk"
+    force_element_utc: Mapped["ForceElementUtc"] = relationship(
+        "ForceElementUtc", back_populates="bulk"
     )

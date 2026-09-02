@@ -1256,7 +1256,8 @@ export interface SiteEquipmentAdvisory {
 export interface UtcDeployItem {
   equipment_type_id: number
   /** Materialize this workspace's copy of a global property-book asset. The
-   *  normal path when deploying from a kit: serial and equipment ID come from
+   *  normal path when deploying from a force element: serial and equipment ID
+   *  come from
    *  the asset, so nobody retypes them. If this workspace already has a row
    *  for the asset, that row is reused rather than duplicated. */
   asset_id?: number | null
@@ -1367,15 +1368,15 @@ export interface AssetImportResult {
   skipped: string[]
 }
 
-// --- saved kits ---
+// --- force elements ---
 
 /** A pinned item, carrying everything the picker needs to be read without a
  *  second call. `current_utc_*` is the disclosure that makes taking gear from
  *  another deployment workable: the operator sees "held by FCP-2 (Site Bravo)"
  *  before choosing, not after. Null means it is idle in the pool. */
-export interface EquipmentKitItem {
+export interface ForceElementItem {
   id: number
-  kit_utc_id: number
+  force_element_utc_id: number
   /** The property-book asset this pin points at. */
   asset_id: number
   display_order: number
@@ -1393,9 +1394,9 @@ export interface EquipmentKitItem {
   in_this_workspace: boolean
 }
 
-export interface EquipmentKitBulk {
+export interface ForceElementBulk {
   id: number
-  kit_utc_id: number
+  force_element_utc_id: number
   equipment_type_id: number
   quantity: number
   enclave_id: number | null
@@ -1403,9 +1404,9 @@ export interface EquipmentKitBulk {
   type_short_name: string | null
 }
 
-export interface EquipmentKitUtc {
+export interface ForceElementUtc {
   id: number
-  kit_id: number
+  force_element_id: number
   utc_def_id: number | null
   name: string
   role_hint: UtcRoleHint
@@ -1413,13 +1414,13 @@ export interface EquipmentKitUtc {
   display_order: number
   utc_def_code: string | null
   utc_def_name: string | null
-  items: EquipmentKitItem[]
-  bulk: EquipmentKitBulk[]
+  items: ForceElementItem[]
+  bulk: ForceElementBulk[]
 }
 
-export interface EquipmentKit {
+export interface ForceElement {
   id: number
-  /** Null for a global kit — the normal case. */
+  /** Null for a global force element — the normal case. */
   workspace_id: number | null
   is_global: boolean
   package_def_id: number | null
@@ -1427,7 +1428,7 @@ export interface EquipmentKit {
   description: string | null
   retired_at: string | null
   package_def_code: string | null
-  utcs: EquipmentKitUtc[]
+  utcs: ForceElementUtc[]
   item_count: number
   bulk_count: number
   /** How many pinned assets some picture already has in play. Context, not a

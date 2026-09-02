@@ -115,7 +115,7 @@ SubjectKind = Literal[
     "equipment_link",
     "utc_instance",
     "package_instance",
-    "equipment_kit",
+    "force_element",
     "equipment_asset",
 ]
 # Runtime view of the Literal above. `SubjectKind` stays the single declaration
@@ -159,7 +159,7 @@ class SubjectKinds:
     EQUIPMENT_LINK: SubjectKind = "equipment_link"
     UTC_INSTANCE: SubjectKind = "utc_instance"
     PACKAGE_INSTANCE: SubjectKind = "package_instance"
-    EQUIPMENT_KIT: SubjectKind = "equipment_kit"
+    FORCE_ELEMENT: SubjectKind = "force_element"
     EQUIPMENT_ASSET: SubjectKind = "equipment_asset"
 
 
@@ -210,9 +210,9 @@ GENERAL_SUBJECT_KINDS = {
     SubjectKinds.EQUIPMENT_LINK,
     SubjectKinds.UTC_INSTANCE,
     SubjectKinds.PACKAGE_INSTANCE,
-    # A kit is a saved plan, not a status: saving or deleting one is news on
+    # A force element is a saved plan, not a status: saving or deleting one is news on
     # the general feed, never a validation.
-    SubjectKinds.EQUIPMENT_KIT,
+    SubjectKinds.FORCE_ELEMENT,
     # The property book is structural too: adding or striking a box is news,
     # not a status validation.
     SubjectKinds.EQUIPMENT_ASSET,
@@ -2689,15 +2689,15 @@ class AssetImportOut(BaseModel):
     skipped: list[str] = Field(default_factory=list)
 
 
-# ===================== Equipment: saved kits =====================
+# ===================== Equipment: force elements =====================
 
 
-class EquipmentKitItemIn(BaseModel):
+class ForceElementItemIn(BaseModel):
     asset_id: int
     display_order: int = 0
 
 
-class EquipmentKitItemOut(_ORM):
+class ForceElementItemOut(_ORM):
     """A pinned asset, fattened with everything the picker needs to be read
     without a second call.
 
@@ -2708,7 +2708,7 @@ class EquipmentKitItemOut(_ORM):
     """
 
     id: int
-    kit_utc_id: int
+    force_element_utc_id: int
     asset_id: int
     display_order: int = 0
     equipment_code: Optional[str] = None
@@ -2724,15 +2724,15 @@ class EquipmentKitItemOut(_ORM):
     in_this_workspace: bool = False
 
 
-class EquipmentKitBulkIn(BaseModel):
+class ForceElementBulkIn(BaseModel):
     equipment_type_id: int
     quantity: int = 1
     enclave_id: Optional[int] = None
 
 
-class EquipmentKitBulkOut(_ORM):
+class ForceElementBulkOut(_ORM):
     id: int
-    kit_utc_id: int
+    force_element_utc_id: int
     equipment_type_id: int
     quantity: int
     enclave_id: Optional[int] = None
@@ -2740,19 +2740,19 @@ class EquipmentKitBulkOut(_ORM):
     type_short_name: Optional[str] = None
 
 
-class EquipmentKitUtcIn(BaseModel):
+class ForceElementUtcIn(BaseModel):
     utc_def_id: Optional[int] = None
     name: str
     role_hint: UtcRoleHint = "either"
     notes: Optional[str] = None
     display_order: int = 0
-    items: list[EquipmentKitItemIn] = Field(default_factory=list)
-    bulk: list[EquipmentKitBulkIn] = Field(default_factory=list)
+    items: list[ForceElementItemIn] = Field(default_factory=list)
+    bulk: list[ForceElementBulkIn] = Field(default_factory=list)
 
 
-class EquipmentKitUtcOut(_ORM):
+class ForceElementUtcOut(_ORM):
     id: int
-    kit_id: int
+    force_element_id: int
     utc_def_id: Optional[int] = None
     name: str
     role_hint: UtcRoleHint = "either"
@@ -2760,25 +2760,25 @@ class EquipmentKitUtcOut(_ORM):
     display_order: int = 0
     utc_def_code: Optional[str] = None
     utc_def_name: Optional[str] = None
-    items: list[EquipmentKitItemOut] = Field(default_factory=list)
-    bulk: list[EquipmentKitBulkOut] = Field(default_factory=list)
+    items: list[ForceElementItemOut] = Field(default_factory=list)
+    bulk: list[ForceElementBulkOut] = Field(default_factory=list)
 
 
-class EquipmentKitIn(BaseModel):
+class ForceElementIn(BaseModel):
     name: str
     description: Optional[str] = None
     package_def_id: Optional[int] = None
-    utcs: list[EquipmentKitUtcIn] = Field(default_factory=list)
+    utcs: list[ForceElementUtcIn] = Field(default_factory=list)
 
 
-class EquipmentKitPatch(BaseModel):
+class ForceElementPatch(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     package_def_id: Optional[int] = None
     retired: Optional[bool] = None
 
 
-class EquipmentKitOut(_ORM):
+class ForceElementOut(_ORM):
     id: int
     workspace_id: Optional[int] = None
     is_global: bool = False
@@ -2787,9 +2787,9 @@ class EquipmentKitOut(_ORM):
     description: Optional[str] = None
     retired_at: Optional[datetime.datetime] = None
     package_def_code: Optional[str] = None
-    utcs: list[EquipmentKitUtcOut] = Field(default_factory=list)
-    # Rolled up for the list view, which shows kits as cards and would
-    # otherwise need every kit's full tree to print "9 items".
+    utcs: list[ForceElementUtcOut] = Field(default_factory=list)
+    # Rolled up for the list view, which shows force elements as cards and
+    # would otherwise need every one's full tree to print "9 items".
     item_count: int = 0
     bulk_count: int = 0
     # How many pinned assets some workspace already has in play. Context, not
@@ -2800,10 +2800,10 @@ class EquipmentKitOut(_ORM):
 
 
 class KitCaptureIn(BaseModel):
-    """Save a live package as a reusable kit.
+    """Save a live package as a reusable force element.
 
     The path that matters: configure the FCP once by hand — unavoidable the
-    first time — then keep it. Authoring a kit from an empty form uses the same
+    first time — then keep it. Authoring one from an empty form uses the same
     tables but nobody will do it.
     """
 
@@ -2815,10 +2815,10 @@ class KitCaptureIn(BaseModel):
 
 
 class KitRefreshIn(BaseModel):
-    """Re-pin an existing kit from a live package, replacing its contents.
+    """Re-pin an existing force element from a live package, replacing its contents.
 
     Cheaper than editing pin-by-pin after the real-world set changes — a radio
-    goes to depot and a replacement arrives, and the kit should follow.
+    goes to depot and a replacement arrives, and the force element should follow.
     """
 
     package_instance_id: int

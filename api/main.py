@@ -26,7 +26,7 @@ from routers import (
     equipment,
     equipment_assets,
     equipment_catalog,
-    equipment_kits,
+    force_elements,
     equipment_topology,
     event_types,
     events,
@@ -173,7 +173,7 @@ app.include_router(equipment_assets.router)
 app.include_router(equipment_catalog.router)
 app.include_router(equipment.router)
 app.include_router(deployments.router)
-app.include_router(equipment_kits.router)
+app.include_router(force_elements.router)
 app.include_router(equipment_topology.router)
 
 
