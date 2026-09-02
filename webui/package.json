@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:host": "API_URL=http://localhost:8001 next dev -p 3001",
+    "dev": "DS_RELAY_PORT=4400 next dev",
+    "dev:host": "DS_RELAY_PORT=4400 API_URL=http://localhost:8001 next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

@@ -1,3 +1,6 @@
 {
-  "worktree": { "bgIsolation": "none" }
+  "worktree": { "bgIsolation": "none" },
+  "env": {
+    "DS_RELAY_PORT": "4400"
+  }
 }
