@@ -8,6 +8,7 @@ import {
   Blocks,
   BookOpen,
   Boxes,
+  Building2,
   ChevronRight,
   ChevronUp,
   ExternalLink,
@@ -87,31 +88,48 @@ const PERSONNEL_SUB_ITEMS = [
 const WORKSPACE_ADMIN_ITEMS_TOP = [
   { path: "/settings/event-types", label: "Event types", icon: Shapes },
   { path: "/settings/rules", label: "Rules", icon: Workflow },
-  { path: "/admin/gateways", label: "Gateways", icon: Network },
 ]
 
-// The reference collections, read top-down: a package composes UTCs, a UTC
-// composes equipment types. Three pages rather than one tabbed catalog, so
-// each is a place you can link to and come back to.
-const TEMPLATE_ITEMS = [
+// An admin nav row. `path` is workspace-scoped and gets the w() prefix;
+// `href` is global and stands on its own. Exactly one of the two.
+type AdminItem = {
+  path?: string
+  href?: string
+  label: string
+  icon: typeof Users
+}
+
+// The reference collections — what a thing IS, as opposed to which ones we
+// own. Read top-down: a package composes UTCs, a UTC composes equipment
+// types, and equipment types are described by the services and enclaves they
+// carry. Separate pages rather than one tabbed catalog, so each is a place
+// you can link to and come back to.
+const TEMPLATE_ITEMS: AdminItem[] = [
   { path: "/admin/packages", label: "Packages", icon: Blocks },
   { path: "/admin/utcs", label: "UTCs", icon: Boxes },
   { path: "/admin/equipment-types", label: "Equipment types", icon: Radio },
+  { href: "/admin/service-types", label: "Services", icon: Settings },
+  { path: "/admin/enclaves", label: "Enclaves", icon: Layers },
 ]
 
-const WORKSPACE_ADMIN_ITEMS_REST = [
-  // Templates say what a TACLANE is; the property book says which ones we own.
-  // Adjacent on purpose.
+const WORKSPACE_ADMIN_ITEMS_REST: AdminItem[] = [
+  // Read as a sentence: templates say what a TACLANE is, the property book
+  // says which ones we own, and a force element says which of those go out
+  // together. Adjacent on purpose. Force elements carry a bare href — like
+  // the property book they describe, they are not workspace data.
   { path: "/admin/property-book", label: "Property book", icon: Package },
-  { path: "/admin/enclaves", label: "Enclaves", icon: Layers },
+  { href: "/admin/force-elements", label: "Force elements", icon: Boxes },
   { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
-  { path: "/admin/work-centers", label: "Work centers", icon: Users },
-  { path: "/admin/teams", label: "Teams", icon: Users },
-  { path: "/admin/units", label: "Units", icon: Users },
 ]
-const GLOBAL_ADMIN_ITEMS = [
+
+// Who the workspace is made of, read outside-in: the work centers, teams and
+// units people are filed under, then the accounts themselves. Users is global,
+// so it carries an href of its own where the rest take a workspace path.
+const PERSONNEL_ITEMS: AdminItem[] = [
+  { path: "/admin/work-centers", label: "Work centers", icon: Building2 },
+  { path: "/admin/teams", label: "Teams", icon: UsersRound },
+  { path: "/admin/units", label: "Units", icon: Flag },
   { href: "/admin/users", label: "Users", icon: Users },
-  { href: "/admin/service-types", label: "Service catalog", icon: Settings },
 ]
 
 interface Props {
@@ -149,15 +167,23 @@ export function AppSidebar({ user, sites }: Props) {
   // Admin folded the sidebar shut over the page you had just opened.
   const onRoute = (href: string) =>
     pathname === href || pathname.startsWith(href + "/")
-  const onTemplatesRoute = TEMPLATE_ITEMS.some((item) => onRoute(w(item.path)))
+  const adminItemHref = (item: AdminItem) => item.href ?? w(item.path!)
+  const onTemplatesRoute = TEMPLATE_ITEMS.some((item) =>
+    onRoute(adminItemHref(item)),
+  )
+  const onPersonnelItemsRoute = PERSONNEL_ITEMS.some((item) =>
+    onRoute(adminItemHref(item)),
+  )
   const onAdminRoute =
     onTemplatesRoute ||
-    [...WORKSPACE_ADMIN_ITEMS_TOP, ...WORKSPACE_ADMIN_ITEMS_REST].some((item) =>
-      onRoute(w(item.path)),
-    ) ||
-    GLOBAL_ADMIN_ITEMS.some((item) => onRoute(item.href))
+    onPersonnelItemsRoute ||
+    WORKSPACE_ADMIN_ITEMS_TOP.some((item) => onRoute(w(item.path))) ||
+    WORKSPACE_ADMIN_ITEMS_REST.some((item) => onRoute(adminItemHref(item)))
   const [adminOpen, setAdminOpen] = useState(onAdminRoute)
   const [templatesOpen, setTemplatesOpen] = useState(onTemplatesRoute)
+  const [personnelItemsOpen, setPersonnelItemsOpen] = useState(
+    onPersonnelItemsRoute,
+  )
 
   useEffect(() => {
     if (onAdminRoute) setAdminOpen(true)
@@ -166,6 +192,10 @@ export function AppSidebar({ user, sites }: Props) {
   useEffect(() => {
     if (onTemplatesRoute) setTemplatesOpen(true)
   }, [onTemplatesRoute])
+
+  useEffect(() => {
+    if (onPersonnelItemsRoute) setPersonnelItemsOpen(true)
+  }, [onPersonnelItemsRoute])
 
   // The nav is taller than the pane it sits in — 20-odd rows against a 560px
   // sidebar on a 720px screen — so the item you are ON can land below the
@@ -177,7 +207,14 @@ export function AppSidebar({ user, sites }: Props) {
     contentRef.current
       ?.querySelector("[data-active]")
       ?.scrollIntoView({ block: "nearest" })
-  }, [pathname, adminOpen, templatesOpen, sitesOpen, personnelOpen])
+  }, [
+    pathname,
+    adminOpen,
+    templatesOpen,
+    personnelItemsOpen,
+    sitesOpen,
+    personnelOpen,
+  ])
 
   // Which structure graph the roster page is showing, if any — mirrors the
   // page's URL params (?view=graph&graph=…, org when graph is omitted).
@@ -366,18 +403,18 @@ export function AppSidebar({ user, sites }: Props) {
                   })}
 
                   <SidebarMenuItem>
-                    {/* A toggle, not a link: Templates is a heading for the
-                        three pages under it and has no page of its own. Its
+                    {/* A toggle, not a link: Equipment templates is a heading
+                        for the pages under it and has no page of its own. Its
                         own row shows active only while collapsed, so the
                         highlight is never on two rows at once. */}
                     <SidebarMenuButton
                       onClick={() => setTemplatesOpen((v) => !v)}
                       isActive={onTemplatesRoute && !templatesOpen}
-                      tooltip="Templates"
+                      tooltip="Equipment templates"
                       aria-expanded={templatesOpen}
                     >
                       <LayoutTemplate />
-                      <span>Templates</span>
+                      <span>Equipment templates</span>
                       <ChevronRight
                         className={cn(
                           "ml-auto size-4 transition-transform duration-150",
@@ -388,7 +425,7 @@ export function AppSidebar({ user, sites }: Props) {
                     {templatesOpen && (
                       <SidebarMenuSub>
                         {TEMPLATE_ITEMS.map((item) => {
-                          const href = w(item.path)
+                          const href = adminItemHref(item)
                           return (
                             <SidebarMenuSubItem key={href}>
                               <SidebarMenuSubButton
@@ -405,24 +442,60 @@ export function AppSidebar({ user, sites }: Props) {
                     )}
                   </SidebarMenuItem>
 
-                  {[
-                    ...WORKSPACE_ADMIN_ITEMS_REST.map((item) => ({
-                      ...item,
-                      href: w(item.path),
-                    })),
-                    ...GLOBAL_ADMIN_ITEMS,
-                  ].map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        isActive={onRoute(item.href)}
-                        tooltip={item.label}
-                        render={<Link href={item.href} />}
-                      >
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {WORKSPACE_ADMIN_ITEMS_REST.map((item) => {
+                    const href = adminItemHref(item)
+                    return (
+                      <SidebarMenuItem key={href}>
+                        <SidebarMenuButton
+                          isActive={onRoute(href)}
+                          tooltip={item.label}
+                          render={<Link href={href} />}
+                        >
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+
+                  <SidebarMenuItem>
+                    {/* Same shape as Templates above: a heading with no page
+                        of its own, active only while collapsed so the
+                        highlight never sits on two rows at once. */}
+                    <SidebarMenuButton
+                      onClick={() => setPersonnelItemsOpen((v) => !v)}
+                      isActive={onPersonnelItemsRoute && !personnelItemsOpen}
+                      tooltip="Personnel"
+                      aria-expanded={personnelItemsOpen}
+                    >
+                      <Users />
+                      <span>Personnel</span>
+                      <ChevronRight
+                        className={cn(
+                          "ml-auto size-4 transition-transform duration-150",
+                          personnelItemsOpen && "rotate-90",
+                        )}
+                      />
+                    </SidebarMenuButton>
+                    {personnelItemsOpen && (
+                      <SidebarMenuSub>
+                        {PERSONNEL_ITEMS.map((item) => {
+                          const href = adminItemHref(item)
+                          return (
+                            <SidebarMenuSubItem key={href}>
+                              <SidebarMenuSubButton
+                                isActive={onRoute(href)}
+                                render={<Link href={href} />}
+                              >
+                                <item.icon />
+                                <span>{item.label}</span>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          )
+                        })}
+                      </SidebarMenuSub>
+                    )}
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             )}
@@ -463,6 +536,21 @@ export function AppSidebar({ user, sites }: Props) {
                   <ExternalLink />
                 </SidebarMenuAction>
               </SidebarMenuItem>
+
+              {/* Global in reach but still admin-only, so it sits below the
+                  row everyone sees rather than displacing it. */}
+              {isAdmin && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    tooltip="Gateways"
+                    isActive={onRoute(w("/admin/gateways"))}
+                    render={<Link href={w("/admin/gateways")} />}
+                  >
+                    <Network />
+                    <span>Gateways</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
