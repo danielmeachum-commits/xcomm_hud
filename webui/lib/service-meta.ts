@@ -51,7 +51,11 @@ export const ICON_MAP: Record<string, LucideIcon> = {
 
 export const ICON_NAMES = Object.keys(ICON_MAP)
 
-const KIND_DEFAULT_ICON: Record<ServiceKind, LucideIcon> = {
+/** The glyph a service falls back to when its type names no icon of its own.
+ *  Exported so a caller with a `kind` in hand can index it rather than call
+ *  `serviceIcon` in a render body — a function returning a component there is
+ *  what the static-components rule catches. */
+export const SERVICE_KIND_ICONS: Record<ServiceKind, LucideIcon> = {
   voice: Phone,
   data: Globe,
   other: Boxes,
@@ -62,7 +66,7 @@ export function serviceIcon(
   kind: ServiceKind,
 ): LucideIcon {
   if (iconName && ICON_MAP[iconName]) return ICON_MAP[iconName]
-  return KIND_DEFAULT_ICON[kind] ?? Boxes
+  return SERVICE_KIND_ICONS[kind] ?? Boxes
 }
 
 const GATEWAY_KIND_ICON: Record<GatewayKind, LucideIcon> = {
@@ -73,6 +77,22 @@ const GATEWAY_KIND_ICON: Record<GatewayKind, LucideIcon> = {
 
 export function gatewayIcon(kind: GatewayKind): LucideIcon {
   return GATEWAY_KIND_ICON[kind] ?? Network
+}
+
+/** The three things a service can be, in the order the pickers offer them.
+ *  Was a `KINDS` const copied into every form that had a kind select. */
+export const SERVICE_KINDS: ServiceKind[] = ["voice", "data", "other"]
+
+export function kindLabel(k: ServiceKind): string {
+  switch (k) {
+    case "voice":
+      return "Voice"
+    case "data":
+      return "Data"
+    case "other":
+    default:
+      return "Other"
+  }
 }
 
 export const SERVICE_CATEGORIES: ServiceCategory[] = [

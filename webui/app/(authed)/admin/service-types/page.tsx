@@ -22,13 +22,13 @@ export default async function ServiceTypesPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs items={[{ label: "Admin" }, { label: "Service catalog" }]} />
+      <PageBreadcrumbs items={[{ label: "Admin" }, { label: "Services" }]} />
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Service catalog</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Services</h1>
         <p className="text-xs text-muted-foreground">
           Standardized service types. New services across sites pick from this
-          list so categorization stays consistent. Restrict which statuses each
-          type accepts (leave empty to allow all).
+          list so categorization stays consistent. Open a type for what it sets
+          on a new service and which statuses it accepts.
         </p>
       </div>
       <ServiceTypesAdmin templates={templates} enclaves={enclaves} />

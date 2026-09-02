@@ -1,10 +1,16 @@
 "use client"
 
+import { Plus } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Edit3, Plus, Trash2 } from "lucide-react"
 
-import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
+import {
+  AllowedStatusPicker,
+  TemplateFields,
+  emptyTemplateForm,
+  templateBody,
+  type TemplateForm,
+} from "@/components/admin/service-type-fields"
 import { EnclaveChip } from "@/components/enclaves/enclaves-client"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,217 +20,191 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
-  ICON_MAP,
-  ICON_NAMES,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
   SERVICE_CATEGORIES,
-  SERVICE_REACH_VALUES,
   categoryLabel,
+  kindLabel,
   reachLabel,
   serviceIcon,
 } from "@/lib/service-meta"
-import { STATUS_VALUES, statusLabel, statusToIndicatorState } from "@/lib/status"
-import { cn } from "@/lib/utils"
-import type {
-  Enclave,
-  ServiceCategory,
-  ServiceKind,
-  ServiceReach,
-  ServiceTemplate,
-  StatusValue,
-} from "@/lib/types"
-
-const KINDS: ServiceKind[] = ["voice", "data", "other"]
+import { STATUS_VALUES } from "@/lib/status"
+import type { Enclave, ServiceTemplate, StatusValue } from "@/lib/types"
 
 interface Props {
   templates: ServiceTemplate[]
   enclaves?: Enclave[]
 }
 
+/** The service catalog, one row per type.
+ *
+ *  A row is a link to the type's own page rather than nine columns and a
+ *  pencil at the end of them: the table used to carry every field the editor
+ *  did — description included — which made it both unreadable and the only
+ *  place a type could be looked at. What is left is what tells two types
+ *  apart at a glance.
+ *
+ *  Grouped by category, which is also the order the API returns. */
 export function ServiceTypesAdmin({ templates, enclaves = [] }: Props) {
   const router = useRouter()
-  const [editing, setEditing] = useState<ServiceTemplate | null>(null)
   const [creating, setCreating] = useState(false)
   const enclaveById = new Map(enclaves.map((e) => [e.id, e]))
 
-  async function remove(id: number, name: string) {
-    if (!confirm(`Delete service type "${name}"? Existing instances are kept but lose the link.`)) return
-    const res = await fetch(`/api/be/service-templates/${id}`, { method: "DELETE" })
-    if (res.ok) router.refresh()
-  }
+  // Every category that has rows, in the canonical order, plus anything the
+  // API sends that this build does not know the name of — a row nobody can
+  // see is worse than a row under an unfamiliar heading.
+  const groups = [
+    ...SERVICE_CATEGORIES,
+    ...new Set(
+      templates
+        .map((t) => t.category)
+        .filter((c) => !SERVICE_CATEGORIES.includes(c)),
+    ),
+  ]
+    .map((c) => [c, templates.filter((t) => t.category === c)] as const)
+    .filter(([, rows]) => rows.length > 0)
 
   return (
     <>
       <div className="flex justify-end">
         <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="size-3.5" />
+          <Plus data-icon="inline-start" />
           New type
         </Button>
       </div>
-      <div className="overflow-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left">Name</th>
-              <th className="px-3 py-2 text-left">Enclave</th>
-              <th className="px-3 py-2 text-left">Kind</th>
-              <th className="px-3 py-2 text-left">Category</th>
-              <th className="px-3 py-2 text-left">Reach</th>
-              <th className="px-3 py-2 text-left">Allowed statuses</th>
-              <th className="px-3 py-2 text-left">Description</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {templates.map((t) => {
-              const Icon = serviceIcon(t.icon, t.kind)
-              return (
-                <tr key={t.id} className="border-t border-border">
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Icon className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="font-medium">{t.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    {t.enclave_id !== null && enclaveById.has(t.enclave_id) ? (
-                      <EnclaveChip enclave={enclaveById.get(t.enclave_id)!} />
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">{t.kind}</td>
-                  <td className="px-3 py-2">{categoryLabel(t.category)}</td>
-                  <td className="px-3 py-2">{reachLabel(t.reach)}</td>
-                  <td className="px-3 py-2">
-                    {t.allowed_statuses && t.allowed_statuses.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {t.allowed_statuses.map((s) => (
-                          <span
-                            key={s}
-                            className="inline-flex items-center gap-1 rounded-full bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
-                          >
-                            <StatusIndicator state={statusToIndicatorState(s)} size="sm" />
-                            {statusLabel(s)}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">All allowed</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {t.description ?? ""}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
-                        <Edit3 className="size-3.5" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => remove(t.id, t.name)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-            {templates.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-xs text-muted-foreground">
-                  No service types yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
 
-      {(editing || creating) && (
-        <TemplateDialog
-          template={editing}
+      {templates.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          No service types yet.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="w-32">Enclave</TableHead>
+              <TableHead className="w-24">Kind</TableHead>
+              <TableHead className="w-24">Reach</TableHead>
+              <TableHead className="w-36 text-right">Statuses</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {groups.map(([cat, rows]) => [
+              <TableRow key={`group-${cat}`} className="bg-muted/40 hover:bg-muted/40">
+                <TableCell
+                  colSpan={5}
+                  className="py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  {categoryLabel(cat)}
+                  <span className="ml-1.5 font-normal">({rows.length})</span>
+                </TableCell>
+              </TableRow>,
+              ...rows.map((t) => {
+                const Icon = serviceIcon(t.icon, t.kind)
+                const enclave =
+                  t.enclave_id === null ? undefined : enclaveById.get(t.enclave_id)
+                return (
+                  <TableRow
+                    key={t.id}
+                    onClick={() => router.push(`/admin/service-types/${t.id}`)}
+                    className="cursor-pointer"
+                  >
+                    <TableCell>
+                      <div className="flex min-w-0 items-start gap-2">
+                        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <div className="font-medium">{t.name}</div>
+                          {t.description && (
+                            <div className="truncate text-xs text-muted-foreground">
+                              {t.description}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {enclave ? (
+                        <EnclaveChip enclave={enclave} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {kindLabel(t.kind)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {reachLabel(t.reach)}
+                    </TableCell>
+                    {/* A count rather than the chips themselves: a row of
+                        seven status pills was the widest thing on the page
+                        and said the same thing on almost every row. */}
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {t.allowed_statuses && t.allowed_statuses.length > 0
+                        ? `${t.allowed_statuses.length} of ${STATUS_VALUES.length}`
+                        : "All allowed"}
+                    </TableCell>
+                  </TableRow>
+                )
+              }),
+            ])}
+          </TableBody>
+        </Table>
+      )}
+
+      {creating && (
+        <CreateDialog
           enclaves={enclaves}
-          onClose={() => {
-            setEditing(null)
-            setCreating(false)
-          }}
+          onClose={() => setCreating(false)}
+          onCreated={(id) => router.push(`/admin/service-types/${id}`)}
         />
       )}
     </>
   )
 }
 
-function TemplateDialog({
-  template,
+/** A new type, then straight to its page — the thing you do next after
+ *  creating one is look at it. */
+function CreateDialog({
   enclaves,
   onClose,
+  onCreated,
 }: {
-  template: ServiceTemplate | null
   enclaves: Enclave[]
   onClose: () => void
+  onCreated: (id: number) => void
 }) {
-  const router = useRouter()
-  const editing = template !== null
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState({
-    name: template?.name ?? "",
-    enclave_id: (template?.enclave_id ?? null) as number | null,
-    kind: (template?.kind ?? "other") as ServiceKind,
-    category: (template?.category ?? "other") as ServiceCategory,
-    reach: (template?.reach ?? "local") as ServiceReach,
-    icon: template?.icon ?? "",
-    description: template?.description ?? "",
-    allowed_statuses: (template?.allowed_statuses ?? null) as StatusValue[] | null,
-  })
-
-  function toggleAllowed(s: StatusValue) {
-    const current = draft.allowed_statuses ?? STATUS_VALUES.slice()
-    const next = current.includes(s)
-      ? current.filter((x) => x !== s)
-      : [...current, s]
-    setDraft({
-      ...draft,
-      allowed_statuses: next.length === STATUS_VALUES.length ? null : next,
-    })
-  }
+  const [form, setForm] = useState<TemplateForm>(emptyTemplateForm)
+  const [statuses, setStatuses] = useState<StatusValue[] | null>(null)
 
   async function submit() {
     setPending(true)
     setError(null)
     try {
-      const body = {
-        name: draft.name,
-        enclave_id: draft.enclave_id,
-        kind: draft.kind,
-        category: draft.category,
-        reach: draft.reach,
-        icon: draft.icon || null,
-        description: draft.description || null,
-        allowed_statuses: draft.allowed_statuses,
-      }
-      const url = editing
-        ? `/api/be/service-templates/${template!.id}`
-        : `/api/be/service-templates`
-      const method = editing ? "PATCH" : "POST"
-      const res = await fetch(url, {
-        method,
+      const res = await fetch("/api/be/service-templates", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ...templateBody(form),
+          allowed_statuses: statuses,
+        }),
       })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
-        throw new Error(j.detail ?? "Save failed")
+        throw new Error(typeof j.detail === "string" ? j.detail : "Save failed")
       }
+      const created: ServiceTemplate = await res.json()
       onClose()
-      router.refresh()
+      onCreated(created.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error")
     } finally {
@@ -232,192 +212,66 @@ function TemplateDialog({
     }
   }
 
-  const allowedSet = new Set(draft.allowed_statuses ?? STATUS_VALUES)
+  const blocked = pending || !form.name.trim()
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? `Edit ${template!.name}` : "New service type"}</DialogTitle>
+          <DialogTitle>New service type</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="name">Name</Label>
-            <Input
-              id="name"
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              required
+        {/* A real form, so Enter in any single-line field creates the way it
+            does in every other dialog. */}
+        <form
+          className="flex min-h-0 flex-col gap-6"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!blocked) submit()
+          }}
+        >
+          {/* The field set is tall enough to run off a laptop screen, so it
+              scrolls rather than pushing the buttons past the bottom of the
+              dialog. */}
+          <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto">
+            <TemplateFields
+              form={form}
+              setForm={setForm}
+              enclaves={enclaves}
               disabled={pending}
+              idPrefix="new-svc-type"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              value={draft.description}
-              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-              rows={2}
-              disabled={pending}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-enclave">Enclave</Label>
-              <select
-                id="tpl-enclave"
-                value={draft.enclave_id ?? ""}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    enclave_id: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            <div className="flex flex-col gap-1.5">
+              <Label>Allowed statuses</Label>
+              <span className="text-[11px] text-muted-foreground">
+                What a service of this type may be set to. Leave every one on
+                to allow all.
+              </span>
+              <AllowedStatusPicker
+                value={statuses}
+                onChange={setStatuses}
                 disabled={pending}
-              >
-                <option value="">None</option>
-                {enclaves.map((en) => (
-                  <option key={en.id} value={en.id}>
-                    {en.name}
-                  </option>
-                ))}
-              </select>
-              <p className="mb-3 text-[11px] text-muted-foreground">
-                Services created from this template inherit it. This is where
-                the NIPR/SIPR split used to live as a name prefix.
+              />
+            </div>
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
               </p>
-              <Label htmlFor="kind">Kind</Label>
-              <select
-                id="kind"
-                value={draft.kind}
-                onChange={(e) => setDraft({ ...draft, kind: e.target.value as ServiceKind })}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                disabled={pending}
-              >
-                {KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="reach">Reach</Label>
-              <select
-                id="reach"
-                value={draft.reach}
-                onChange={(e) => setDraft({ ...draft, reach: e.target.value as ServiceReach })}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                disabled={pending}
-              >
-                {SERVICE_REACH_VALUES.map((r) => (
-                  <option key={r} value={r}>
-                    {reachLabel(r)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="category">Category</Label>
-              <select
-                id="category"
-                value={draft.category}
-                onChange={(e) =>
-                  setDraft({ ...draft, category: e.target.value as ServiceCategory })
-                }
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                disabled={pending}
-              >
-                {SERVICE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {categoryLabel(c)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="icon-grid">Icon</Label>
-              <p className="text-[10px] text-muted-foreground">
-                Click to pick. Leave unset to default from kind.
-              </p>
-            </div>
-          </div>
-          <div id="icon-grid" className="grid grid-cols-9 gap-1.5">
-            <button
+          <DialogFooter>
+            <Button
               type="button"
-              onClick={() => setDraft({ ...draft, icon: "" })}
-              className={cn(
-                "flex h-9 items-center justify-center rounded-md border text-[10px] uppercase",
-                draft.icon === "" ? "border-foreground bg-accent" : "border-input",
-              )}
-              title="Default from kind"
+              variant="ghost"
+              onClick={onClose}
               disabled={pending}
             >
-              auto
-            </button>
-            {ICON_NAMES.map((name) => {
-              const IconComp = ICON_MAP[name]
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => setDraft({ ...draft, icon: name })}
-                  className={cn(
-                    "flex h-9 items-center justify-center rounded-md border",
-                    draft.icon === name
-                      ? "border-foreground bg-accent"
-                      : "border-input hover:bg-accent/50",
-                  )}
-                  title={name}
-                  disabled={pending}
-                >
-                  <IconComp className="size-4" />
-                </button>
-              )
-            })}
-          </div>
-          <div className="space-y-1.5">
-            <Label>Allowed statuses</Label>
-            <p className="text-[10px] text-muted-foreground">
-              Toggle which statuses are valid when validating instances of this type.
-            </p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {STATUS_VALUES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggleAllowed(s)}
-                  className={cn(
-                    "flex items-center justify-center gap-2 rounded-md border px-2 py-1.5 text-xs transition-colors",
-                    allowedSet.has(s)
-                      ? "border-foreground bg-accent"
-                      : "border-input opacity-50 hover:opacity-100",
-                  )}
-                  disabled={pending}
-                >
-                  <StatusIndicator state={statusToIndicatorState(s)} size="sm" />
-                  {statusLabel(s)}
-                </button>
-              ))}
-            </div>
-          </div>
-          {error && (
-            <p className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={pending}>
-            {pending ? "Saving…" : editing ? "Save" : "Create"}
-          </Button>
-        </DialogFooter>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={blocked}>
+              {pending ? "Saving…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
