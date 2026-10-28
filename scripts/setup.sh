@@ -28,15 +28,22 @@ fi
 
 "$REPO_ROOT/scripts/gen-env.sh" "$REPO_ROOT/.env"
 
-# The webui runs on the host (see podman-compose.yml), so it needs its deps.
-if [[ -d "$REPO_ROOT/webui/node_modules" ]]; then
-  echo "✓ webui dependencies installed"
-elif command -v npm >/dev/null; then
+# The webui runs on the host (see podman-compose.yml), so it needs Node and
+# its deps. Next.js 16 needs Node >= 20.9; distro packages are often older.
+node_new_enough() {
+  node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>20||(a==20&&b>=9)?0:1)'
+}
+if ! command -v node >/dev/null; then
+  echo "✗ Node not found — install Node 20.9+ (e.g. nvm install, which reads .nvmrc)"
+  missing=1
+elif ! node_new_enough; then
+  echo "✗ Node $(node --version) is too old (need >= 20.9) — e.g. nvm install, which reads .nvmrc"
+  missing=1
+elif [[ -d "$REPO_ROOT/webui/node_modules" ]]; then
+  echo "✓ Node $(node --version), webui dependencies installed"
+else
   echo "… installing webui dependencies"
   npm --prefix "$REPO_ROOT/webui" install
-else
-  echo "✗ npm not found — install Node 20+ to run the webui"
-  missing=1
 fi
 
 if (( missing )); then
