@@ -1,0 +1,18 @@
+[Unit]
+Description=xcomm_hud Postgres
+
+[Container]
+ContainerName=xcomm-hud-postgres
+Image=docker.io/library/postgres:16-alpine
+Network=xcomm-hud.network
+Volume=xcomm-hud-pgdata.volume:/var/lib/postgresql/data
+EnvironmentFile=@ENV_FILE@
+HealthCmd=pg_isready
+HealthInterval=10s
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target
