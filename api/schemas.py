@@ -115,7 +115,6 @@ SubjectKind = Literal[
     "equipment_link",
     "utc_instance",
     "package_instance",
-    "force_element",
     "equipment_asset",
 ]
 # Runtime view of the Literal above. `SubjectKind` stays the single declaration
@@ -159,7 +158,6 @@ class SubjectKinds:
     EQUIPMENT_LINK: SubjectKind = "equipment_link"
     UTC_INSTANCE: SubjectKind = "utc_instance"
     PACKAGE_INSTANCE: SubjectKind = "package_instance"
-    FORCE_ELEMENT: SubjectKind = "force_element"
     EQUIPMENT_ASSET: SubjectKind = "equipment_asset"
 
 
@@ -210,9 +208,6 @@ GENERAL_SUBJECT_KINDS = {
     SubjectKinds.EQUIPMENT_LINK,
     SubjectKinds.UTC_INSTANCE,
     SubjectKinds.PACKAGE_INSTANCE,
-    # A force element is a saved plan, not a status: saving or deleting one is news on
-    # the general feed, never a validation.
-    SubjectKinds.FORCE_ELEMENT,
     # The property book is structural too: adding or striking a box is news,
     # not a status validation.
     SubjectKinds.EQUIPMENT_ASSET,
@@ -2687,141 +2682,6 @@ class AssetImportOut(BaseModel):
     created: list[EquipmentAssetOut] = Field(default_factory=list)
     linked: int = 0
     skipped: list[str] = Field(default_factory=list)
-
-
-# ===================== Equipment: force elements =====================
-
-
-class ForceElementItemIn(BaseModel):
-    asset_id: int
-    display_order: int = 0
-
-
-class ForceElementItemOut(_ORM):
-    """A pinned asset, fattened with everything the picker needs to be read
-    without a second call.
-
-    `commitments` is the disclosure that makes the shared pool workable: the
-    operator sees which pictures already have this box in play before choosing
-    it. An empty list means nobody is using it. Note this never blocks
-    anything — two exercises listing the same radio is expected.
-    """
-
-    id: int
-    force_element_utc_id: int
-    asset_id: int
-    display_order: int = 0
-    equipment_code: Optional[str] = None
-    serial_number: Optional[str] = None
-    equipment_type_id: Optional[int] = None
-    type_title: Optional[str] = None
-    type_short_name: Optional[str] = None
-    capability_kinds: list[str] = Field(default_factory=list)
-    retired: bool = False
-    commitments: list[AssetCommitment] = Field(default_factory=list)
-    # Whether THIS workspace already has a row materialized from the asset —
-    # the case where deploying reuses it rather than creating another.
-    in_this_workspace: bool = False
-
-
-class ForceElementBulkIn(BaseModel):
-    equipment_type_id: int
-    quantity: int = 1
-    enclave_id: Optional[int] = None
-
-
-class ForceElementBulkOut(_ORM):
-    id: int
-    force_element_utc_id: int
-    equipment_type_id: int
-    quantity: int
-    enclave_id: Optional[int] = None
-    type_title: Optional[str] = None
-    type_short_name: Optional[str] = None
-
-
-class ForceElementUtcIn(BaseModel):
-    utc_def_id: Optional[int] = None
-    name: str
-    role_hint: UtcRoleHint = "either"
-    notes: Optional[str] = None
-    display_order: int = 0
-    items: list[ForceElementItemIn] = Field(default_factory=list)
-    bulk: list[ForceElementBulkIn] = Field(default_factory=list)
-
-
-class ForceElementUtcOut(_ORM):
-    id: int
-    force_element_id: int
-    utc_def_id: Optional[int] = None
-    name: str
-    role_hint: UtcRoleHint = "either"
-    notes: Optional[str] = None
-    display_order: int = 0
-    utc_def_code: Optional[str] = None
-    utc_def_name: Optional[str] = None
-    items: list[ForceElementItemOut] = Field(default_factory=list)
-    bulk: list[ForceElementBulkOut] = Field(default_factory=list)
-
-
-class ForceElementIn(BaseModel):
-    name: str
-    description: Optional[str] = None
-    package_def_id: Optional[int] = None
-    utcs: list[ForceElementUtcIn] = Field(default_factory=list)
-
-
-class ForceElementPatch(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    package_def_id: Optional[int] = None
-    retired: Optional[bool] = None
-
-
-class ForceElementOut(_ORM):
-    id: int
-    workspace_id: Optional[int] = None
-    is_global: bool = False
-    package_def_id: Optional[int] = None
-    name: str
-    description: Optional[str] = None
-    retired_at: Optional[datetime.datetime] = None
-    package_def_code: Optional[str] = None
-    utcs: list[ForceElementUtcOut] = Field(default_factory=list)
-    # Rolled up for the list view, which shows force elements as cards and
-    # would otherwise need every one's full tree to print "9 items".
-    item_count: int = 0
-    bulk_count: int = 0
-    # How many pinned assets some workspace already has in play. Context, not
-    # a shortage: the gear is still deployable here.
-    committed_count: int = 0
-    # Pins whose asset has been struck from the property book.
-    retired_count: int = 0
-
-
-class KitCaptureIn(BaseModel):
-    """Save a live package as a reusable force element.
-
-    The path that matters: configure the FCP once by hand — unavoidable the
-    first time — then keep it. Authoring one from an empty form uses the same
-    tables but nobody will do it.
-    """
-
-    package_instance_id: int
-    name: str
-    description: Optional[str] = None
-    # Carry the package's own definition across unless told otherwise.
-    package_def_id: Optional[int] = None
-
-
-class KitRefreshIn(BaseModel):
-    """Re-pin an existing force element from a live package, replacing its contents.
-
-    Cheaper than editing pin-by-pin after the real-world set changes — a radio
-    goes to depot and a replacement arrives, and the force element should follow.
-    """
-
-    package_instance_id: int
 
 
 class TopologySiteNode(BaseModel):

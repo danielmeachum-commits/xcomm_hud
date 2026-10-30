@@ -862,7 +862,7 @@ def deploy_utc(
                         "item_index": index,
                     },
                 )
-            # A stale draft is the realistic cause: the force element pinned a radio that
+            # A stale draft is the realistic cause: the picker claimed a radio that
             # has since been re-typed. Better to say so than to silently deploy
             # the wrong box against a line that called for something else.
             if existing_eq.equipment_type_id != eq_type.id:
@@ -968,7 +968,7 @@ def deploy_utc(
 
         if asset is not None:
             # This workspace's copy of a globally-owned box. Find-or-create:
-            # redeploying the same force element into the same picture moves the row it
+            # redeploying the same box into the same picture moves the row it
             # already made rather than registering the radio twice.
             eq, created_new = materialize_asset(
                 db, asset, workspace, site, utc.id, item.enclave_id

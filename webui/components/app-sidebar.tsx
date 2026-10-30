@@ -113,12 +113,9 @@ const TEMPLATE_ITEMS: AdminItem[] = [
 ]
 
 const WORKSPACE_ADMIN_ITEMS_REST: AdminItem[] = [
-  // Read as a sentence: templates say what a TACLANE is, the property book
-  // says which ones we own, and a force element says which of those go out
-  // together. Adjacent on purpose. Force elements carry a bare href — like
-  // the property book they describe, they are not workspace data.
+  // Templates say what a TACLANE is, the property book says which ones we
+  // own. Adjacent on purpose.
   { path: "/admin/property-book", label: "Property book", icon: Package },
-  { href: "/admin/force-elements", label: "Force elements", icon: Boxes },
   { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
 ]
 

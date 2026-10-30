@@ -1256,9 +1256,8 @@ export interface SiteEquipmentAdvisory {
 export interface UtcDeployItem {
   equipment_type_id: number
   /** Materialize this workspace's copy of a global property-book asset. The
-   *  normal path when deploying from a force element: serial and equipment ID
-   *  come from
-   *  the asset, so nobody retypes them. If this workspace already has a row
+   *  normal path when deploying from the property book: serial and equipment
+   *  ID come from the asset, so nobody retypes them. If this workspace already has a row
    *  for the asset, that row is reused rather than duplicated. */
   asset_id?: number | null
   /** Claim gear the workspace already owns instead of registering new. When
@@ -1366,74 +1365,4 @@ export interface AssetImportResult {
   created: EquipmentAsset[]
   linked: number
   skipped: string[]
-}
-
-// --- force elements ---
-
-/** A pinned item, carrying everything the picker needs to be read without a
- *  second call. `current_utc_*` is the disclosure that makes taking gear from
- *  another deployment workable: the operator sees "held by FCP-2 (Site Bravo)"
- *  before choosing, not after. Null means it is idle in the pool. */
-export interface ForceElementItem {
-  id: number
-  force_element_utc_id: number
-  /** The property-book asset this pin points at. */
-  asset_id: number
-  display_order: number
-  equipment_code: string | null
-  serial_number: string | null
-  equipment_type_id: number | null
-  type_title: string | null
-  type_short_name: string | null
-  capability_kinds: string[]
-  /** The asset has been struck from the property book. */
-  retired: boolean
-  commitments: AssetCommitment[]
-  /** This workspace already has a row materialized from the asset, so
-   *  deploying reuses it rather than creating another. */
-  in_this_workspace: boolean
-}
-
-export interface ForceElementBulk {
-  id: number
-  force_element_utc_id: number
-  equipment_type_id: number
-  quantity: number
-  enclave_id: number | null
-  type_title: string | null
-  type_short_name: string | null
-}
-
-export interface ForceElementUtc {
-  id: number
-  force_element_id: number
-  utc_def_id: number | null
-  name: string
-  role_hint: UtcRoleHint
-  notes: string | null
-  display_order: number
-  utc_def_code: string | null
-  utc_def_name: string | null
-  items: ForceElementItem[]
-  bulk: ForceElementBulk[]
-}
-
-export interface ForceElement {
-  id: number
-  /** Null for a global force element — the normal case. */
-  workspace_id: number | null
-  is_global: boolean
-  package_def_id: number | null
-  name: string
-  description: string | null
-  retired_at: string | null
-  package_def_code: string | null
-  utcs: ForceElementUtc[]
-  item_count: number
-  bulk_count: number
-  /** How many pinned assets some picture already has in play. Context, not a
-   *  shortage — the gear is still deployable here. */
-  committed_count: number
-  /** Pins whose asset has been struck from the property book. */
-  retired_count: number
 }
