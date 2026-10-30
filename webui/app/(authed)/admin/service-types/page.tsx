@@ -22,7 +22,7 @@ export default async function ServiceTypesPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs items={[{ label: "Admin" }, { label: "Services" }]} />
+      <PageBreadcrumbs items={[{ label: "Global" }, { label: "Services" }]} />
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Services</h1>
         <p className="text-xs text-muted-foreground">

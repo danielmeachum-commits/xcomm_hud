@@ -545,14 +545,14 @@ export type Branch =
   | "space_force"
   | "coast_guard"
 
+/** Global — units belong to no workspace. */
 export interface Unit {
   id: number
-  workspace_id: number
   name: string
   description: string | null
   /** Service branch of the org — prepopulates a new member's branch. */
   branch: Branch | null
-  /** At most one per workspace — preselected when adding personnel. */
+  /** At most one — preselected when adding personnel. */
   is_default: boolean
   parent_unit_id: number | null
   created_at: string
@@ -561,9 +561,13 @@ export interface Unit {
 
 export interface WorkCenter {
   id: number
-  workspace_id: number
+  /** Null for a shared shop; set for one this workspace added for itself. */
+  workspace_id: number | null
+  is_global: boolean
   name: string
   description: string | null
+  /** The specialty or specialties the shop draws on ("3D1X3"). */
+  afsc: string | null
   created_at: string
   updated_at: string
 }

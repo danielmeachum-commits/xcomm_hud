@@ -1,4 +1,8 @@
-"""Unit CRUD — military organization (squadron/wing/...) per workspace.
+"""Unit CRUD — military organization (squadron/wing/...).
+
+Global, like the property book: the squadron is a fact about the organization,
+not about one exercise, so units belong to no workspace. Reads are open to any
+viewer; writes need `admin`.
 
 Units can nest via `parent_unit_id`. Delete SET NULLs children up so the
 sub-tree gets promoted rather than lost — safer default than cascade.
@@ -10,8 +14,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from db import get_db
-from deps import get_current_workspace, requires
-from models import Unit, Workspace
+from deps import requires
+from models import Unit
 from pubsub import notify
 from schemas import UnitIn, UnitOut, UnitPatch
 
@@ -21,34 +25,27 @@ router = APIRouter(prefix="/units", tags=["personnel"])
 @router.get("", response_model=list[UnitOut])
 def list_units(
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    return (
-        db.query(Unit)
-        .filter(Unit.workspace_id == workspace.id)
-        .order_by(Unit.name)
-        .all()
-    )
+    return db.query(Unit).order_by(Unit.name).all()
 
 
-def _load(db: Session, unit_id: int, workspace: Workspace) -> Unit:
+def _load(db: Session, unit_id: int) -> Unit:
     u = db.get(Unit, unit_id)
-    if u is None or u.workspace_id != workspace.id:
+    if u is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unit not found")
     return u
 
 
 def _validate_parent(
     db: Session,
-    workspace: Workspace,
     parent_unit_id: int | None,
     self_id: int | None,
 ) -> None:
     if parent_unit_id is None:
         return
     parent = db.get(Unit, parent_unit_id)
-    if parent is None or parent.workspace_id != workspace.id:
+    if parent is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "Parent unit not found"
         )
@@ -74,12 +71,10 @@ def _validate_parent(
         )
 
 
-def _clear_other_defaults(db: Session, workspace: Workspace, keep_id: int | None) -> None:
+def _clear_other_defaults(db: Session, keep_id: int | None) -> None:
     """Making a unit the default clears the flag everywhere else — at most one
-    default per workspace (also enforced by a partial unique index)."""
-    q = db.query(Unit).filter(
-        Unit.workspace_id == workspace.id, Unit.is_default.is_(True)
-    )
+    default (also enforced by a partial unique index)."""
+    q = db.query(Unit).filter(Unit.is_default.is_(True))
     if keep_id is not None:
         q = q.filter(Unit.id != keep_id)
     q.update({"is_default": False}, synchronize_session="fetch")
@@ -90,19 +85,14 @@ def create_unit(
     body: UnitIn,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
-    _=Depends(requires("operator")),
+    _=Depends(requires("admin")),
 ):
-    if (
-        db.query(Unit)
-        .filter(Unit.workspace_id == workspace.id, Unit.name == body.name)
-        .first()
-    ):
+    if db.query(Unit).filter(Unit.name == body.name).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "Unit name already exists")
-    _validate_parent(db, workspace, body.parent_unit_id, self_id=None)
+    _validate_parent(db, body.parent_unit_id, self_id=None)
     if body.is_default:
-        _clear_other_defaults(db, workspace, keep_id=None)
-    unit = Unit(workspace_id=workspace.id, **body.model_dump())
+        _clear_other_defaults(db, keep_id=None)
+    unit = Unit(**body.model_dump())
     db.add(unit)
     db.flush()
     notify(background_tasks)
@@ -115,19 +105,14 @@ def patch_unit(
     body: UnitPatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
-    _=Depends(requires("operator")),
+    _=Depends(requires("admin")),
 ):
-    unit = _load(db, unit_id, workspace)
+    unit = _load(db, unit_id)
     data = body.model_dump(exclude_unset=True)
     if "name" in data and data["name"] != unit.name:
         clash = (
             db.query(Unit)
-            .filter(
-                Unit.workspace_id == workspace.id,
-                Unit.name == data["name"],
-                Unit.id != unit.id,
-            )
+            .filter(Unit.name == data["name"], Unit.id != unit.id)
             .first()
         )
         if clash:
@@ -135,9 +120,9 @@ def patch_unit(
                 status.HTTP_409_CONFLICT, "Unit name already exists"
             )
     if "parent_unit_id" in data:
-        _validate_parent(db, workspace, data["parent_unit_id"], self_id=unit.id)
+        _validate_parent(db, data["parent_unit_id"], self_id=unit.id)
     if data.get("is_default"):
-        _clear_other_defaults(db, workspace, keep_id=unit.id)
+        _clear_other_defaults(db, keep_id=unit.id)
     for k, v in data.items():
         setattr(unit, k, v)
     db.flush()
@@ -150,9 +135,8 @@ def delete_unit(
     unit_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("admin")),
 ):
-    unit = _load(db, unit_id, workspace)
+    unit = _load(db, unit_id)
     db.delete(unit)
     notify(background_tasks)

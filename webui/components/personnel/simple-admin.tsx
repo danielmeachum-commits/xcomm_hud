@@ -1,5 +1,6 @@
 "use client"
 
+import { Globe } from "lucide-react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 
@@ -12,6 +13,8 @@ export interface AdminRow {
   id: number
   name: string
   description: string | null
+  /** A shared row from the global list, as opposed to a local addition. */
+  is_global?: boolean
   // Optional per-entity extras rendered in the row and edit form.
   extras?: Record<string, string | null>
 }
@@ -36,6 +39,9 @@ interface Props<T extends AdminRow> {
   rowExtras?: (row: T) => Record<string, string | null>
   canEdit: boolean
   canDelete: boolean
+  /** The resource keeps a shared list alongside local rows: offer to add to
+   *  it on create (`?global=true`) and badge the rows that are on it. */
+  globalOption?: boolean
 }
 
 export function SimpleAdmin<T extends AdminRow>({
@@ -48,6 +54,7 @@ export function SimpleAdmin<T extends AdminRow>({
   rowExtras,
   canEdit,
   canDelete,
+  globalOption = false,
 }: Props<T>) {
   const router = useRouter()
   const [editing, setEditing] = useState<T | null>(null)
@@ -55,6 +62,7 @@ export function SimpleAdmin<T extends AdminRow>({
   const [name, setName] = useState("")
   const [desc, setDesc] = useState("")
   const [extras, setExtras] = useState<Record<string, string>>({})
+  const [makeGlobal, setMakeGlobal] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -63,6 +71,7 @@ export function SimpleAdmin<T extends AdminRow>({
     setName("")
     setDesc("")
     setExtras({})
+    setMakeGlobal(false)
     setError(null)
     setCreating(true)
   }
@@ -99,7 +108,9 @@ export function SimpleAdmin<T extends AdminRow>({
         const val = extras[f.key]
         body[f.key] = val ? val : null
       }
-      const url = editing ? `/api/be${resource}/${editing.id}` : `/api/be${resource}`
+      const url = editing
+        ? `/api/be${resource}/${editing.id}`
+        : `/api/be${resource}${makeGlobal ? "?global=true" : ""}`
       const res = await fetch(url, {
         method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -183,6 +194,17 @@ export function SimpleAdmin<T extends AdminRow>({
               />
             </div>
           </div>
+          {globalOption && creating && (
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={makeGlobal}
+                disabled={pending}
+                onChange={(e) => setMakeGlobal(e.target.checked)}
+              />
+              Add to the shared list (every workspace sees it)
+            </label>
+          )}
           {error && (
             <p className="mt-2 text-sm text-destructive" role="alert">
               {error}
@@ -233,7 +255,20 @@ export function SimpleAdmin<T extends AdminRow>({
               const ex = rowExtras ? rowExtras(row) : row.extras ?? {}
               return (
                 <tr key={row.id} className="border-t hover:bg-muted/20">
-                  <td className="px-3 py-2 font-medium">{row.name}</td>
+                  <td className="px-3 py-2 font-medium">
+                    <span className="inline-flex items-center gap-2">
+                      {row.name}
+                      {row.is_global && (
+                        <span
+                          title="Shared across workspaces, admin-managed"
+                          className="inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground"
+                        >
+                          <Globe className="size-3" />
+                          Shared
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   {extraColumns.map((c) => (
                     <td key={c.key} className="px-3 py-2 text-muted-foreground">
                       {ex[c.key] ?? "—"}

@@ -30,6 +30,8 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from routers.work_centers import load_visible as load_work_center
+from routers.work_centers import visible_to as work_centers_visible_to
 from schemas import (
     PersonnelCheckInBulkIn,
     PersonnelCheckInIn,
@@ -173,14 +175,12 @@ def _validate_refs(
     self_id: int | None,
 ) -> None:
     if work_center_id is not None:
-        wc = db.get(WorkCenter, work_center_id)
-        if wc is None or wc.workspace_id != workspace.id:
+        if load_work_center(db, work_center_id, workspace) is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Work center not found"
             )
     if unit_id is not None:
-        u = db.get(Unit, unit_id)
-        if u is None or u.workspace_id != workspace.id:
+        if db.get(Unit, unit_id) is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Unit not found"
             )
@@ -541,14 +541,11 @@ def import_personnel_csv(
     wc_by_name = {
         wc.name.lower(): wc
         for wc in db.query(WorkCenter)
-        .filter(WorkCenter.workspace_id == workspace.id)
+        .filter(work_centers_visible_to(workspace))
         .all()
     }
     unit_by_name = {
-        u.name.lower(): u
-        for u in db.query(Unit)
-        .filter(Unit.workspace_id == workspace.id)
-        .all()
+        u.name.lower(): u for u in db.query(Unit).all()
     }
 
     imported = 0
@@ -601,6 +598,8 @@ def import_personnel_csv(
         if wc_name:
             wc_row = wc_by_name.get(wc_name.lower())
             if wc_row is None and body.create_missing:
+                # A shop nobody has yet is added locally — the import speaks
+                # for this picture, not for the shared list.
                 wc_row = WorkCenter(workspace_id=workspace.id, name=wc_name)
                 db.add(wc_row)
                 db.flush()
@@ -612,7 +611,7 @@ def import_personnel_csv(
         if unit_name:
             unit_row = unit_by_name.get(unit_name.lower())
             if unit_row is None and body.create_missing:
-                unit_row = Unit(workspace_id=workspace.id, name=unit_name)
+                unit_row = Unit(name=unit_name)
                 db.add(unit_row)
                 db.flush()
                 unit_by_name[unit_name.lower()] = unit_row

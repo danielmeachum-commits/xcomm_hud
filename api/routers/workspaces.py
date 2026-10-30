@@ -51,6 +51,7 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from routers.work_centers import visible_to as work_centers_visible_to
 from workspace_slug import unique_workspace_slug
 from schemas import (
     ExportedAnnotation,
@@ -337,31 +338,16 @@ def duplicate_workspace(
             )
         )
 
-    # --- Personnel side: units → work_centers → teams → personnel.
-    # Units first because personnel.unit_id depends on them, and units may
-    # reference each other via parent_unit_id. We do two passes: create rows
-    # then rewire parents once the id map exists.
-    unit_id_map: dict[int, int] = {}
-    src_units = list(
-        db.query(Unit).filter(Unit.workspace_id == source.id).all()
-    )
-    for u in src_units:
-        new_u = Unit(
-            workspace_id=dest.id, name=u.name, description=u.description
-        )
-        db.add(new_u)
-        db.flush()
-        unit_id_map[u.id] = new_u.id
-    for u in src_units:
-        if u.parent_unit_id and u.parent_unit_id in unit_id_map:
-            db.get(Unit, unit_id_map[u.id]).parent_unit_id = unit_id_map[
-                u.parent_unit_id
-            ]
-
+    # --- Personnel side: work_centers → teams → personnel.
+    # Units are global, so the clone's people point at the same rows. Shared
+    # work centers likewise; only the source's local shops are copied.
     wc_id_map: dict[int, int] = {}
     for wc in db.query(WorkCenter).filter(WorkCenter.workspace_id == source.id).all():
         new_wc = WorkCenter(
-            workspace_id=dest.id, name=wc.name, description=wc.description
+            workspace_id=dest.id,
+            name=wc.name,
+            description=wc.description,
+            afsc=wc.afsc,
         )
         db.add(new_wc)
         db.flush()
@@ -399,7 +385,7 @@ def duplicate_workspace(
             work_center_id=wc_id_map.get(p.work_center_id)
             if p.work_center_id
             else None,
-            unit_id=unit_id_map.get(p.unit_id) if p.unit_id else None,
+            unit_id=p.unit_id,
             # supervisor rewired in second pass once every id is known
             assigned_site_id=site_id_map.get(p.assigned_site_id)
             if p.assigned_site_id
@@ -1144,13 +1130,13 @@ def export_workspace(
         ):
             template_name_by_id[tpl.id] = tpl.name
 
-    units = (
-        db.query(Unit).filter(Unit.workspace_id == ws.id).order_by(Unit.name).all()
-    )
+    # Units and shared shops are global, but they travel with the bundle by
+    # name all the same: the instance it lands on may not have them.
+    units = db.query(Unit).order_by(Unit.name).all()
     unit_name_by_id = {u.id: u.name for u in units}
     work_centers = (
         db.query(WorkCenter)
-        .filter(WorkCenter.workspace_id == ws.id)
+        .filter(work_centers_visible_to(ws))
         .order_by(WorkCenter.name)
         .all()
     )
@@ -1193,7 +1179,9 @@ def export_workspace(
             for u in units
         ],
         work_centers=[
-            ExportedWorkCenter(name=wc.name, description=wc.description)
+            ExportedWorkCenter(
+                name=wc.name, description=wc.description, afsc=wc.afsc
+            )
             for wc in work_centers
         ],
         teams=[
@@ -1505,24 +1493,41 @@ def import_workspace(
     # --- Personnel side ---
     # Units first (self-referential parent), then work centers, teams,
     # personnel. Rewire supervisor after all people exist.
-    unit_id_by_name: dict[str, int] = {}
+    #
+    # Units are global, so a bundled unit that already exists here is reused
+    # as it stands — only the ones this instance lacks are created, and only
+    # those get their parent wired from the bundle.
+    existing_units = {u.name: u.id for u in db.query(Unit).all()}
+    unit_id_by_name: dict[str, int] = dict(existing_units)
     for u in payload.units:
-        new_u = Unit(
-            workspace_id=ws.id, name=u.name, description=u.description
-        )
+        if u.name in unit_id_by_name:
+            continue
+        new_u = Unit(name=u.name, description=u.description)
         db.add(new_u)
         db.flush()
         unit_id_by_name[u.name] = new_u.id
     for u in payload.units:
+        if u.name in existing_units:
+            continue
         if u.parent_unit_name and u.parent_unit_name in unit_id_by_name:
             db.get(Unit, unit_id_by_name[u.name]).parent_unit_id = (
                 unit_id_by_name[u.parent_unit_name]
             )
 
-    wc_id_by_name: dict[str, int] = {}
+    # A bundled shop matching a shared one is the shared one; anything else
+    # becomes a local shop of the new workspace.
+    wc_id_by_name: dict[str, int] = {
+        wc.name: wc.id
+        for wc in db.query(WorkCenter).filter(WorkCenter.workspace_id.is_(None))
+    }
     for wc in payload.work_centers:
+        if wc.name in wc_id_by_name:
+            continue
         new_wc = WorkCenter(
-            workspace_id=ws.id, name=wc.name, description=wc.description
+            workspace_id=ws.id,
+            name=wc.name,
+            description=wc.description,
+            afsc=wc.afsc,
         )
         db.add(new_wc)
         db.flush()

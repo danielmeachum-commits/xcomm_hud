@@ -23,7 +23,7 @@ export default async function UsersAdminPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs items={[{ label: "Admin" }, { label: "Users" }]} />
+      <PageBreadcrumbs items={[{ label: "Global" }, { label: "Users" }]} />
       <UsersAdminClient initialUsers={users} />
     </div>
   )

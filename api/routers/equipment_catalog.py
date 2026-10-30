@@ -38,6 +38,7 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from routers.work_centers import load_visible as load_work_center
 from schemas import (
     EquipmentTypeCapabilityIn,
     EquipmentTypeIn,
@@ -101,13 +102,19 @@ def _norm_tags(tags: list[str]) -> list[str]:
     return list(seen)
 
 
-def _type_out(db: Session, row: EquipmentType) -> EquipmentTypeOut:
+def _type_out(
+    db: Session, row: EquipmentType, workspace: Workspace
+) -> EquipmentTypeOut:
     out = EquipmentTypeOut.model_validate(row)
     out.is_global = row.workspace_id is None
     out.enclave_ids = sorted(link.enclave_id for link in row.enclave_links)
-    # Primary first, then by name — the responsible shop is the one people
-    # look for, and it should not be buried mid-list.
-    links = sorted(row.work_center_links, key=lambda l: (not l.is_primary, l.id))
+    # Ownership is answered per workspace, so a global type carries every
+    # workspace's links — only this one's are its answer. Primary first, then
+    # by id: the responsible shop is the one people look for.
+    links = sorted(
+        (l for l in row.work_center_links if l.workspace_id == workspace.id),
+        key=lambda l: (not l.is_primary, l.id),
+    )
     names = {
         w.id: w.name
         for w in db.query(WorkCenter).filter(
@@ -151,8 +158,8 @@ def _set_type_work_centers(
 
     seen_primary = False
     for link in {l.work_center_id: l for l in links}.values():
-        wc = db.get(WorkCenter, link.work_center_id)
-        if wc is None or wc.workspace_id != workspace.id:
+        wc = load_work_center(db, link.work_center_id, workspace)
+        if wc is None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 f"Work center {link.work_center_id} not found",
@@ -224,7 +231,7 @@ def list_equipment_types(
         )
         .all()
     )
-    return [_type_out(db, r) for r in rows]
+    return [_type_out(db, r, workspace) for r in rows]
 
 
 @router.post(
@@ -263,7 +270,7 @@ def create_equipment_type(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.patch("/equipment-types/{type_id}", response_model=EquipmentTypeOut)
@@ -288,7 +295,7 @@ def patch_equipment_type(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.put(
@@ -328,7 +335,7 @@ def replace_type_capabilities(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.put("/equipment-types/{type_id}/enclaves", response_model=EquipmentTypeOut)
@@ -353,7 +360,7 @@ def replace_type_enclaves(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.delete("/equipment-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -563,7 +570,7 @@ def replace_type_work_centers(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.put("/utc-defs/{utc_def_id}/lines", response_model=UtcDefOut)

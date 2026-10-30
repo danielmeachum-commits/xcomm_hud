@@ -971,6 +971,10 @@ class WorkspaceRuleState(Base):
 class Unit(Base):
     """A military unit / organization (squadron, wing, group, ...) for chain of command.
 
+    Global: the squadron exists whether or not an exercise is running, so a
+    unit belongs to no workspace and every picture files people under the same
+    rows. Writes are admin-only, like the rest of the global tier.
+
     Distinct from WorkCenter (physical/functional workshop) — a person may
     belong to the 375th Communications Squadron (Unit) while working in the
     "Radio Shop" (WorkCenter). Unit primarily applies to military members
@@ -980,23 +984,17 @@ class Unit(Base):
 
     __tablename__ = "unit"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", name="uq_unit_workspace_name"),
+        UniqueConstraint("name", name="uq_unit_name"),
+        Index("uq_unit_default", "is_default", unique=True, postgresql_where=text("is_default")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Service branch of the organization — prepopulates a new member's branch
     # in the personnel form once their unit is picked.
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
-    # At most one per workspace (partial unique index) — preselected when
-    # adding personnel.
+    # At most one (partial unique index) — preselected when adding personnel.
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     parent_unit_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
@@ -1013,27 +1011,41 @@ class Unit(Base):
 
 
 class WorkCenter(Base):
-    """A logical grouping of personnel (and later, equipment) within a workspace.
+    """The shop a person works in, and the shop that answers for a kind of gear.
 
-    Work centers are the physical/functional bucket a person belongs to — one
-    person to one work center. Distinct from Unit (military org) and Team
+    One person to one work center. Distinct from Unit (military org) and Team
     (many-to-many overlay for ad-hoc collaboration across work centers).
+
+    Same global-vs-workspace shape as Enclave: `workspace_id IS NULL` is a
+    shared, admin-managed shop (Net Ops, RF, ...), a non-null one is a local
+    addition — the non-players one picture accounts for and another doesn't.
+    A local row may not take a global row's name, so a MANFOR line that names
+    its shop resolves to one row and only one.
     """
 
     __tablename__ = "work_center"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_work_center_workspace_name"),
+        Index(
+            "uq_work_center_global_name",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
+    workspace_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The specialty (or specialties — "3D1X2, 3D1X3") the shop draws on. Free
+    # text: a shop is often more than one AFSC, and nothing branches on it.
+    afsc: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
@@ -1113,8 +1125,10 @@ class Personnel(Base):
     # the permanent roster. `affiliation` is their org/unit, `escort` the on-site
     # point of contact hosting them.
     is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Unit commander/OIC — at most one per unit (partial unique index), and
-    # only meaningful with a unit set (the API rejects a unitless commander).
+    # Unit commander/OIC — at most one per unit per workspace (partial unique
+    # index), and only meaningful with a unit set (the API rejects a unitless
+    # commander). Per workspace because units are global but the roster is
+    # not yet: the same commander exists once in every picture they're in.
     # Marked with a gold star wherever the person's name is rendered.
     is_commander: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False

@@ -1397,7 +1397,6 @@ class UnitPatch(BaseModel):
 
 class UnitOut(_ORM):
     id: int
-    workspace_id: int
     name: str
     description: Optional[str] = None
     branch: Optional[Branch] = None
@@ -1410,18 +1409,23 @@ class UnitOut(_ORM):
 class WorkCenterIn(BaseModel):
     name: str
     description: Optional[str] = None
+    afsc: Optional[str] = None
 
 
 class WorkCenterPatch(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    afsc: Optional[str] = None
 
 
 class WorkCenterOut(_ORM):
     id: int
-    workspace_id: int
+    # Null for a shared shop; set for one this workspace added for itself.
+    workspace_id: Optional[int] = None
+    is_global: bool = False
     name: str
     description: Optional[str] = None
+    afsc: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -1778,6 +1782,7 @@ class ExportedUnit(BaseModel):
 class ExportedWorkCenter(BaseModel):
     name: str
     description: Optional[str] = None
+    afsc: Optional[str] = None
 
 
 class ExportedTeam(BaseModel):

@@ -21,7 +21,7 @@ export default async function EventTypesPage({ params }: PageProps) {
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
-        items={[{ label: "Settings" }, { label: "Event Types" }]}
+        items={[{ label: "Workspace Admin" }, { label: "Event Types" }]}
       />
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Event Types</h1>

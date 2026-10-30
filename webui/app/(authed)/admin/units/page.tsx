@@ -14,7 +14,7 @@ export default async function UnitsAdminPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs items={[{ label: "Admin" }, { label: "Units" }]} />
+      <PageBreadcrumbs items={[{ label: "Global" }, { label: "Units" }]} />
       <UnitsAdmin units={units} canEdit canDelete />
     </div>
   )

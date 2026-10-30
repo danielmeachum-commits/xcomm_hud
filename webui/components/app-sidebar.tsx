@@ -82,12 +82,17 @@ const PERSONNEL_SUB_ITEMS = [
   },
 ]
 
-// Workspace-scoped admin items (gateways lives under the current workspace);
-// truly global admin items follow with absolute paths. Split around the
-// Templates submenu, which sits between the two halves.
-const WORKSPACE_ADMIN_ITEMS_TOP = [
+// The Workspace Admin group holds what belongs to this workspace. Anything shared
+// across workspaces sits in the Global group instead, even where its page
+// also takes local additions — where a row sits in the nav says whether
+// editing it reaches every picture.
+const WORKSPACE_ADMIN_ITEMS = [
   { path: "/settings/event-types", label: "Event types", icon: Shapes },
   { path: "/settings/rules", label: "Rules", icon: Workflow },
+  { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
+  // Teams are put together for one deployment (FCP-1), unlike the shops and
+  // units people are filed under.
+  { path: "/admin/teams", label: "Teams", icon: UsersRound },
 ]
 
 // An admin nav row. `path` is workspace-scoped and gets the w() prefix;
@@ -112,20 +117,13 @@ const TEMPLATE_ITEMS: AdminItem[] = [
   { path: "/admin/enclaves", label: "Enclaves", icon: Layers },
 ]
 
-const WORKSPACE_ADMIN_ITEMS_REST: AdminItem[] = [
-  // Templates say what a TACLANE is, the property book says which ones we
-  // own. Adjacent on purpose.
-  { path: "/admin/property-book", label: "Property book", icon: Package },
-  { path: "/admin/site-properties", label: "Site properties", icon: ListChecks },
-]
-
-// Who the workspace is made of, read outside-in: the work centers, teams and
-// units people are filed under, then the accounts themselves. Users is global,
-// so it carries an href of its own where the rest take a workspace path.
+// Organization-wide personnel structure: the shops and units people are filed
+// under, then the accounts themselves. Work centers keep a workspace path —
+// the page also adds shops local to this picture — while units and users
+// stand on their own.
 const PERSONNEL_ITEMS: AdminItem[] = [
   { path: "/admin/work-centers", label: "Work centers", icon: Building2 },
-  { path: "/admin/teams", label: "Teams", icon: UsersRound },
-  { path: "/admin/units", label: "Units", icon: Flag },
+  { href: "/admin/units", label: "Units", icon: Flag },
   { href: "/admin/users", label: "Users", icon: Users },
 ]
 
@@ -159,9 +157,9 @@ export function AppSidebar({ user, sites }: Props) {
     if (onPersonnelRoute) setPersonnelOpen(true)
   }, [onPersonnelRoute])
 
-  // Admin and its Templates submenu open themselves when you're already
-  // inside them. Both start closed, so without this every navigation within
-  // Admin folded the sidebar shut over the page you had just opened.
+  // Workspace Admin and the Global submenus open themselves when you're
+  // already inside them. All start closed, so without this every navigation
+  // within them folded the sidebar shut over the page you had just opened.
   const onRoute = (href: string) =>
     pathname === href || pathname.startsWith(href + "/")
   const adminItemHref = (item: AdminItem) => item.href ?? w(item.path!)
@@ -171,11 +169,9 @@ export function AppSidebar({ user, sites }: Props) {
   const onPersonnelItemsRoute = PERSONNEL_ITEMS.some((item) =>
     onRoute(adminItemHref(item)),
   )
-  const onAdminRoute =
-    onTemplatesRoute ||
-    onPersonnelItemsRoute ||
-    WORKSPACE_ADMIN_ITEMS_TOP.some((item) => onRoute(w(item.path))) ||
-    WORKSPACE_ADMIN_ITEMS_REST.some((item) => onRoute(adminItemHref(item)))
+  const onAdminRoute = WORKSPACE_ADMIN_ITEMS.some((item) =>
+    onRoute(w(item.path)),
+  )
   const [adminOpen, setAdminOpen] = useState(onAdminRoute)
   const [templatesOpen, setTemplatesOpen] = useState(onTemplatesRoute)
   const [personnelItemsOpen, setPersonnelItemsOpen] = useState(
@@ -372,7 +368,7 @@ export function AppSidebar({ user, sites }: Props) {
                 />
               }
             >
-              <span>Admin</span>
+              <span>Workspace Admin</span>
               <ChevronRight
                 className={cn(
                   "size-3.5 transition-transform",
@@ -383,7 +379,7 @@ export function AppSidebar({ user, sites }: Props) {
             {adminOpen && (
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {WORKSPACE_ADMIN_ITEMS_TOP.map((item) => {
+                  {WORKSPACE_ADMIN_ITEMS.map((item) => {
                     const href = w(item.path)
                     return (
                       <SidebarMenuItem key={href}>
@@ -398,6 +394,63 @@ export function AppSidebar({ user, sites }: Props) {
                       </SidebarMenuItem>
                     )
                   })}
+
+                </SidebarMenu>
+              </SidebarGroupContent>
+            )}
+          </SidebarGroup>
+        )}
+
+        {/* Global scope — shared across every workspace, set apart from the
+            workspace-scoped nav above. The admin rows here edit lists every
+            workspace reads, even where a page also takes local additions. */}
+        <SidebarSeparator />
+        <SidebarGroup>
+          <SidebarGroupLabel className="gap-1.5">
+            <Globe className="size-3" />
+            Global
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Knowledge Hub — shared across all workspaces"
+                  isActive={onRoute(w("/docs"))}
+                  render={<Link href={w("/docs")} />}
+                >
+                  <BookOpen data-icon="inline-start" />
+                  <span>Knowledge Hub</span>
+                </SidebarMenuButton>
+                <SidebarMenuAction
+                  showOnHover
+                  title="Open in new tab"
+                  aria-label="Open Knowledge Hub in a new tab"
+                  render={
+                    <a
+                      href={w("/docs")}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    />
+                  }
+                >
+                  <ExternalLink />
+                </SidebarMenuAction>
+              </SidebarMenuItem>
+
+              {/* Global in reach but still admin-only, so it sits below the
+                  row everyone sees rather than displacing it. */}
+              {isAdmin && (
+                <>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      tooltip="Gateways"
+                      isActive={onRoute(w("/admin/gateways"))}
+                      render={<Link href={w("/admin/gateways")} />}
+                    >
+                      <Network />
+                      <span>Gateways</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
 
                   <SidebarMenuItem>
                     {/* A toggle, not a link: Equipment templates is a heading
@@ -439,21 +492,18 @@ export function AppSidebar({ user, sites }: Props) {
                     )}
                   </SidebarMenuItem>
 
-                  {WORKSPACE_ADMIN_ITEMS_REST.map((item) => {
-                    const href = adminItemHref(item)
-                    return (
-                      <SidebarMenuItem key={href}>
-                        <SidebarMenuButton
-                          isActive={onRoute(href)}
-                          tooltip={item.label}
-                          render={<Link href={href} />}
-                        >
-                          <item.icon />
-                          <span>{item.label}</span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    )
-                  })}
+                  <SidebarMenuItem>
+                    {/* Templates say what a TACLANE is; the property book
+                        says which ones we own. */}
+                    <SidebarMenuButton
+                      isActive={onRoute(w("/admin/property-book"))}
+                      tooltip="Property book"
+                      render={<Link href={w("/admin/property-book")} />}
+                    >
+                      <Package />
+                      <span>Property book</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
 
                   <SidebarMenuItem>
                     {/* Same shape as Templates above: a heading with no page
@@ -493,60 +543,7 @@ export function AppSidebar({ user, sites }: Props) {
                       </SidebarMenuSub>
                     )}
                   </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            )}
-          </SidebarGroup>
-        )}
-
-        {/* Global scope — shared across every workspace, set apart from the
-            workspace-scoped nav above. Room for more global areas later. */}
-        <SidebarSeparator />
-        <SidebarGroup>
-          <SidebarGroupLabel className="gap-1.5">
-            <Globe className="size-3" />
-            Global
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  tooltip="Knowledge Hub — shared across all workspaces"
-                  isActive={onRoute(w("/docs"))}
-                  render={<Link href={w("/docs")} />}
-                >
-                  <BookOpen data-icon="inline-start" />
-                  <span>Knowledge Hub</span>
-                </SidebarMenuButton>
-                <SidebarMenuAction
-                  showOnHover
-                  title="Open in new tab"
-                  aria-label="Open Knowledge Hub in a new tab"
-                  render={
-                    <a
-                      href={w("/docs")}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    />
-                  }
-                >
-                  <ExternalLink />
-                </SidebarMenuAction>
-              </SidebarMenuItem>
-
-              {/* Global in reach but still admin-only, so it sits below the
-                  row everyone sees rather than displacing it. */}
-              {isAdmin && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    tooltip="Gateways"
-                    isActive={onRoute(w("/admin/gateways"))}
-                    render={<Link href={w("/admin/gateways")} />}
-                  >
-                    <Network />
-                    <span>Gateways</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                </>
               )}
             </SidebarMenu>
           </SidebarGroupContent>

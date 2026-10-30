@@ -20,7 +20,7 @@ export default async function SitePropertyTemplatesPage() {
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
-        items={[{ label: "Admin" }, { label: "Site properties" }]}
+        items={[{ label: "Workspace Admin" }, { label: "Site properties" }]}
       />
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Site properties</h1>
