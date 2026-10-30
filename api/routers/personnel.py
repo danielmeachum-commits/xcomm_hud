@@ -1,8 +1,12 @@
 """Personnel CRUD + CSV bulk import.
 
-Personnel are a workspace-scoped roster. Team assignments live on the
-`personnel_team` join and are exposed on read as `team_ids` for a compact
-UI-friendly shape.
+A personnel row is someone's part in this workspace's picture; who they are
+lives on the global `person` (see routers/people.py). Reads flatten the two
+into one shape, and writes split a body between them: identity fields go to
+the person — shared with every other picture they're in, so changing more
+than contact details on a roster person needs `admin` — and the rest stay
+here. Team assignments live on the `personnel_team` join and are exposed on
+read as `team_ids` for a compact UI-friendly shape.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from deps import get_current_workspace, requires
 from auth import get_current_user
 from rules_engine import emit_trigger
 from models import (
+    Person,
     Personnel,
     PersonnelLocationEvent,
     PersonnelTeam,
@@ -30,6 +35,14 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from routers.people import (
+    IDENTITY_FIELDS,
+    changed_fields,
+    check_commander,
+    ensure_commander_slot,
+    require_identity_write,
+    validate_unit,
+)
 from routers.work_centers import load_visible as load_work_center
 from routers.work_centers import visible_to as work_centers_visible_to
 from schemas import (
@@ -48,29 +61,65 @@ from schemas import (
 router = APIRouter(prefix="/personnel", tags=["personnel"])
 
 
-def _to_out(p: Personnel) -> dict:
-    """Serialize a Personnel row with team_ids resolved from the join."""
+# Columns that belong to this picture rather than the person.
+PICTURE_FIELDS = (
+    "is_guest",
+    "affiliation",
+    "escort",
+    "notes",
+    "work_center_id",
+    "assigned_site_id",
+    "room_number",
+)
+
+
+def _ids_by_person(db: Session, workspace_id: int) -> dict[int, int]:
+    """person id → personnel id within one workspace, for translating the
+    roster's supervisor pointers into this picture."""
+    return dict(
+        db.query(Personnel.person_id, Personnel.id)
+        .filter(Personnel.workspace_id == workspace_id)
+        .all()
+    )
+
+
+def _supervisor_here(db: Session, p: Personnel) -> int | None:
+    sup = p.person.supervisor_id
+    if sup is None:
+        return None
+    return (
+        db.query(Personnel.id)
+        .filter(Personnel.workspace_id == p.workspace_id, Personnel.person_id == sup)
+        .scalar()
+    )
+
+
+def _to_out(p: Personnel, supervisor_id: int | None) -> dict:
+    """Serialize a Personnel row flattened with its person, team_ids resolved
+    from the join. `supervisor_id` is already translated to this picture."""
+    person = p.person
     return {
         "id": p.id,
         "workspace_id": p.workspace_id,
-        "personnel_type": p.personnel_type,
+        "person_id": person.id,
+        "personnel_type": person.personnel_type,
         "is_guest": p.is_guest,
-        "is_commander": p.is_commander,
+        "is_commander": person.is_commander,
         "affiliation": p.affiliation,
         "escort": p.escort,
-        "branch": p.branch,
-        "rank": p.rank,
-        "skill_level": p.skill_level,
-        "last_name": p.last_name,
-        "first_name": p.first_name,
-        "cellphone": p.cellphone,
-        "dsn": p.dsn,
-        "sipr_number": p.sipr_number,
-        "email": p.email,
+        "branch": person.branch,
+        "rank": person.rank,
+        "skill_level": person.skill_level,
+        "last_name": person.last_name,
+        "first_name": person.first_name,
+        "cellphone": person.cellphone,
+        "dsn": person.dsn,
+        "sipr_number": person.sipr_number,
+        "email": person.email,
         "notes": p.notes,
         "work_center_id": p.work_center_id,
-        "unit_id": p.unit_id,
-        "supervisor_id": p.supervisor_id,
+        "unit_id": person.unit_id,
+        "supervisor_id": supervisor_id,
         "assigned_site_id": p.assigned_site_id,
         "room_number": p.room_number,
         "team_ids": [t.id for t in p.teams],
@@ -82,6 +131,15 @@ def _to_out(p: Personnel) -> dict:
         "created_at": p.created_at,
         "updated_at": p.updated_at,
     }
+
+
+def _out(db: Session, p: Personnel) -> dict:
+    return _to_out(p, _supervisor_here(db, p))
+
+
+def _outs(db: Session, people: list[Personnel], workspace: Workspace) -> list[dict]:
+    ids = _ids_by_person(db, workspace.id)
+    return [_to_out(p, ids.get(p.person.supervisor_id)) for p in people]
 
 
 def _resolve_checkin_site(
@@ -139,7 +197,7 @@ def _apply_location_change(
         "personnel.location_changed",
         {
             "personnel_id": p.id,
-            "personnel_name": f"{p.last_name}, {p.first_name}",
+            "personnel_name": f"{p.person.last_name}, {p.person.first_name}",
             "prev_status": prev_status,
             "new_status": stat,
             "site_id": site_id,
@@ -164,36 +222,17 @@ def _load(db: Session, pid: int, workspace: Workspace) -> Personnel:
     return p
 
 
-def _validate_refs(
+def _validate_picture_refs(
     db: Session,
     workspace: Workspace,
     *,
     work_center_id: int | None,
-    unit_id: int | None,
-    supervisor_id: int | None,
     assigned_site_id: int | None,
-    self_id: int | None,
 ) -> None:
     if work_center_id is not None:
         if load_work_center(db, work_center_id, workspace) is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Work center not found"
-            )
-    if unit_id is not None:
-        if db.get(Unit, unit_id) is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "Unit not found"
-            )
-    if supervisor_id is not None:
-        if self_id is not None and supervisor_id == self_id:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "A person cannot be their own supervisor",
-            )
-        sup = db.get(Personnel, supervisor_id)
-        if sup is None or sup.workspace_id != workspace.id:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "Supervisor not found"
             )
     if assigned_site_id is not None:
         s = db.get(Site, assigned_site_id)
@@ -203,33 +242,36 @@ def _validate_refs(
             )
 
 
-def _ensure_commander_slot(
-    db: Session, unit_id: int | None, keep_id: int | None
-) -> None:
-    """A commander must belong to a unit, and each unit has at most one.
-    The UI hides the toggle when the slot is taken, and a partial unique
-    index backstops the rule, but this turns a race into a readable error
-    instead of an IntegrityError."""
-    if unit_id is None:
+def _resolve_supervisor(
+    db: Session,
+    workspace: Workspace,
+    supervisor_id: int | None,
+    self_person_id: int | None,
+) -> int | None:
+    """Clients name a supervisor by their personnel id in this picture; the
+    roster stores the person. Returns that person's id."""
+    if supervisor_id is None:
+        return None
+    sup = db.get(Personnel, supervisor_id)
+    if sup is None or sup.workspace_id != workspace.id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "Supervisor not found"
+        )
+    if self_person_id is not None and sup.person_id == self_person_id:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "A commander must belong to a unit — pick a unit first.",
+            "A person cannot be their own supervisor",
         )
-    q = db.query(Personnel).filter(
-        Personnel.unit_id == unit_id,
-        Personnel.is_commander.is_(True),
+    return sup.person_id
+
+
+def _in_other_pictures(db: Session, p: Personnel) -> bool:
+    return (
+        db.query(Personnel.id)
+        .filter(Personnel.person_id == p.person_id, Personnel.id != p.id)
+        .first()
+        is not None
     )
-    if keep_id is not None:
-        q = q.filter(Personnel.id != keep_id)
-    existing = q.first()
-    if existing is not None:
-        unit = db.get(Unit, unit_id)
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"{existing.last_name}, {existing.first_name} is already the "
-            f"commander of {unit.name if unit else 'that unit'} — unassign "
-            "them first.",
-        )
 
 
 def _resolve_teams(
@@ -258,11 +300,12 @@ def list_personnel(
 ):
     people = (
         db.query(Personnel)
+        .join(Person, Person.id == Personnel.person_id)
         .filter(Personnel.workspace_id == workspace.id)
-        .order_by(Personnel.last_name, Personnel.first_name)
+        .order_by(Person.last_name, Person.first_name)
         .all()
     )
-    return [_to_out(p) for p in people]
+    return _outs(db, people, workspace)
 
 
 @router.post("", response_model=PersonnelOut, status_code=status.HTTP_201_CREATED)
@@ -273,25 +316,67 @@ def create_personnel(
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("operator")),
 ):
-    _validate_refs(
+    _validate_picture_refs(
         db,
         workspace,
         work_center_id=body.work_center_id,
-        unit_id=body.unit_id,
-        supervisor_id=body.supervisor_id,
         assigned_site_id=body.assigned_site_id,
-        self_id=None,
     )
-    if body.is_commander:
-        _ensure_commander_slot(db, body.unit_id, keep_id=None)
     teams = _resolve_teams(db, workspace, body.team_ids)
-    data = body.model_dump(exclude={"team_ids"})
-    p = Personnel(workspace_id=workspace.id, **data)
+    if body.person_id is not None:
+        # Add from the roster: who they are is already settled.
+        if body.is_guest:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Guests aren't on the roster — add them by name instead.",
+            )
+        person = db.get(Person, body.person_id)
+        if person is None or person.workspace_id is not None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Person not found"
+            )
+        already = (
+            db.query(Personnel.id)
+            .filter(
+                Personnel.workspace_id == workspace.id,
+                Personnel.person_id == person.id,
+            )
+            .first()
+        )
+        if already is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"{person.last_name}, {person.first_name} is already in "
+                "this workspace.",
+            )
+    else:
+        if not body.last_name or not body.first_name:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "first_name and last_name are required",
+            )
+        validate_unit(db, body.unit_id)
+        if body.is_commander:
+            ensure_commander_slot(db, body.unit_id, keep_person_id=None)
+        person = Person(
+            # A guest is local to this picture; everyone else joins the roster.
+            workspace_id=workspace.id if body.is_guest else None,
+            supervisor_id=_resolve_supervisor(
+                db, workspace, body.supervisor_id, self_person_id=None
+            ),
+            **{f: getattr(body, f) for f in IDENTITY_FIELDS},
+        )
+        db.add(person)
+    p = Personnel(
+        workspace_id=workspace.id,
+        person=person,
+        **{f: getattr(body, f) for f in PICTURE_FIELDS},
+    )
     p.teams = teams
     db.add(p)
     db.flush()
     notify(background_tasks)
-    return _to_out(p)
+    return _out(db, p)
 
 
 @router.get("/{pid}", response_model=PersonnelOut)
@@ -301,7 +386,7 @@ def get_personnel(
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("viewer")),
 ):
-    return _to_out(_load(db, pid, workspace))
+    return _out(db, _load(db, pid, workspace))
 
 
 @router.patch("/{pid}", response_model=PersonnelOut)
@@ -311,36 +396,53 @@ def patch_personnel(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
-    _=Depends(requires("operator")),
+    current_user: User = Depends(requires("operator")),
 ):
     p = _load(db, pid, workspace)
+    person = p.person
     data = body.model_dump(exclude_unset=True)
-    _validate_refs(
+    team_ids = data.pop("team_ids", None)
+
+    changes = changed_fields(
+        person, {k: v for k, v in data.items() if k in IDENTITY_FIELDS}
+    )
+    if "supervisor_id" in data and data["supervisor_id"] != _supervisor_here(db, p):
+        changes["supervisor_id"] = _resolve_supervisor(
+            db, workspace, data["supervisor_id"], self_person_id=person.id
+        )
+    require_identity_write(person, changes, current_user)
+    validate_unit(db, changes.get("unit_id"))
+    check_commander(db, person, changes)
+
+    picture = {k: v for k, v in data.items() if k in PICTURE_FIELDS}
+    _validate_picture_refs(
         db,
         workspace,
-        work_center_id=data.get("work_center_id", p.work_center_id),
-        unit_id=data.get("unit_id", p.unit_id),
-        supervisor_id=data.get("supervisor_id", p.supervisor_id),
-        assigned_site_id=data.get("assigned_site_id", p.assigned_site_id),
-        self_id=p.id,
+        work_center_id=picture.get("work_center_id", p.work_center_id),
+        assigned_site_id=picture.get("assigned_site_id", p.assigned_site_id),
     )
-    # Re-check the commander slot whenever the person will be a commander and
-    # either the flag or their unit is changing (moving units carries command
-    # into the new unit, which may already have one).
-    if data.get("is_commander", p.is_commander) and (
-        "is_commander" in data or "unit_id" in data
-    ):
-        _ensure_commander_slot(
-            db, data.get("unit_id", p.unit_id), keep_id=p.id
-        )
-    team_ids = data.pop("team_ids", None)
-    for k, v in data.items():
+    if "is_guest" in picture and picture["is_guest"] != p.is_guest:
+        # Guest-ness decides whether the person is on the roster at all.
+        if picture["is_guest"]:
+            if _in_other_pictures(db, p):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "This person is in other workspaces too, so they can't "
+                    "become a guest of this one.",
+                )
+            person.workspace_id = workspace.id
+        else:
+            person.workspace_id = None
+
+    for k, v in changes.items():
+        setattr(person, k, v)
+    for k, v in picture.items():
         setattr(p, k, v)
     if team_ids is not None:
         p.teams = _resolve_teams(db, workspace, team_ids)
     db.flush()
     notify(background_tasks)
-    return _to_out(p)
+    return _out(db, p)
 
 
 @router.delete("/{pid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -351,14 +453,14 @@ def delete_personnel(
     workspace: Workspace = Depends(get_current_workspace),
     _=Depends(requires("admin")),
 ):
+    """Removes the person from this picture. A roster person stays on the
+    roster; a guest, who exists only here, goes entirely."""
     p = _load(db, pid, workspace)
-    # Break any supervisor pointers that reference this person before delete;
-    # ondelete=SET NULL would handle it, but flushing here keeps the ORM state
-    # consistent for the notify payload.
-    db.query(Personnel).filter(Personnel.supervisor_id == p.id).update(
-        {Personnel.supervisor_id: None}
-    )
+    person = p.person
     db.delete(p)
+    if person.workspace_id is not None:
+        db.flush()
+        db.delete(person)
     notify(background_tasks)
 
 
@@ -389,7 +491,7 @@ def checkin_personnel(
     )
     db.flush()
     notify(background_tasks)
-    return _to_out(p)
+    return _out(db, p)
 
 
 @router.post("/checkin-bulk", response_model=list[PersonnelOut])
@@ -430,7 +532,7 @@ def checkin_bulk(
         )
     db.flush()
     notify(background_tasks)
-    return [_to_out(p) for p in people]
+    return _outs(db, people, workspace)
 
 
 @router.post("/reset", response_model=PersonnelResetOut)
@@ -494,6 +596,7 @@ def list_personnel_history(
 
 
 CSV_COLUMNS = {
+    "person_id",
     "first_name",
     "last_name",
     "personnel_type",
@@ -530,7 +633,8 @@ def import_personnel_csv(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "CSV has no header row"
         )
     headers = {(h or "").strip().lower() for h in reader.fieldnames}
-    missing = REQUIRED_CSV_COLUMNS - headers
+    # A sheet of roster ids can stand without names.
+    missing = REQUIRED_CSV_COLUMNS - headers if "person_id" not in headers else set()
     if missing:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -548,6 +652,13 @@ def import_personnel_csv(
         u.name.lower(): u for u in db.query(Unit).all()
     }
 
+    in_picture = {
+        pid
+        for (pid,) in db.query(Personnel.person_id).filter(
+            Personnel.workspace_id == workspace.id
+        )
+    }
+
     imported = 0
     skipped = 0
     created_wc: list[str] = []
@@ -556,9 +667,30 @@ def import_personnel_csv(
 
     for idx, raw in enumerate(reader, start=2):  # header is line 1
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+
+        person: Person | None = None
+        if row.get("person_id"):
+            # A roster id links the person as they are; the row's identity
+            # columns are ignored.
+            try:
+                person = db.get(Person, int(row["person_id"]))
+            except ValueError:
+                person = None
+            if person is None or person.workspace_id is not None:
+                skipped += 1
+                errors.append(f"line {idx}: no roster person {row['person_id']}")
+                continue
+            if person.id in in_picture:
+                skipped += 1
+                errors.append(
+                    f"line {idx}: {person.last_name}, {person.first_name} "
+                    "is already in this workspace"
+                )
+                continue
+
         first_name = row.get("first_name") or ""
         last_name = row.get("last_name") or ""
-        if not first_name or not last_name:
+        if person is None and (not first_name or not last_name):
             skipped += 1
             errors.append(f"line {idx}: missing first_name or last_name")
             continue
@@ -608,7 +740,7 @@ def import_personnel_csv(
 
         unit_name = row.get("unit") or ""
         unit_row: Unit | None = None
-        if unit_name:
+        if unit_name and person is None:
             unit_row = unit_by_name.get(unit_name.lower())
             if unit_row is None and body.create_missing:
                 unit_row = Unit(name=unit_name)
@@ -617,23 +749,30 @@ def import_personnel_csv(
                 unit_by_name[unit_name.lower()] = unit_row
                 created_units.append(unit_name)
 
+        if person is None:
+            person = Person(
+                workspace_id=None,
+                personnel_type=personnel_type,
+                branch=branch,
+                rank=row.get("rank") or None,
+                last_name=last_name,
+                first_name=first_name,
+                cellphone=row.get("cellphone") or None,
+                dsn=row.get("dsn") or None,
+                sipr_number=row.get("sipr_number") or None,
+                email=row.get("email") or None,
+                unit_id=unit_row.id if unit_row else None,
+            )
+            db.add(person)
         p = Personnel(
             workspace_id=workspace.id,
-            personnel_type=personnel_type,
-            branch=branch,
-            rank=row.get("rank") or None,
-            last_name=last_name,
-            first_name=first_name,
-            cellphone=row.get("cellphone") or None,
-            dsn=row.get("dsn") or None,
-            sipr_number=row.get("sipr_number") or None,
-            email=row.get("email") or None,
+            person=person,
             notes=row.get("notes") or None,
             work_center_id=wc_row.id if wc_row else None,
-            unit_id=unit_row.id if unit_row else None,
             room_number=row.get("room_number") or None,
         )
         db.add(p)
+        in_picture.add(person.id)
         imported += 1
 
     db.flush()

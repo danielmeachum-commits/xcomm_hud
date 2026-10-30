@@ -32,6 +32,7 @@ import type {
   Branch,
   Personnel,
   PersonnelType,
+  Role,
   Site,
   Team,
   Unit,
@@ -237,6 +238,8 @@ interface Props {
   teams: Team[]
   sites: Site[]
   supervisors: Personnel[]
+  /** Gates the shared identity fields — see `lockIdentity`. */
+  userRole?: Role
   triggerLabel?: string
   triggerVariant?: "default" | "outline"
 }
@@ -248,11 +251,17 @@ export function PersonnelForm({
   teams,
   sites,
   supervisors,
+  userRole,
   triggerLabel,
   triggerVariant,
 }: Props) {
   const router = useRouter()
   const editing = !!person
+  const isAdmin = userRole === "admin"
+  // Who someone is lives on the global roster and shows in every workspace
+  // they're in, so past contact details only an admin changes it. Guests are
+  // local to this workspace and stay fully editable.
+  const lockIdentity = editing && !person!.is_guest && !isAdmin
   const defaultUnit = units.find((u) => u.is_default) ?? null
   // No "default site" flag exists yet, so new people start at the first site
   // in the workspace list — one less field to touch for single-site setups.
@@ -672,7 +681,13 @@ export function PersonnelForm({
 
             <div className="min-h-[300px] space-y-4">
               {step === 0 && (
-                <>
+                <fieldset disabled={lockIdentity} className="contents">
+                  {lockIdentity && (
+                    <p className="rounded-md border border-input bg-muted/50 p-3 text-xs text-muted-foreground">
+                      Name, rank and unit are shared with every workspace
+                      this person is in — ask an admin to change them.
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="last_name">Last name</Label>
@@ -771,16 +786,19 @@ export function PersonnelForm({
                         </option>
                       ))}
                     </select>
-                    <InlineCreator<Unit>
-                      noun="unit"
-                      endpoint="/api/be/units"
-                      disabled={pending}
-                      onCreated={(u) => {
-                        createdRef.current = true
-                        setExtraUnits((xs) => [...xs, u])
-                        setDraft((d) => ({ ...d, unit_id: u.id.toString() }))
-                      }}
-                    />
+                    {/* Units are global; creating one needs admin. */}
+                    {isAdmin && (
+                      <InlineCreator<Unit>
+                        noun="unit"
+                        endpoint="/api/be/units"
+                        disabled={pending}
+                        onCreated={(u) => {
+                          createdRef.current = true
+                          setExtraUnits((xs) => [...xs, u])
+                          setDraft((d) => ({ ...d, unit_id: u.id.toString() }))
+                        }}
+                      />
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -885,7 +903,7 @@ export function PersonnelForm({
                       </div>
                     )}
                   </div>
-                </>
+                </fieldset>
               )}
 
               {step === 1 && (
@@ -932,7 +950,7 @@ export function PersonnelForm({
                       personnel={supervisors.filter(
                         (s) => !editing || s.id !== person!.id,
                       )}
-                      disabled={pending}
+                      disabled={pending || lockIdentity}
                       placeholder="Search supervisors…"
                     />
                   </div>
@@ -948,7 +966,7 @@ export function PersonnelForm({
                         onChange={(e) =>
                           setDraft({ ...draft, is_commander: e.target.checked })
                         }
-                        disabled={pending}
+                        disabled={pending || lockIdentity}
                       />
                       <CommanderStar size={14} />
                       <span className="font-medium">Commander</span>
@@ -1023,6 +1041,12 @@ export function PersonnelForm({
 
               {step === 2 && (
                 <div className="grid grid-cols-2 gap-3">
+                  {!person?.is_guest && (
+                    <p className="col-span-2 text-xs text-muted-foreground">
+                      Contact details are shared with every workspace this
+                      person is in.
+                    </p>
+                  )}
                   <div className="space-y-1.5">
                     <Label htmlFor="email">Email</Label>
                     <Input

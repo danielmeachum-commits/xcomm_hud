@@ -34,6 +34,7 @@ from models import (
     PackageDef,
     PackageDefUtc,
     PackageInstance,
+    Person,
     Personnel,
     Service,
     ServiceDelivery,
@@ -51,6 +52,7 @@ from models import (
     Workspace,
 )
 from pubsub import notify
+from routers.people import IDENTITY_FIELDS
 from routers.work_centers import visible_to as work_centers_visible_to
 from workspace_slug import unique_workspace_slug
 from schemas import (
@@ -365,28 +367,29 @@ def duplicate_workspace(
         db.flush()
         team_id_map[team.id] = new_team.id
 
-    personnel_id_map: dict[int, int] = {}
     src_personnel = list(
         db.query(Personnel).filter(Personnel.workspace_id == source.id).all()
     )
     for p in src_personnel:
+        person = p.person
+        if person.workspace_id is not None:
+            # A guest exists only in the picture that signed them in; the
+            # copy gets its own. Roster people are shared as they are.
+            person = Person(
+                workspace_id=dest.id,
+                **{f: getattr(p.person, f) for f in IDENTITY_FIELDS},
+            )
+            db.add(person)
         new_p = Personnel(
             workspace_id=dest.id,
-            personnel_type=p.personnel_type,
-            branch=p.branch,
-            rank=p.rank,
-            last_name=p.last_name,
-            first_name=p.first_name,
-            cellphone=p.cellphone,
-            dsn=p.dsn,
-            sipr_number=p.sipr_number,
-            email=p.email,
+            person=person,
+            is_guest=p.is_guest,
+            affiliation=p.affiliation,
+            escort=p.escort,
             notes=p.notes,
-            work_center_id=wc_id_map.get(p.work_center_id)
+            work_center_id=wc_id_map.get(p.work_center_id, p.work_center_id)
             if p.work_center_id
             else None,
-            unit_id=p.unit_id,
-            # supervisor rewired in second pass once every id is known
             assigned_site_id=site_id_map.get(p.assigned_site_id)
             if p.assigned_site_id
             else None,
@@ -403,13 +406,6 @@ def duplicate_workspace(
             db.get(Team, team_id_map[t.id]) for t in p.teams if t.id in team_id_map
         ]
         db.add(new_p)
-        db.flush()
-        personnel_id_map[p.id] = new_p.id
-    for p in src_personnel:
-        if p.supervisor_id and p.supervisor_id in personnel_id_map:
-            db.get(Personnel, personnel_id_map[p.id]).supervisor_id = (
-                personnel_id_map[p.supervisor_id]
-            )
 
     _duplicate_equipment(
         db, source, dest, site_id_map, service_id_map, gateway_id_map, enclave_map
@@ -1150,12 +1146,16 @@ def export_workspace(
     team_name_by_id = {t.id: t.name for t in teams}
     people = (
         db.query(Personnel)
+        .join(Person, Person.id == Personnel.person_id)
         .filter(Personnel.workspace_id == ws.id)
-        .order_by(Personnel.last_name, Personnel.first_name)
+        .order_by(Person.last_name, Person.first_name)
         .all()
     )
-    supervisor_key_by_id = {
-        p.id: f"{p.last_name}, {p.first_name}" for p in people
+    # Keyed by person: the roster's supervisor pointer names a person, and
+    # only supervisors in this picture make it into the bundle.
+    supervisor_key_by_person = {
+        p.person_id: f"{p.person.last_name}, {p.person.first_name}"
+        for p in people
     }
 
     equipment_export = _export_equipment(db, ws, site_name_by_id)
@@ -1192,23 +1192,27 @@ def export_workspace(
         ],
         personnel=[
             ExportedPersonnel(
-                personnel_type=p.personnel_type,
-                branch=p.branch,
-                rank=p.rank,
-                skill_level=p.skill_level,
-                last_name=p.last_name,
-                first_name=p.first_name,
-                cellphone=p.cellphone,
-                dsn=p.dsn,
-                sipr_number=p.sipr_number,
-                email=p.email,
+                personnel_type=p.person.personnel_type,
+                branch=p.person.branch,
+                rank=p.person.rank,
+                skill_level=p.person.skill_level,
+                last_name=p.person.last_name,
+                first_name=p.person.first_name,
+                cellphone=p.person.cellphone,
+                dsn=p.person.dsn,
+                sipr_number=p.person.sipr_number,
+                email=p.person.email,
                 notes=p.notes,
                 work_center_name=wc_name_by_id.get(p.work_center_id)
                 if p.work_center_id
                 else None,
-                unit_name=unit_name_by_id.get(p.unit_id) if p.unit_id else None,
-                supervisor_key=supervisor_key_by_id.get(p.supervisor_id)
-                if p.supervisor_id
+                unit_name=unit_name_by_id.get(p.person.unit_id)
+                if p.person.unit_id
+                else None,
+                supervisor_key=supervisor_key_by_person.get(
+                    p.person.supervisor_id
+                )
+                if p.person.supervisor_id
                 else None,
                 assigned_site_name=site_name_by_id.get(p.assigned_site_id)
                 if p.assigned_site_id
@@ -1545,11 +1549,13 @@ def import_workspace(
         db.flush()
         team_id_by_name[t.name] = new_t.id
 
-    personnel_id_by_key: dict[str, int] = {}
-    people_records: list[tuple[Personnel, str | None]] = []
+    # Bundles carry people by value, and identity is the row id, so an
+    # import adds new people to the roster rather than guessing at matches.
+    person_by_key: dict[str, Person] = {}
+    people_records: list[tuple[Person, str | None]] = []
     for p in payload.personnel:
-        new_p = Personnel(
-            workspace_id=ws.id,
+        person = Person(
+            workspace_id=None,
             personnel_type=p.personnel_type,
             branch=p.branch,
             rank=p.rank,
@@ -1560,11 +1566,16 @@ def import_workspace(
             dsn=p.dsn,
             sipr_number=p.sipr_number,
             email=p.email,
+            unit_id=unit_id_by_name.get(p.unit_name) if p.unit_name else None,
+        )
+        db.add(person)
+        new_p = Personnel(
+            workspace_id=ws.id,
+            person=person,
             notes=p.notes,
             work_center_id=wc_id_by_name.get(p.work_center_name)
             if p.work_center_name
             else None,
-            unit_id=unit_id_by_name.get(p.unit_name) if p.unit_name else None,
             assigned_site_id=site_id_by_name.get(p.assigned_site_name)
             if p.assigned_site_name
             else None,
@@ -1586,11 +1597,11 @@ def import_workspace(
         key = f"{p.last_name}, {p.first_name}"
         # First occurrence wins for supervisor lookup — duplicates are rare
         # in practice.
-        personnel_id_by_key.setdefault(key, new_p.id)
-        people_records.append((new_p, p.supervisor_key))
-    for new_p, sup_key in people_records:
-        if sup_key and sup_key in personnel_id_by_key:
-            new_p.supervisor_id = personnel_id_by_key[sup_key]
+        person_by_key.setdefault(key, person)
+        people_records.append((person, p.supervisor_key))
+    for person, sup_key in people_records:
+        if sup_key and sup_key in person_by_key:
+            person.supervisor_id = person_by_key[sup_key].id
 
     _import_equipment(
         db,

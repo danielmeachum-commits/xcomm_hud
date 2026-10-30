@@ -8,6 +8,7 @@ import { PersonnelCanvas } from "@/components/personnel/personnel-canvas"
 import { PersonnelCsvImport } from "@/components/personnel/personnel-csv-import"
 import { PersonnelForm } from "@/components/personnel/personnel-form"
 import { PersonnelTable } from "@/components/personnel/personnel-table"
+import { RosterAddDialog } from "@/components/personnel/roster-add-dialog"
 import { usePersonnelFilters } from "@/components/personnel/use-personnel-filters"
 import { FilterBar, FilterChips } from "@/components/multi-select-filter"
 import { Input } from "@/components/ui/input"
@@ -26,6 +27,7 @@ import {
   UsersRound,
 } from "lucide-react"
 import type {
+  Person,
   Personnel,
   Role,
   Site,
@@ -36,6 +38,7 @@ import type {
 
 interface Props {
   personnel: Personnel[]
+  roster: Person[]
   workCenters: WorkCenter[]
   units: Unit[]
   teams: Team[]
@@ -53,6 +56,7 @@ type GraphMode = "org" | "teams"
 
 export function PersonnelListClient({
   personnel,
+  roster,
   workCenters,
   units,
   teams,
@@ -168,12 +172,18 @@ export function PersonnelListClient({
           <div className="flex items-center gap-2">
             <EndOfDayButton />
             <PersonnelCsvImport />
+            <RosterAddDialog
+              roster={roster}
+              present={new Set(personnel.map((p) => p.person_id))}
+              units={units}
+            />
             <PersonnelForm
               workCenters={workCenters}
               units={units}
               teams={teams}
               sites={sites}
               supervisors={personnel}
+              userRole={userRole}
             />
           </div>
         )}

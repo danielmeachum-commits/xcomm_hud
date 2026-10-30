@@ -85,7 +85,10 @@ export function PersonnelCsvImport() {
             <code className="rounded bg-muted px-1">last_name</code>. Optional
             columns are matched by header name (case-insensitive):
             personnel_type, branch, rank, cellphone, dsn, sipr_number, email,
-            notes, work_center, unit, room_number.
+            notes, work_center, unit, room_number. Each row adds a new person
+            to the roster; a row with a roster{" "}
+            <code className="rounded bg-muted px-1">person_id</code> adds that
+            person instead, and needs no name.
           </p>
           <div className="space-y-1.5">
             <Label htmlFor="csv">CSV</Label>

@@ -3,6 +3,7 @@ import { apiGet } from "@/lib/api"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { PersonnelListClient } from "@/components/personnel/personnel-list-client"
 import type {
+  Person,
   Personnel,
   Site,
   Team,
@@ -13,8 +14,9 @@ import type {
 export default async function PersonnelListPage() {
   const me = await requireSession()
 
-  const [personnel, workCenters, units, teams, sites] = await Promise.all([
+  const [personnel, roster, workCenters, units, teams, sites] = await Promise.all([
     apiGet<Personnel[]>("/personnel").catch(() => [] as Personnel[]),
+    apiGet<Person[]>("/people").catch(() => [] as Person[]),
     apiGet<WorkCenter[]>("/work-centers").catch(() => [] as WorkCenter[]),
     apiGet<Unit[]>("/units").catch(() => [] as Unit[]),
     apiGet<Team[]>("/teams").catch(() => [] as Team[]),
@@ -26,6 +28,7 @@ export default async function PersonnelListPage() {
       <PageBreadcrumbs items={[{ label: "Personnel" }]} />
       <PersonnelListClient
         personnel={personnel.filter((p) => !p.is_guest)}
+        roster={roster}
         workCenters={workCenters}
         units={units}
         teams={teams}

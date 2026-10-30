@@ -1472,7 +1472,78 @@ class TeamOut(_ORM):
     updated_at: datetime.datetime
 
 
+class PersonIn(BaseModel):
+    """A new person on the global roster (identity only)."""
+
+    personnel_type: PersonnelType = "military"
+    is_commander: bool = False
+    branch: Optional[Branch] = "air_force"
+    rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None  # a person id
+
+
+class PersonPatch(BaseModel):
+    personnel_type: Optional[PersonnelType] = None
+    is_commander: Optional[bool] = None
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+
+
+class PersonWorkspaceRef(BaseModel):
+    """One picture a person is in, and their personnel id there."""
+
+    workspace_id: int
+    slug: str
+    name: str
+    personnel_id: int
+
+
+class PersonOut(_ORM):
+    id: int
+    personnel_type: PersonnelType
+    is_commander: bool = False
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    skill_level: Optional[int] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+    workspaces: list[PersonWorkspaceRef] = Field(default_factory=list)
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
 class PersonnelIn(BaseModel):
+    """Add someone to this picture.
+
+    With `person_id`, links an existing roster person and the identity fields
+    are ignored. Without it, a new person is created from them — on the
+    global roster, or local to this workspace for a guest.
+    """
+
+    person_id: Optional[int] = None
     personnel_type: PersonnelType = "military"
     is_guest: bool = False
     is_commander: bool = False
@@ -1481,8 +1552,8 @@ class PersonnelIn(BaseModel):
     branch: Optional[Branch] = "air_force"
     rank: Optional[str] = None
     skill_level: Optional[SkillLevel] = None
-    last_name: str
-    first_name: str
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
     cellphone: Optional[str] = None
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
@@ -1521,8 +1592,15 @@ class PersonnelPatch(BaseModel):
 
 
 class PersonnelOut(_ORM):
+    """A personnel row flattened with its person's identity.
+
+    `supervisor_id` is the supervisor's personnel id in this picture — null
+    when they're not in it, even if the person has one on the roster.
+    """
+
     id: int
     workspace_id: int
+    person_id: int
     personnel_type: PersonnelType
     is_guest: bool = False
     is_commander: bool = False
@@ -1611,10 +1689,13 @@ class PersonnelCsvImportIn(BaseModel):
     """Bulk import from CSV. `csv_text` is the raw file body as string.
 
     Column mapping (header row required, case-insensitive):
-      first_name, last_name, personnel_type, branch, rank, cellphone, dsn,
-      sipr_number, email, notes, work_center, unit, room_number.
-    Missing optional columns are fine. Work center / unit are matched by
-    name and auto-created if missing.
+      person_id, first_name, last_name, personnel_type, branch, rank,
+      cellphone, dsn, sipr_number, email, notes, work_center, unit,
+      room_number.
+    A row with a roster `person_id` adds that person to the picture and its
+    identity columns are ignored; any other row creates a new roster person
+    and needs first_name and last_name. Missing optional columns are fine.
+    Work center / unit are matched by name and auto-created if missing.
     """
 
     csv_text: str

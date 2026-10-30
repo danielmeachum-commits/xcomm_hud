@@ -1099,42 +1099,44 @@ class Team(Base):
     )
 
 
-class Personnel(Base):
-    """A person assigned to this workspace's roster.
+class Person(Base):
+    """Who someone is, once for the unit — the global roster.
 
-    Covers both uniformed members and DoD civilians. For civilians the
-    `branch` field records the service they support (rank is optional or
-    a GS grade). Contact fields are all optional so a partial CSV import
+    Mirrors the property book: `Person` is identity, `Personnel` is a
+    workspace's entry for them. Covers uniformed members and DoD civilians;
+    for civilians `branch` records the service they support (rank is optional
+    or a GS grade). Contact fields are optional so a partial CSV import
     doesn't reject rows.
+
+    `workspace_id` takes the enclave shape: NULL is the shared roster, a
+    workspace id is a person local to that one picture — guests, who are not
+    on the unit's books. Identity is the row id; nothing matches people by
+    name.
     """
 
-    __tablename__ = "personnel"
+    __tablename__ = "person"
+    __table_args__ = (
+        # Unit commander/OIC — at most one per unit, and only meaningful with
+        # a unit set (the API rejects a unitless commander). Marked with a
+        # gold star wherever the person's name is rendered.
+        Index(
+            "uq_person_unit_commander",
+            "unit_id",
+            unique=True,
+            postgresql_where=text("is_commander AND unit_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
+    workspace_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     personnel_type: Mapped[str] = mapped_column(
         String(16), nullable=False, default="military"
     )
-    # Guests / visitors are flagged so they can be signed in and tracked like
-    # anyone else (on-site list, accountability, check-out) while staying out of
-    # the permanent roster. `affiliation` is their org/unit, `escort` the on-site
-    # point of contact hosting them.
-    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Unit commander/OIC — at most one per unit per workspace (partial unique
-    # index), and only meaningful with a unit set (the API rejects a unitless
-    # commander). Per workspace because units are global but the roster is
-    # not yet: the same commander exists once in every picture they're in.
-    # Marked with a gold star wherever the person's name is rendered.
-    is_commander: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
-    affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     rank: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # AFSC skill level for Air Force enlisted members (1 Helper, 3 Apprentice,
@@ -1147,24 +1149,73 @@ class Personnel(Base):
     dsn: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     sipr_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    work_center_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        ForeignKey("work_center.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     unit_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("unit.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    # Direct supervisor for chain-of-command display. SET NULL on delete so
-    # a departing supervisor doesn't cascade-remove their reports.
+    # Direct supervisor for chain-of-command display — organizational, so it
+    # holds in every picture both people are in. SET NULL on delete so a
+    # departing supervisor doesn't cascade-remove their reports.
     supervisor_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        ForeignKey("personnel.id", ondelete="SET NULL"),
+        ForeignKey("person.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_commander: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class Personnel(Base):
+    """A person's part in one workspace's picture.
+
+    Identity lives on `person` (shared across pictures); this row holds what
+    differs per picture — assignment, live status, shop, teams, guest details,
+    notes. Its id is what location history, teams and site properties point at.
+    """
+
+    __tablename__ = "personnel"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "person_id", name="uq_personnel_workspace_person"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    person_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("person.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Guests / visitors are flagged so they can be signed in and tracked like
+    # anyone else (on-site list, accountability, check-out) while staying out of
+    # the permanent roster — their person is local to this workspace.
+    # `affiliation` is their org/unit, `escort` the on-site point of contact
+    # hosting them.
+    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Per picture, not on Person: a shop can be local to one workspace.
+    work_center_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("work_center.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -1203,6 +1254,8 @@ class Personnel(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
+    # Joined: nearly every reader wants the name.
+    person: Mapped[Person] = relationship(Person, lazy="joined")
     teams: Mapped[list["Team"]] = relationship(
         "Team",
         secondary="personnel_team",

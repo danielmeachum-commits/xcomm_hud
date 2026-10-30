@@ -117,11 +117,12 @@ const TEMPLATE_ITEMS: AdminItem[] = [
   { path: "/admin/enclaves", label: "Enclaves", icon: Layers },
 ]
 
-// Organization-wide personnel structure: the shops and units people are filed
-// under, then the accounts themselves. Work centers keep a workspace path —
-// the page also adds shops local to this picture — while units and users
-// stand on their own.
+// Organization-wide personnel structure: the roster of people, the shops and
+// units they're filed under, then the accounts themselves. Work centers keep a
+// workspace path — the page also adds shops local to this picture — while the
+// rest stand on their own.
 const PERSONNEL_ITEMS: AdminItem[] = [
+  { href: "/admin/roster", label: "Roster", icon: UsersRound },
   { path: "/admin/work-centers", label: "Work centers", icon: Building2 },
   { href: "/admin/units", label: "Units", icon: Flag },
   { href: "/admin/users", label: "Users", icon: Users },

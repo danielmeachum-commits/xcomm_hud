@@ -32,6 +32,7 @@ from routers import (
     folders,
     gateways,
     ingest,
+    people,
     personnel,
     rules,
     scoi_sources,
@@ -162,6 +163,7 @@ app.include_router(scoi_sources.router)
 app.include_router(units.router)
 app.include_router(work_centers.router)
 app.include_router(teams.router)
+app.include_router(people.router)
 app.include_router(personnel.router)
 # Enclaves are referenced by the equipment catalog and by services, so they
 # read first in the docs.

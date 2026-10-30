@@ -602,9 +602,40 @@ export type PersonnelStatus =
   | "sick"
   | "training"
 
+/** Someone on the global roster — identity only. Each workspace they're in
+ *  has its own `Personnel` row for their part in that picture. */
+export interface Person {
+  id: number
+  personnel_type: PersonnelType
+  is_commander: boolean
+  branch: Branch | null
+  rank: string | null
+  skill_level: number | null
+  last_name: string
+  first_name: string
+  cellphone: string | null
+  dsn: string | null
+  sipr_number: string | null
+  email: string | null
+  unit_id: number | null
+  /** A person id, unlike `Personnel.supervisor_id`. */
+  supervisor_id: number | null
+  workspaces: {
+    workspace_id: number
+    slug: string
+    name: string
+    personnel_id: number
+  }[]
+  created_at: string
+  updated_at: string
+}
+
+/** A person's entry in one workspace, flattened with their roster identity
+ *  (name, rank, unit, contact, supervisor, command). */
 export interface Personnel {
   id: number
   workspace_id: number
+  person_id: number
   personnel_type: PersonnelType
   is_guest: boolean
   /** Unit commander/OIC — at most one per unit, officers only, requires a
@@ -624,6 +655,8 @@ export interface Personnel {
   notes: string | null
   work_center_id: number | null
   unit_id: number | null
+  /** Their supervisor's personnel id in this workspace — null when the
+   *  supervisor isn't in it. */
   supervisor_id: number | null
   assigned_site_id: number | null
   room_number: string | null
