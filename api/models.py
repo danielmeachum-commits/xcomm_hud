@@ -439,6 +439,13 @@ class ServiceDelivery(Base):
     )
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Criticality HERE (critical / sustainment / other). Per delivery since
+    # 0068: it is chosen when a package deploys, and one service can be
+    # critical at the main site and sustainment at an extension.
+    # `Service.category` is only the default a new delivery starts from.
+    category: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="other", server_default=text("'other'")
+    )
     # Which PACE tiers this delivery uses. Defaults to all four (full fan-out =
     # previous behavior). Operators clear PACE letters it can't use.
     enabled_pace: Mapped[list[str]] = mapped_column(
@@ -1914,6 +1921,13 @@ class UtcDef(Base):
         cascade="all, delete-orphan",
         order_by="UtcDefManforLine.display_order",
     )
+    # The services it brings up, each pre-wired to the gear that backs it.
+    services: Mapped[list["UtcDefService"]] = relationship(
+        "UtcDefService",
+        back_populates="utc_def",
+        cascade="all, delete-orphan",
+        order_by="UtcDefService.display_order",
+    )
 
 
 class UtcDefLine(Base):
@@ -2034,6 +2048,102 @@ class UtcDefManforLine(Base):
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="manfor")
+
+
+class UtcDefService(Base):
+    """A service this UTC brings up wherever it deploys.
+
+    Names a service TEMPLATE, not a workspace's `service`: UTC definitions are
+    global, and a global row cannot point at one workspace's services. The
+    deploy wizard resolves the template to the workspace's service (finding
+    the existing "NIPR Web" or creating it) and stands up a delivery at the
+    site. The template carries the enclave, so there is no enclave column here.
+
+    What it deliberately does NOT carry is the PACE plan or the criticality.
+    Both are decided per deployment — which tiers a site can use depends on
+    the gateways it actually has — so the wizard asks for them every time.
+    """
+
+    __tablename__ = "utc_def_service"
+    __table_args__ = (
+        UniqueConstraint(
+            "utc_def_id", "service_template_id", name="uq_utc_def_service_template"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_def_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("utc_def.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    service_template_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("service_template.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="services")
+    wires: Mapped[list["UtcDefServiceWire"]] = relationship(
+        "UtcDefServiceWire",
+        back_populates="utc_def_service",
+        cascade="all, delete-orphan",
+        order_by="UtcDefServiceWire.id",
+    )
+
+
+class UtcDefServiceWire(Base):
+    """This line's capability backs that service — the doctrine version of a
+    `capability_service_link`, materialized into one at deploy.
+
+    Points at its line by (equipment type, enclave) and at its capability by
+    kind, not by id. `utc_def_line` and `equipment_type_capability` are both
+    saved delete-and-reinsert, so an id FK would cascade the wiring away on
+    every LOGDET edit. The natural keys are what those tables already keep
+    unique, and what the deploy wizard matches items on.
+
+    `required` and `group_key` mean exactly what they do on
+    `CapabilityServiceLink`: required wires in one group are OR'd, groups are
+    AND'd. Carrying them here is what makes derived status work the moment the
+    UTC is deployed instead of after someone re-ticks every binding by hand.
+    """
+
+    __tablename__ = "utc_def_service_wire"
+    __table_args__ = (
+        Index(
+            "uq_utc_def_service_wire_target",
+            "utc_def_service_id",
+            "equipment_type_id",
+            "enclave_id",
+            "capability_kind",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_def_service_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("utc_def_service.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="CASCADE"), nullable=False
+    )
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
+    capability_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="endpoint")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group_key: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+
+    utc_def_service: Mapped["UtcDefService"] = relationship(
+        "UtcDefService", back_populates="wires"
+    )
 
 
 class PackageDef(Base):

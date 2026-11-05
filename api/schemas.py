@@ -423,6 +423,23 @@ class ExportedUtcDefManforLine(BaseModel):
     display_order: int = 0
 
 
+class ExportedUtcDefServiceWire(BaseModel):
+    """A pre-wired capability, by name like the rest of the envelope."""
+
+    equipment_type_title: str
+    enclave_name: Optional[str] = None
+    capability_kind: CapabilityKind
+    role: CapabilityBindRole = "endpoint"
+    required: bool = False
+    group_key: Optional[str] = None
+
+
+class ExportedUtcDefService(BaseModel):
+    service_template_name: str
+    display_order: int = 0
+    wires: list[ExportedUtcDefServiceWire] = Field(default_factory=list)
+
+
 class ExportedUtcDef(BaseModel):
     code: str
     name: str
@@ -434,6 +451,8 @@ class ExportedUtcDef(BaseModel):
     # Defaulted for the same reason: a bundle written before 0063 has no
     # MANFOR, and importing it must land an empty one rather than fail.
     manfor: list[ExportedUtcDefManforLine] = Field(default_factory=list)
+    # Defaulted: a bundle written before 0068 carries no services.
+    services: list[ExportedUtcDefService] = Field(default_factory=list)
 
 
 class ExportedPackageDefUtc(BaseModel):
@@ -2113,6 +2132,51 @@ class UtcDefManforLineOut(_ORM):
     display_order: int = 0
 
 
+class UtcDefServiceWireIn(BaseModel):
+    """Which line's capability backs the service.
+
+    The line is named by (equipment type, enclave) — see `UtcDefServiceWire`
+    for why not by id.
+    """
+
+    equipment_type_id: int
+    enclave_id: Optional[int] = None
+    capability_kind: CapabilityKind
+    role: CapabilityBindRole = "endpoint"
+    required: bool = False
+    group_key: Optional[str] = Field(default=None, max_length=48)
+
+
+class UtcDefServiceWireOut(_ORM):
+    id: int
+    equipment_type_id: int
+    enclave_id: Optional[int] = None
+    capability_kind: CapabilityKind
+    role: CapabilityBindRole = "endpoint"
+    required: bool = False
+    group_key: Optional[str] = None
+
+
+class UtcDefServiceIn(BaseModel):
+    service_template_id: int
+    wires: list[UtcDefServiceWireIn] = Field(default_factory=list)
+
+
+class UtcDefServiceOut(_ORM):
+    id: int
+    utc_def_id: int
+    service_template_id: int
+    display_order: int = 0
+    wires: list[UtcDefServiceWireOut] = Field(default_factory=list)
+    # Denormalized from the template for display.
+    service_template_name: Optional[str] = None
+    kind: Optional[ServiceKind] = None
+    enclave_id: Optional[int] = None
+    # The template's category — a SUGGESTION for the wizard, never applied
+    # without the operator choosing it.
+    default_category: Optional[ServiceCategory] = None
+
+
 class UtcDefIn(BaseModel):
     code: str
     name: str
@@ -2122,6 +2186,8 @@ class UtcDefIn(BaseModel):
     # and who deploys with it (MANFOR).
     lines: list[UtcDefLineIn] = Field(default_factory=list)
     manfor: list[UtcDefManforLineIn] = Field(default_factory=list)
+    # The services it brings up, pre-wired to the gear above.
+    services: list[UtcDefServiceIn] = Field(default_factory=list)
 
 
 class UtcDefPatch(BaseModel):
@@ -2142,6 +2208,7 @@ class UtcDefOut(_ORM):
     retired_at: Optional[datetime.datetime] = None
     lines: list[UtcDefLineOut] = Field(default_factory=list)
     manfor: list[UtcDefManforLineOut] = Field(default_factory=list)
+    services: list[UtcDefServiceOut] = Field(default_factory=list)
     is_global: bool = False
 
 
@@ -2627,8 +2694,33 @@ class CapabilityWiringIn(BaseModel):
     item_index: int
     capability_kind: CapabilityKind
     service_id: Optional[int] = None
+    # Index into the payload's `services` list: a delivery this deploy stands
+    # up, which has no id yet when the wizard builds the wiring.
+    new_service_index: Optional[int] = None
     gateway_id: Optional[int] = None
     role: CapabilityBindRole = "endpoint"
+    # Carried from the UTC definition's pre-wiring; ignored for gateways.
+    required: bool = False
+    group_key: Optional[str] = Field(default=None, max_length=48)
+
+
+class UtcDeployServiceIn(BaseModel):
+    """A service the UTC brings up at the deploy site.
+
+    Resolved to the workspace's existing service for this template when there
+    is one, and created from the template when not. `enabled_pace` and
+    `category` are REQUIRED, with no defaults: the PACE plan depends on the
+    gateways the site actually has, and criticality is a call about this
+    deployment, so neither may be filled in silently.
+
+    When the site already delivers the service, the delivery is joined as-is
+    and these two are ignored — a second UTC backing NIPR Web must not rewrite
+    a PACE plan someone already set.
+    """
+
+    service_template_id: int
+    enabled_pace: list[GatewayPace] = Field(min_length=1)
+    category: ServiceCategory
 
 
 class UtcDeployItemIn(BaseModel):
@@ -2686,6 +2778,8 @@ class UtcDeployIn(BaseModel):
     notes: Optional[str] = None
     items: list[UtcDeployItemIn] = Field(default_factory=list)
     holdings: list[EquipmentHoldingIn] = Field(default_factory=list)
+    # Declared before `wiring` so a wire can name one by index.
+    services: list[UtcDeployServiceIn] = Field(default_factory=list)
     wiring: list[CapabilityWiringIn] = Field(default_factory=list)
 
 
@@ -2714,6 +2808,10 @@ class UtcDeployOut(BaseModel):
     equipment: list[EquipmentOut] = Field(default_factory=list)
     holdings: list[EquipmentHoldingOut] = Field(default_factory=list)
     bindings_created: int = 0
+    # Deliveries this deploy stood up, and ones it joined because the site
+    # already delivered that service.
+    deliveries_created: int = 0
+    deliveries_joined: int = 0
     # Empty on a deploy that only registered new gear.
     reassigned: list[ReassignedEquipmentOut] = Field(default_factory=list)
 

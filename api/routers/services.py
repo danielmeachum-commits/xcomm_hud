@@ -76,7 +76,7 @@ def _service_out(
         service_template_id=service.service_template_id,
         enclave_id=service.enclave_id,
         kind=service.kind,
-        category=service.category,
+        category=delivery.category,
         reach=delivery.reach,
         icon=service.icon,
         description=service.description,
@@ -262,6 +262,7 @@ def create_service(
         status=body.status,
         notes=body.notes,
         enabled_pace=body.enabled_pace,
+        category=body.category,
         display_order=next_order,
     )
     db.add(delivery)
@@ -308,10 +309,14 @@ def patch_service(
     # point — renaming "NIPR Web" should not rename it at one site only.
     # Anything per-location stays on the delivery.
     identity_fields = {
-        "name", "service_template_id", "enclave_id", "kind", "category",
+        "name", "service_template_id", "enclave_id", "kind",
         "icon", "description",
     }
-    delivery_fields = {"site_id", "reach", "notes", "display_order", "enabled_pace"}
+    # `category` is criticality AT THIS SITE since 0068 — see
+    # ServiceDelivery.category.
+    delivery_fields = {
+        "site_id", "reach", "notes", "display_order", "enabled_pace", "category",
+    }
     for k, v in data.items():
         if k in identity_fields:
             setattr(service, k, v)

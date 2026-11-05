@@ -207,6 +207,8 @@ export interface Service {
    *  parse them to know. */
   enclave_id: number | null
   kind: ServiceKind
+  /** Criticality AT THIS SITE. Per delivery: the same service can be
+   *  critical at the main site and sustainment at an extension. */
   category: ServiceCategory
   reach: ServiceReach
   icon: string | null
@@ -967,6 +969,41 @@ export interface UtcDefManforLine {
   display_order: number
 }
 
+/** One pre-wired capability: this LOGDET line's capability backs the
+ *  service. The line is named by (type, enclave), not by id — lines are saved
+ *  delete-and-reinsert, so an id would not survive an edit. */
+export interface UtcDefServiceWire {
+  id?: number
+  equipment_type_id: number
+  enclave_id: number | null
+  capability_kind: CapabilityKind
+  role: CapabilityBindRole
+  /** Gates the service in derived status; unrequired wires are context. */
+  required: boolean
+  /** Required wires sharing a group are redundant (best-of). */
+  group_key: string | null
+}
+
+/** A service this UTC brings up wherever it deploys. PACE plan and
+ *  criticality are NOT here — the deploy wizard asks for both every time. */
+export interface UtcDefService {
+  id: number
+  utc_def_id: number
+  service_template_id: number
+  display_order: number
+  wires: UtcDefServiceWire[]
+  service_template_name: string | null
+  kind: ServiceKind | null
+  enclave_id: number | null
+  /** The template's category — a suggestion, never applied unasked. */
+  default_category: ServiceCategory | null
+}
+
+export interface UtcDefServiceInput {
+  service_template_id: number
+  wires: Omit<UtcDefServiceWire, "id">[]
+}
+
 export interface UtcDef {
   id: number
   workspace_id: number | null
@@ -980,6 +1017,8 @@ export interface UtcDef {
   lines: UtcDefLine[]
   /** The MANFOR — who deploys with it. */
   manfor: UtcDefManforLine[]
+  /** The services it brings up, pre-wired to the LOGDET above. */
+  services: UtcDefService[]
   is_global: boolean
 }
 
@@ -1317,8 +1356,22 @@ export interface CapabilityWiring {
   item_index: number
   capability_kind: CapabilityKind
   service_id?: number | null
+  /** Index into the payload's `services` — a delivery this deploy stands up,
+   *  which has no id yet. */
+  new_service_index?: number | null
   gateway_id?: number | null
   role?: CapabilityBindRole
+  required?: boolean
+  group_key?: string | null
+}
+
+/** A service the deploy brings up at the site. Joined unchanged when the
+ *  site already delivers it; otherwise created with this PACE plan and
+ *  criticality, which have no defaults on purpose. */
+export interface UtcDeployService {
+  service_template_id: number
+  enabled_pace: GatewayPace[]
+  category: ServiceCategory
 }
 
 export interface UtcDeployPayload {
@@ -1340,6 +1393,7 @@ export interface UtcDeployPayload {
     enclave_id?: number | null
     notes?: string | null
   }[]
+  services?: UtcDeployService[]
   wiring: CapabilityWiring[]
 }
 
@@ -1364,6 +1418,8 @@ export interface UtcDeployResult {
   equipment: Equipment[]
   holdings: EquipmentHolding[]
   bindings_created: number
+  deliveries_created: number
+  deliveries_joined: number
   /** Empty on a deploy that only registered new gear. */
   reassigned: ReassignedEquipment[]
 }

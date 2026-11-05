@@ -289,7 +289,7 @@ def _enrich_service_context(db: Session, ctx: dict) -> dict:
         "site_id": delivery.site_id,
         "site_name": site.name if site else None,
         "service_kind": svc.kind if svc else None,
-        "service_category": svc.category if svc else None,
+        "service_category": delivery.category,
         "service_reach": delivery.reach,
         "enabled_pace": delivery.enabled_pace or [],
     }

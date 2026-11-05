@@ -47,6 +47,8 @@ from models import (
     UtcDef,
     UtcDefLine,
     UtcDefManforLine,
+    UtcDefService,
+    UtcDefServiceWire,
     UtcInstance,
     WorkCenter,
     Workspace,
@@ -77,6 +79,8 @@ from schemas import (
     ExportedUtcDef,
     ExportedUtcDefLine,
     ExportedUtcDefManforLine,
+    ExportedUtcDefService,
+    ExportedUtcDefServiceWire,
     ExportedUtcInstance,
     ExportedWorkCenter,
     ExportedWorkspaceMeta,
@@ -291,6 +295,7 @@ def duplicate_workspace(
                 display_order=delivery.display_order,
                 notes=delivery.notes,
                 enabled_pace=list(delivery.enabled_pace),
+                category=delivery.category,
             )
             db.add(new_delivery)
             db.flush()
@@ -533,6 +538,33 @@ def _duplicate_equipment(
                     display_order=position.display_order,
                 )
             )
+        # Templates are global, so they copy by id; the wire's type and
+        # enclave remap exactly the way the lines above do, which is what
+        # keeps a wire matching its line in the copy.
+        for svc in (
+            db.query(UtcDefService).filter(UtcDefService.utc_def_id == d.id).all()
+        ):
+            new_svc = UtcDefService(
+                utc_def_id=new_d.id,
+                service_template_id=svc.service_template_id,
+                display_order=svc.display_order,
+            )
+            db.add(new_svc)
+            db.flush()
+            for wire in svc.wires:
+                db.add(
+                    UtcDefServiceWire(
+                        utc_def_service_id=new_svc.id,
+                        equipment_type_id=equipment_type_map.get(
+                            wire.equipment_type_id, wire.equipment_type_id
+                        ),
+                        enclave_id=enclave_map.get(wire.enclave_id, wire.enclave_id),
+                        capability_kind=wire.capability_kind,
+                        role=wire.role,
+                        required=wire.required,
+                        group_key=wire.group_key,
+                    )
+                )
 
     package_def_map: dict[int, int] = {}
     for pd in db.query(PackageDef).filter(PackageDef.workspace_id == source.id).all():
@@ -752,6 +784,14 @@ def _export_equipment(
         )
     }
     local_utc_defs = db.query(UtcDef).filter(UtcDef.workspace_id == ws.id).all()
+    # Service templates are global and travel by name, like types do.
+    utc_template_names = {t.id: t.name for t in db.query(ServiceTemplate)}
+    utc_enclave_names = {
+        e.id: e.name
+        for e in db.query(Enclave).filter(
+            (Enclave.workspace_id.is_(None)) | (Enclave.workspace_id == ws.id)
+        )
+    }
     all_utc_codes = {
         d.id: d.code
         for d in db.query(UtcDef).filter(
@@ -940,6 +980,31 @@ def _export_equipment(
                     for position in db.query(UtcDefManforLine)
                     .filter(UtcDefManforLine.utc_def_id == d.id)
                     .order_by(UtcDefManforLine.display_order)
+                ],
+                services=[
+                    ExportedUtcDefService(
+                        service_template_name=utc_template_names[svc.service_template_id],
+                        display_order=svc.display_order,
+                        wires=[
+                            ExportedUtcDefServiceWire(
+                                equipment_type_title=all_type_titles[
+                                    wire.equipment_type_id
+                                ],
+                                enclave_name=utc_enclave_names.get(wire.enclave_id)
+                                if wire.enclave_id
+                                else None,
+                                capability_kind=wire.capability_kind,
+                                role=wire.role,
+                                required=wire.required,
+                                group_key=wire.group_key,
+                            )
+                            for wire in svc.wires
+                            if all_type_titles.get(wire.equipment_type_id)
+                        ],
+                    )
+                    for svc in db.query(UtcDefService)
+                    .filter(UtcDefService.utc_def_id == d.id)
+                    .order_by(UtcDefService.display_order)
                 ],
             )
             for d in local_utc_defs
@@ -1259,7 +1324,7 @@ def export_workspace(
                 else None,
                 name=svc.name,
                 kind=svc.kind,
-                category=svc.category,
+                category=d.category,
                 reach=d.reach,
                 icon=svc.icon,
                 description=svc.description,
@@ -1456,6 +1521,7 @@ def import_workspace(
             display_order=svc.display_order,
             notes=svc.notes,
             enabled_pace=list(svc.enabled_pace),
+            category=svc.category,
         )
         db.add(new_delivery)
         db.flush()
@@ -1740,6 +1806,39 @@ def _import_equipment(
                     display_order=order,
                 )
             )
+        for order, svc in enumerate(d.services):
+            template = (
+                db.query(ServiceTemplate)
+                .filter(ServiceTemplate.name == svc.service_template_name)
+                .first()
+            )
+            # Survivable, like a missing UTC def on a deployed UTC: the
+            # definition keeps its gear and loses the service it would raise.
+            if template is None:
+                continue
+            new_svc = UtcDefService(
+                utc_def_id=new_d.id,
+                service_template_id=template.id,
+                display_order=order,
+            )
+            db.add(new_svc)
+            db.flush()
+            for wire in svc.wires:
+                db.add(
+                    UtcDefServiceWire(
+                        utc_def_service_id=new_svc.id,
+                        equipment_type_id=resolve_type(
+                            wire.equipment_type_title, f"UTC definition '{d.code}'"
+                        ),
+                        enclave_id=enclave_id_by_name.get(wire.enclave_name)
+                        if wire.enclave_name
+                        else None,
+                        capability_kind=wire.capability_kind,
+                        role=wire.role,
+                        required=wire.required,
+                        group_key=wire.group_key,
+                    )
+                )
 
     def resolve_utc_def(code: str) -> int | None:
         if code in utc_def_id_by_code:
