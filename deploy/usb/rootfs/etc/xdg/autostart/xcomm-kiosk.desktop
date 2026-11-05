@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=xcomm
+Comment=Wait for xcomm to start, then open it
+Exec=/usr/libexec/xcomm-hud/kiosk.sh
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true

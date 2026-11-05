@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=xcomm
+Comment=Open xcomm (starts it first if needed)
+Exec=/usr/libexec/xcomm-hud/kiosk.sh
+Icon=network-workgroup
+Categories=Network;

@@ -1,0 +1,16 @@
+[Unit]
+Description=xcomm_hud offline host
+# Only the stick's own account runs the stack. The unit is enabled globally
+# (for every user) in the image, so this is what keeps it to one.
+ConditionUser=xcomm
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/xcomm-hud/boot.sh
+ExecStop=%h/xcomm_hud/deploy/bundle/xcomm stop
+# First boot loads ~2.3 GB of images from the stick.
+TimeoutStartSec=1200
+
+[Install]
+WantedBy=default.target

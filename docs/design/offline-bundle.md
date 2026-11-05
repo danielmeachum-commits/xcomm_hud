@@ -1,8 +1,8 @@
 # Offline bundle — one portable host, browsers everywhere else
 
 Status: **Phase 1 IMPLEMENTED** (2026-11-05) — `deploy/bundle/compose.prod.yml`,
-`deploy/bundle/xcomm`, `GET /healthz`. Phases 2–5 are still planned. See §10
-for what phase 1 actually shipped and how it was verified.
+`deploy/bundle/xcomm`, `GET /healthz`. **USB image (phase 5) written, not yet
+built on hardware** — `deploy/usb/`, see §11. Phases 2–4 are still planned.
 
 ## 1. Goal
 
@@ -273,3 +273,76 @@ Don't run `podman system reset` against a throwaway `--root` to clean up a test
 store: rootless Podman shares its lock file (`/dev/shm/libpod_rootless_lock_<uid>`)
 across stores, and the reset orphaned every running container in the real
 store. Delete the throwaway directory instead.
+
+## 11. USB stick — `deploy/usb/`
+
+A Fedora bootc image with a light desktop. Boot any laptop from the stick and
+it becomes the xcomm host; everything it needs is on the stick, data included.
+
+### Building and writing a stick
+
+```
+deploy/usb/build.sh               # needs internet, sudo, ~30 GB free
+deploy/usb/flash.sh               # list USB disks
+deploy/usb/flash.sh /dev/sdX      # erase the stick and write the image
+```
+
+`build.sh` builds from the branch **as it is on GitHub** (`main` by default,
+`--branch` for another), in a clean temporary worktree, so a stick never
+carries uncommitted edits. It asks for the password of the stick's `xcomm`
+account (sudo and screen unlock; login itself is automatic).
+
+`flash.sh` refuses anything that isn't a whole USB disk, the disk this machine
+runs from, and a stick smaller than the image, and makes you type the device
+back before writing. A 64 GB USB 3 SSD-class stick is recommended.
+
+### What's in the image
+
+| Piece | Where |
+|---|---|
+| Fedora 42 bootc, XFCE, LightDM, Firefox, NetworkManager + panel applet, Wi-Fi firmware (Intel, Realtek, Atheros, Broadcom, MediaTek), avahi, git, podman-compose | `deploy/usb/Containerfile` |
+| Seed: git bundle of the branch + the saved images file | `/usr/share/xcomm-hud/` (from `deploy/usb/seed/`, built by `build.sh`) |
+| Port 80 for rootless Podman | `/usr/lib/sysctl.d/90-xcomm-hud.conf` |
+| Stack at boot, no login needed | user unit `xcomm-hud.service` (enabled globally, `ConditionUser=xcomm`) + linger via tmpfiles |
+| Auto-login into XFCE | `/etc/lightdm/lightdm.conf.d/50-xcomm-autologin.conf`; group `autologin` via sysusers |
+| "Starting xcomm…" then Firefox at `http://localhost` | `/usr/libexec/xcomm-hud/kiosk.sh`, autostarted |
+| Firefox: no first-run pages, telemetry or update checks | `/usr/lib64/firefox/distribution/policies.json` |
+| Hostname `xcomm`, so others can use `http://xcomm.local` | `/etc/hostname`, avahi |
+
+### First boot
+
+`boot.sh` (run by the user unit, as `xcomm`):
+
+1. Clones the checkout from the bundle into `~/xcomm_hud`, renames the
+   branch back to its real name, and points `origin` at GitHub so a later
+   `git pull` on Wi-Fi works.
+2. Copies the images file into `~/xcomm_hud/.bundle/images/` and runs
+   `xcomm init`, which generates secrets and loads the images into the
+   user's rootless store. A few minutes on first boot.
+3. Runs `xcomm start`. Every later boot only does this step.
+
+The seed in `/usr` is read-only and never touched again, so updates (git pull
+and rebuild in `~/xcomm_hud`) survive reboots.
+
+### Deliberate choices
+
+- **Firefox in a normal window, not `--kiosk`:** the panel stays visible,
+  because that's where Wi-Fi is joined for updates. F11 goes full screen.
+- **The seed branch is bundled under a throwaway name.** Branches are shared
+  by every worktree, so moving `main` inside the build worktree could rewind
+  the `main` of the checkout `build.sh` was run from.
+- **Root filesystem 40 GiB:** OS and desktop, the seed, the loaded images,
+  room for an on-host rebuild during an update, and data. The disk image is
+  sparse, so `flash.sh` writes only the used part.
+
+### Not yet verified
+
+- `build.sh` steps 4–5 (rootful build, bootc-image-builder) and `flash.sh`'s
+  actual write need sudo and a stick, so they haven't run yet. The
+  Containerfile itself was test-built rootless (see the PR).
+- Whether bootc-image-builder runs cleanly on a non-Fedora host (this one is
+  Pop!_OS). If it doesn't, build steps 4–5 on a Fedora machine or VM.
+- Whether the root partition grows to fill a larger stick; if not, the space
+  past 40 GiB is unused until we add a grow step.
+- A real boot: auto-login, Wi-Fi firmware on the target laptops, first-boot
+  timing.

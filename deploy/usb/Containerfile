@@ -1,0 +1,62 @@
+# The xcomm USB stick: a bootable Fedora image that runs the offline bundle.
+#
+# Built by deploy/usb/build.sh — not by hand. build.sh fills `seed/` with a
+# git bundle of the branch the stick tracks and the saved images file, builds
+# this, and turns it into a disk image with bootc-image-builder.
+#
+# What the stick does at boot:
+#   1. XFCE logs the `xcomm` user in automatically.
+#   2. xcomm-hud.service (a systemd USER unit, lingering so it doesn't wait
+#      for the login) runs /usr/libexec/xcomm-hud/boot.sh: on first boot it
+#      clones the checkout from the bundle and loads the images, then it runs
+#      `xcomm start` every boot.
+#   3. The desktop shows "Starting xcomm…" until the stack answers, then opens
+#      Firefox at http://localhost.
+# Other machines on the network use http://xcomm.local or the host's IP.
+#
+# Pinned to a Fedora release, not :latest, so a rebuild months from now gets
+# the same OS. Bump deliberately.
+FROM quay.io/fedora/fedora-bootc:42
+
+# Desktop, browser, Wi-Fi, mDNS, and what the bundle itself needs.
+#
+# The firmware packages are the ones that make Wi-Fi work on a laptop picked
+# up at random — Intel, Realtek, Atheros, Broadcom and MediaTek between them
+# cover nearly everything. Without them the stick boots fine and then can't
+# join the commercial Wi-Fi it needs for updates.
+RUN dnf -y install \
+        @xfce-desktop \
+        lightdm lightdm-gtk \
+        firefox \
+        zenity \
+        NetworkManager-wifi network-manager-applet \
+        linux-firmware iwlwifi-mvm-firmware iwlwifi-dvm-firmware \
+        realtek-firmware atheros-firmware brcmfmac-firmware mt7xxx-firmware \
+        avahi nss-mdns \
+        git podman-compose curl python3 \
+    && dnf clean all \
+    # Package-manager leftovers in /var: bootc ships /var only as
+    # initial content, and lint flags logs and caches left there.
+    && rm -rf /var/cache/* /var/log/* /var/lib/dnf/repos
+
+# Includes /etc/hostname (`xcomm`, so others can use http://xcomm.local). It
+# has to be COPYed: during a RUN step podman mounts its own /etc/hostname, so
+# writing it there never reaches the image.
+COPY rootfs/ /
+
+# The git bundle of the branch the stick tracks, and the saved images file.
+# Read-only seed: boot.sh copies them into the user's home on first boot,
+# because /usr is immutable on a bootc system and the checkout must be
+# writable for `git pull`.
+COPY seed/ /usr/share/xcomm-hud/
+
+RUN systemctl set-default graphical.target \
+    && systemctl enable lightdm.service avahi-daemon.service NetworkManager.service \
+    # Start xcomm for whichever user session exists; only `xcomm` lingers.
+    && systemctl --global enable xcomm-hud.service \
+    && if command -v firewall-offline-cmd >/dev/null; then \
+         firewall-offline-cmd --add-service=http --add-service=mdns; \
+       fi \
+    && chmod 0755 /usr/libexec/xcomm-hud/*.sh
+
+RUN bootc container lint
