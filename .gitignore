@@ -24,3 +24,6 @@ webui/.source/
 
 # Domscribe artifacts
 .domscribe
+
+# Offline bundle: secrets, saved images, backups, exports (deploy/bundle/xcomm)
+.bundle/

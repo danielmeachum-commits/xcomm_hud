@@ -1,0 +1,90 @@
+# The offline bundle's stack. Driven by deploy/bundle/xcomm — don't run this
+# file by hand; the CLI supplies the project name, env file and port.
+#
+# Built to run with NO internet:
+#   * Every image is pinned and loaded from .bundle/images/ when the host has
+#     no registry to pull from. Nothing here has a `build:` — `xcomm build`
+#     builds the app images explicitly, so `xcomm start` can never trigger a
+#     build (and with it a download) on an airgapped host.
+#   * The backend network is `internal`: Postgres, MinIO and the API have no
+#     route out at all, so anything that tried to reach the internet at runtime
+#     would fail here the same way it would in the field — not just offline,
+#     but provably offline.
+#   * Only the web UI is published, on port 80 by default. It proxies every API
+#     call server-side, so browsers on other machines never talk to the API.
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16.15-alpine
+    env_file: ${XCOMM_ENV_FILE}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    # A local name for a digest-pinned upstream image — see MINIO_PIN in
+    # deploy/bundle/xcomm. Chainguard's free tier only publishes :latest, so
+    # the pin has to be a digest, and a saved image file can't carry a digest
+    # reference: it would load back nameless and the stack wouldn't start.
+    image: localhost/xcomm-hud-minio:current
+    command: server /data
+    env_file: ${XCOMM_ENV_FILE}
+    volumes:
+      - miniodata:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "MC_HOST_local=http://probe:probe@localhost:9000 mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: localhost/xcomm-hud-api:current
+    env_file: ${XCOMM_ENV_FILE}
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_REGION: us-east-1
+    networks: [backend]
+    depends_on: [postgres, minio]
+    # Migrations run at start and fail fast while Postgres is still coming up;
+    # the restart policy retries until it is ready.
+    # Shell form with no single quotes: podman-compose 1.0.6 wraps CMD-SHELL in
+    # `/bin/sh -c '…'` and mangles exec-form quoting, which left this check a
+    # permanent syntax error.
+    healthcheck:
+      test: ["CMD-SHELL", 'python -c "import urllib.request as u; u.urlopen(\"http://localhost:8000/healthz\", timeout=3)"']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  webui:
+    image: localhost/xcomm-hud-webui:current
+    environment:
+      API_URL: http://api:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    # `backend` to reach the API, `front` because an internal network can't
+    # publish a port.
+    networks: [backend, front]
+    depends_on: [api]
+    ports:
+      - "${XCOMM_WEB_PORT:-80}:3000"
+    restart: unless-stopped
+
+networks:
+  backend:
+    internal: true
+  front: {}
+
+volumes:
+  pgdata: {}
+  miniodata: {}

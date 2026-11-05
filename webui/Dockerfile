@@ -1,6 +1,11 @@
-FROM docker.io/node:20-alpine AS base
+# Node 22, matching .nvmrc.
+FROM docker.io/node:22-alpine AS base
 
 RUN apk add --no-cache libc6-compat
+
+# Next.js phones home with usage telemetry by default; the offline host has
+# nowhere to send it.
+ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app
 

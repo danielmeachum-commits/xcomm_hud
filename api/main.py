@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from auth import get_current_user, hash_password
@@ -179,6 +180,20 @@ app.include_router(equipment_topology.router)
 
 @app.get("/health")
 def health() -> dict[str, bool]:
+    return {"ok": True}
+
+
+@app.get("/healthz")
+def healthz(db: Session = Depends(get_db)) -> dict[str, bool]:
+    """Readiness: the process is up AND the database answers.
+
+    `/health` only proves the process is alive, which is true while Postgres
+    is still starting and every real request would fail. The offline bundle's
+    container health check and `xcomm status` read this one instead, so
+    "healthy" means usable. Raising here is the point — an unreachable
+    database comes back as a 500, which is what marks the container unhealthy.
+    """
+    db.execute(text("SELECT 1"))
     return {"ok": True}
 
 
