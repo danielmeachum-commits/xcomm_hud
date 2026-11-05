@@ -27,3 +27,7 @@ webui/.source/
 
 # Offline bundle: secrets, saved images, backups, exports (deploy/bundle/xcomm)
 .bundle/
+
+# USB image build artifacts (deploy/usb/build.sh)
+deploy/usb/seed/
+deploy/usb/output/
