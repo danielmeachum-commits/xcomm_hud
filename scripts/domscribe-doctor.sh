@@ -20,7 +20,20 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCK="$REPO_ROOT/.domscribe/relay.lock"
+# Domscribe keeps its state (.domscribe/) under the app root named by
+# domscribe.config.json -- webui/ here, not the repo root. The CLI resolves the
+# same config, so `npx domscribe serve|stop` from the repo root targets it too.
+APP_ROOT="$(python3 -c "
+import json,os,sys
+root = sys.argv[1]
+try:
+    rel = json.load(open(os.path.join(root, 'domscribe.config.json'))).get('appRoot', '.')
+except Exception:
+    rel = '.'
+print(os.path.normpath(os.path.join(root, rel)))
+" "$REPO_ROOT")"
+DS_DIR="$APP_ROOT/.domscribe"
+LOCK="$DS_DIR/relay.lock"
 NEXT_CONFIG="$REPO_ROOT/webui/next.config.ts"
 CHUNK_DIR="$REPO_ROOT/webui/.next/dev/static/chunks"
 
@@ -102,6 +115,9 @@ fi
 
 if [[ $RELAY_DRIFT -eq 0 && $CACHE_DRIFT -eq 0 ]]; then
   grn "No drift. The overlay should connect."
+  echo "Still disconnected? Reload the tab: the overlay health-checks the relay once"
+  echo "on page load and never retries, so a tab opened before the relay came up"
+  echo "stays disconnected."
   exit 0
 fi
 
@@ -120,7 +136,7 @@ cd "$REPO_ROOT"
 if [[ $RELAY_DRIFT -eq 1 ]]; then
   echo
   bold "Restarting the relay on port $PINNED"
-  # Annotations live in .domscribe/annotations and survive a restart.
+  # Annotations live in $DS_DIR/annotations and survive a restart.
   if [[ -n "$LOCK_PORT" ]]; then
     npx domscribe stop >/dev/null 2>&1 || true
   fi
@@ -141,12 +157,12 @@ if [[ $CACHE_DRIFT -eq 1 ]]; then
   echo
   if [[ $BUST_CACHE -eq 1 ]]; then
     bold "Clearing stale transform caches"
-    rm -rf "$REPO_ROOT/webui/.next/dev" "$REPO_ROOT/.domscribe/transform-cache"
+    rm -rf "$REPO_ROOT/webui/.next/dev" "$DS_DIR/transform-cache"
     grn "  cleared -- the dev server must be restarted to rebuild them"
   else
     ylw "The built chunks are stale. Re-run with --bust-cache to clear them:"
     echo "    ./scripts/domscribe-doctor.sh --bust-cache"
-    echo "  (deletes webui/.next/dev and .domscribe/transform-cache; stop the dev server first)"
+    echo "  (deletes webui/.next/dev and ${DS_DIR#"$REPO_ROOT"/}/transform-cache; stop the dev server first)"
   fi
 fi
 
