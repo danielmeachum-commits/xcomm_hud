@@ -317,7 +317,7 @@ export function ServiceForm({
 
           <div className={cn(siteFixed ? "" : "grid grid-cols-2 gap-3")}>
             <div className="space-y-1.5">
-              <Label htmlFor="category">Category</Label>
+              <Label htmlFor="category">Criticality at this site</Label>
               <select
                 id="category"
                 value={draft.category}

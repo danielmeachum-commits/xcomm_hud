@@ -115,7 +115,6 @@ SubjectKind = Literal[
     "equipment_link",
     "utc_instance",
     "package_instance",
-    "force_element",
     "equipment_asset",
 ]
 # Runtime view of the Literal above. `SubjectKind` stays the single declaration
@@ -159,7 +158,6 @@ class SubjectKinds:
     EQUIPMENT_LINK: SubjectKind = "equipment_link"
     UTC_INSTANCE: SubjectKind = "utc_instance"
     PACKAGE_INSTANCE: SubjectKind = "package_instance"
-    FORCE_ELEMENT: SubjectKind = "force_element"
     EQUIPMENT_ASSET: SubjectKind = "equipment_asset"
 
 
@@ -210,9 +208,6 @@ GENERAL_SUBJECT_KINDS = {
     SubjectKinds.EQUIPMENT_LINK,
     SubjectKinds.UTC_INSTANCE,
     SubjectKinds.PACKAGE_INSTANCE,
-    # A force element is a saved plan, not a status: saving or deleting one is news on
-    # the general feed, never a validation.
-    SubjectKinds.FORCE_ELEMENT,
     # The property book is structural too: adding or striking a box is news,
     # not a status validation.
     SubjectKinds.EQUIPMENT_ASSET,
@@ -428,6 +423,23 @@ class ExportedUtcDefManforLine(BaseModel):
     display_order: int = 0
 
 
+class ExportedUtcDefServiceWire(BaseModel):
+    """A pre-wired capability, by name like the rest of the envelope."""
+
+    equipment_type_title: str
+    enclave_name: Optional[str] = None
+    capability_kind: CapabilityKind
+    role: CapabilityBindRole = "endpoint"
+    required: bool = False
+    group_key: Optional[str] = None
+
+
+class ExportedUtcDefService(BaseModel):
+    service_template_name: str
+    display_order: int = 0
+    wires: list[ExportedUtcDefServiceWire] = Field(default_factory=list)
+
+
 class ExportedUtcDef(BaseModel):
     code: str
     name: str
@@ -439,6 +451,8 @@ class ExportedUtcDef(BaseModel):
     # Defaulted for the same reason: a bundle written before 0063 has no
     # MANFOR, and importing it must land an empty one rather than fail.
     manfor: list[ExportedUtcDefManforLine] = Field(default_factory=list)
+    # Defaulted: a bundle written before 0068 carries no services.
+    services: list[ExportedUtcDefService] = Field(default_factory=list)
 
 
 class ExportedPackageDefUtc(BaseModel):
@@ -1402,7 +1416,6 @@ class UnitPatch(BaseModel):
 
 class UnitOut(_ORM):
     id: int
-    workspace_id: int
     name: str
     description: Optional[str] = None
     branch: Optional[Branch] = None
@@ -1415,18 +1428,23 @@ class UnitOut(_ORM):
 class WorkCenterIn(BaseModel):
     name: str
     description: Optional[str] = None
+    afsc: Optional[str] = None
 
 
 class WorkCenterPatch(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    afsc: Optional[str] = None
 
 
 class WorkCenterOut(_ORM):
     id: int
-    workspace_id: int
+    # Null for a shared shop; set for one this workspace added for itself.
+    workspace_id: Optional[int] = None
+    is_global: bool = False
     name: str
     description: Optional[str] = None
+    afsc: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -1473,7 +1491,78 @@ class TeamOut(_ORM):
     updated_at: datetime.datetime
 
 
+class PersonIn(BaseModel):
+    """A new person on the global roster (identity only)."""
+
+    personnel_type: PersonnelType = "military"
+    is_commander: bool = False
+    branch: Optional[Branch] = "air_force"
+    rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None  # a person id
+
+
+class PersonPatch(BaseModel):
+    personnel_type: Optional[PersonnelType] = None
+    is_commander: Optional[bool] = None
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+
+
+class PersonWorkspaceRef(BaseModel):
+    """One picture a person is in, and their personnel id there."""
+
+    workspace_id: int
+    slug: str
+    name: str
+    personnel_id: int
+
+
+class PersonOut(_ORM):
+    id: int
+    personnel_type: PersonnelType
+    is_commander: bool = False
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    skill_level: Optional[int] = None
+    last_name: str
+    first_name: str
+    cellphone: Optional[str] = None
+    dsn: Optional[str] = None
+    sipr_number: Optional[str] = None
+    email: Optional[str] = None
+    unit_id: Optional[int] = None
+    supervisor_id: Optional[int] = None
+    workspaces: list[PersonWorkspaceRef] = Field(default_factory=list)
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
 class PersonnelIn(BaseModel):
+    """Add someone to this picture.
+
+    With `person_id`, links an existing roster person and the identity fields
+    are ignored. Without it, a new person is created from them — on the
+    global roster, or local to this workspace for a guest.
+    """
+
+    person_id: Optional[int] = None
     personnel_type: PersonnelType = "military"
     is_guest: bool = False
     is_commander: bool = False
@@ -1482,8 +1571,8 @@ class PersonnelIn(BaseModel):
     branch: Optional[Branch] = "air_force"
     rank: Optional[str] = None
     skill_level: Optional[SkillLevel] = None
-    last_name: str
-    first_name: str
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
     cellphone: Optional[str] = None
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
@@ -1522,8 +1611,15 @@ class PersonnelPatch(BaseModel):
 
 
 class PersonnelOut(_ORM):
+    """A personnel row flattened with its person's identity.
+
+    `supervisor_id` is the supervisor's personnel id in this picture — null
+    when they're not in it, even if the person has one on the roster.
+    """
+
     id: int
     workspace_id: int
+    person_id: int
     personnel_type: PersonnelType
     is_guest: bool = False
     is_commander: bool = False
@@ -1612,16 +1708,36 @@ class PersonnelCsvImportIn(BaseModel):
     """Bulk import from CSV. `csv_text` is the raw file body as string.
 
     Column mapping (header row required, case-insensitive):
-      first_name, last_name, personnel_type, branch, rank, cellphone, dsn,
-      sipr_number, email, notes, work_center, unit, room_number.
-    Missing optional columns are fine. Work center / unit are matched by
-    name and auto-created if missing.
+      person_id, first_name, last_name, personnel_type, branch, rank,
+      cellphone, dsn, sipr_number, email, notes, work_center, unit,
+      room_number.
+    A row with a roster `person_id` adds that person to the picture and its
+    identity columns are ignored; any other row creates a new roster person
+    and needs first_name and last_name. Missing optional columns are fine.
+    Work center / unit are matched by name and auto-created if missing.
     """
 
     csv_text: str
     # If true, missing work centers / units named in the CSV are created.
     # Off means unknown names are ignored (person still imports without them).
     create_missing: bool = True
+
+
+class RosterCsvImportIn(BaseModel):
+    """Bulk add people to the global roster, in no workspace.
+
+    Same identity columns as the personnel import: first_name and last_name
+    required; personnel_type, branch, rank, cellphone, dsn, sipr_number,
+    email, unit optional. Per-picture columns (work_center, room_number,
+    notes) don't apply and are ignored.
+    """
+
+    csv_text: str
+    create_missing: bool = True
+    # Re-importing a sheet is the usual way a roster gets doubled, so rows
+    # naming someone already on it (same last name, first name and rank) are
+    # skipped unless this is turned off — two real people can share all three.
+    skip_existing: bool = True
 
 
 class PersonnelCsvImportOut(BaseModel):
@@ -1783,6 +1899,7 @@ class ExportedUnit(BaseModel):
 class ExportedWorkCenter(BaseModel):
     name: str
     description: Optional[str] = None
+    afsc: Optional[str] = None
 
 
 class ExportedTeam(BaseModel):
@@ -2015,6 +2132,51 @@ class UtcDefManforLineOut(_ORM):
     display_order: int = 0
 
 
+class UtcDefServiceWireIn(BaseModel):
+    """Which line's capability backs the service.
+
+    The line is named by (equipment type, enclave) — see `UtcDefServiceWire`
+    for why not by id.
+    """
+
+    equipment_type_id: int
+    enclave_id: Optional[int] = None
+    capability_kind: CapabilityKind
+    role: CapabilityBindRole = "endpoint"
+    required: bool = False
+    group_key: Optional[str] = Field(default=None, max_length=48)
+
+
+class UtcDefServiceWireOut(_ORM):
+    id: int
+    equipment_type_id: int
+    enclave_id: Optional[int] = None
+    capability_kind: CapabilityKind
+    role: CapabilityBindRole = "endpoint"
+    required: bool = False
+    group_key: Optional[str] = None
+
+
+class UtcDefServiceIn(BaseModel):
+    service_template_id: int
+    wires: list[UtcDefServiceWireIn] = Field(default_factory=list)
+
+
+class UtcDefServiceOut(_ORM):
+    id: int
+    utc_def_id: int
+    service_template_id: int
+    display_order: int = 0
+    wires: list[UtcDefServiceWireOut] = Field(default_factory=list)
+    # Denormalized from the template for display.
+    service_template_name: Optional[str] = None
+    kind: Optional[ServiceKind] = None
+    enclave_id: Optional[int] = None
+    # The template's category — a SUGGESTION for the wizard, never applied
+    # without the operator choosing it.
+    default_category: Optional[ServiceCategory] = None
+
+
 class UtcDefIn(BaseModel):
     code: str
     name: str
@@ -2024,6 +2186,8 @@ class UtcDefIn(BaseModel):
     # and who deploys with it (MANFOR).
     lines: list[UtcDefLineIn] = Field(default_factory=list)
     manfor: list[UtcDefManforLineIn] = Field(default_factory=list)
+    # The services it brings up, pre-wired to the gear above.
+    services: list[UtcDefServiceIn] = Field(default_factory=list)
 
 
 class UtcDefPatch(BaseModel):
@@ -2044,6 +2208,7 @@ class UtcDefOut(_ORM):
     retired_at: Optional[datetime.datetime] = None
     lines: list[UtcDefLineOut] = Field(default_factory=list)
     manfor: list[UtcDefManforLineOut] = Field(default_factory=list)
+    services: list[UtcDefServiceOut] = Field(default_factory=list)
     is_global: bool = False
 
 
@@ -2529,8 +2694,33 @@ class CapabilityWiringIn(BaseModel):
     item_index: int
     capability_kind: CapabilityKind
     service_id: Optional[int] = None
+    # Index into the payload's `services` list: a delivery this deploy stands
+    # up, which has no id yet when the wizard builds the wiring.
+    new_service_index: Optional[int] = None
     gateway_id: Optional[int] = None
     role: CapabilityBindRole = "endpoint"
+    # Carried from the UTC definition's pre-wiring; ignored for gateways.
+    required: bool = False
+    group_key: Optional[str] = Field(default=None, max_length=48)
+
+
+class UtcDeployServiceIn(BaseModel):
+    """A service the UTC brings up at the deploy site.
+
+    Resolved to the workspace's existing service for this template when there
+    is one, and created from the template when not. `enabled_pace` and
+    `category` are REQUIRED, with no defaults: the PACE plan depends on the
+    gateways the site actually has, and criticality is a call about this
+    deployment, so neither may be filled in silently.
+
+    When the site already delivers the service, the delivery is joined as-is
+    and these two are ignored — a second UTC backing NIPR Web must not rewrite
+    a PACE plan someone already set.
+    """
+
+    service_template_id: int
+    enabled_pace: list[GatewayPace] = Field(min_length=1)
+    category: ServiceCategory
 
 
 class UtcDeployItemIn(BaseModel):
@@ -2588,6 +2778,8 @@ class UtcDeployIn(BaseModel):
     notes: Optional[str] = None
     items: list[UtcDeployItemIn] = Field(default_factory=list)
     holdings: list[EquipmentHoldingIn] = Field(default_factory=list)
+    # Declared before `wiring` so a wire can name one by index.
+    services: list[UtcDeployServiceIn] = Field(default_factory=list)
     wiring: list[CapabilityWiringIn] = Field(default_factory=list)
 
 
@@ -2616,6 +2808,10 @@ class UtcDeployOut(BaseModel):
     equipment: list[EquipmentOut] = Field(default_factory=list)
     holdings: list[EquipmentHoldingOut] = Field(default_factory=list)
     bindings_created: int = 0
+    # Deliveries this deploy stood up, and ones it joined because the site
+    # already delivered that service.
+    deliveries_created: int = 0
+    deliveries_joined: int = 0
     # Empty on a deploy that only registered new gear.
     reassigned: list[ReassignedEquipmentOut] = Field(default_factory=list)
 
@@ -2687,141 +2883,6 @@ class AssetImportOut(BaseModel):
     created: list[EquipmentAssetOut] = Field(default_factory=list)
     linked: int = 0
     skipped: list[str] = Field(default_factory=list)
-
-
-# ===================== Equipment: force elements =====================
-
-
-class ForceElementItemIn(BaseModel):
-    asset_id: int
-    display_order: int = 0
-
-
-class ForceElementItemOut(_ORM):
-    """A pinned asset, fattened with everything the picker needs to be read
-    without a second call.
-
-    `commitments` is the disclosure that makes the shared pool workable: the
-    operator sees which pictures already have this box in play before choosing
-    it. An empty list means nobody is using it. Note this never blocks
-    anything — two exercises listing the same radio is expected.
-    """
-
-    id: int
-    force_element_utc_id: int
-    asset_id: int
-    display_order: int = 0
-    equipment_code: Optional[str] = None
-    serial_number: Optional[str] = None
-    equipment_type_id: Optional[int] = None
-    type_title: Optional[str] = None
-    type_short_name: Optional[str] = None
-    capability_kinds: list[str] = Field(default_factory=list)
-    retired: bool = False
-    commitments: list[AssetCommitment] = Field(default_factory=list)
-    # Whether THIS workspace already has a row materialized from the asset —
-    # the case where deploying reuses it rather than creating another.
-    in_this_workspace: bool = False
-
-
-class ForceElementBulkIn(BaseModel):
-    equipment_type_id: int
-    quantity: int = 1
-    enclave_id: Optional[int] = None
-
-
-class ForceElementBulkOut(_ORM):
-    id: int
-    force_element_utc_id: int
-    equipment_type_id: int
-    quantity: int
-    enclave_id: Optional[int] = None
-    type_title: Optional[str] = None
-    type_short_name: Optional[str] = None
-
-
-class ForceElementUtcIn(BaseModel):
-    utc_def_id: Optional[int] = None
-    name: str
-    role_hint: UtcRoleHint = "either"
-    notes: Optional[str] = None
-    display_order: int = 0
-    items: list[ForceElementItemIn] = Field(default_factory=list)
-    bulk: list[ForceElementBulkIn] = Field(default_factory=list)
-
-
-class ForceElementUtcOut(_ORM):
-    id: int
-    force_element_id: int
-    utc_def_id: Optional[int] = None
-    name: str
-    role_hint: UtcRoleHint = "either"
-    notes: Optional[str] = None
-    display_order: int = 0
-    utc_def_code: Optional[str] = None
-    utc_def_name: Optional[str] = None
-    items: list[ForceElementItemOut] = Field(default_factory=list)
-    bulk: list[ForceElementBulkOut] = Field(default_factory=list)
-
-
-class ForceElementIn(BaseModel):
-    name: str
-    description: Optional[str] = None
-    package_def_id: Optional[int] = None
-    utcs: list[ForceElementUtcIn] = Field(default_factory=list)
-
-
-class ForceElementPatch(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    package_def_id: Optional[int] = None
-    retired: Optional[bool] = None
-
-
-class ForceElementOut(_ORM):
-    id: int
-    workspace_id: Optional[int] = None
-    is_global: bool = False
-    package_def_id: Optional[int] = None
-    name: str
-    description: Optional[str] = None
-    retired_at: Optional[datetime.datetime] = None
-    package_def_code: Optional[str] = None
-    utcs: list[ForceElementUtcOut] = Field(default_factory=list)
-    # Rolled up for the list view, which shows force elements as cards and
-    # would otherwise need every one's full tree to print "9 items".
-    item_count: int = 0
-    bulk_count: int = 0
-    # How many pinned assets some workspace already has in play. Context, not
-    # a shortage: the gear is still deployable here.
-    committed_count: int = 0
-    # Pins whose asset has been struck from the property book.
-    retired_count: int = 0
-
-
-class KitCaptureIn(BaseModel):
-    """Save a live package as a reusable force element.
-
-    The path that matters: configure the FCP once by hand — unavoidable the
-    first time — then keep it. Authoring one from an empty form uses the same
-    tables but nobody will do it.
-    """
-
-    package_instance_id: int
-    name: str
-    description: Optional[str] = None
-    # Carry the package's own definition across unless told otherwise.
-    package_def_id: Optional[int] = None
-
-
-class KitRefreshIn(BaseModel):
-    """Re-pin an existing force element from a live package, replacing its contents.
-
-    Cheaper than editing pin-by-pin after the real-world set changes — a radio
-    goes to depot and a replacement arrives, and the force element should follow.
-    """
-
-    package_instance_id: int
 
 
 class TopologySiteNode(BaseModel):

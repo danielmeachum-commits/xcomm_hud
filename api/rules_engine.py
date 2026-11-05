@@ -289,7 +289,7 @@ def _enrich_service_context(db: Session, ctx: dict) -> dict:
         "site_id": delivery.site_id,
         "site_name": site.name if site else None,
         "service_kind": svc.kind if svc else None,
-        "service_category": svc.category if svc else None,
+        "service_category": delivery.category,
         "service_reach": delivery.reach,
         "enabled_pace": delivery.enabled_pace or [],
     }
@@ -326,14 +326,14 @@ def _enrich_personnel_context(db: Session, ctx: dict) -> dict:
     if p is None:
         return {}
     wc = db.get(WorkCenter, p.work_center_id) if p.work_center_id else None
-    unit = db.get(Unit, p.unit_id) if p.unit_id else None
+    unit = db.get(Unit, p.person.unit_id) if p.person.unit_id else None
     teams = [t.name for t in p.teams]
     return {
         "work_center": wc.name if wc else None,
         "unit": unit.name if unit else None,
         "teams": teams,
-        "rank": p.rank,
-        "personnel_type": p.personnel_type,
+        "rank": p.person.rank,
+        "personnel_type": p.person.personnel_type,
         "is_guest": p.is_guest,
         "assigned_site_id": p.assigned_site_id,
     }

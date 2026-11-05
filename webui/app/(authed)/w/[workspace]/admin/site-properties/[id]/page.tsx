@@ -34,7 +34,7 @@ export default async function SitePropertyTemplateDetailPage({
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
         items={[
-          { label: "Admin" },
+          { label: "Workspace Admin" },
           {
             label: "Site properties",
             href: `/w/${workspace}/admin/site-properties`,

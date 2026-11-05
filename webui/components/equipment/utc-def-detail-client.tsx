@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { CodeBadge } from "@/components/equipment/code-badge"
 import { ManageBar } from "@/components/equipment/manage-bar"
 import { UtcManforSection } from "@/components/equipment/utc-manfor-section"
+import { UtcServicesSection } from "@/components/equipment/utc-services-section"
 import {
   ColumnHeading,
   UtcDefContents,
@@ -84,6 +85,7 @@ import type {
   EquipmentType,
   Role,
   AssetCategory,
+  ServiceTemplate,
   UtcDef,
   WorkCenter,
 } from "@/lib/types"
@@ -286,6 +288,7 @@ export function UtcDefDetailClient({
   types,
   enclaves,
   workCenters,
+  templates,
   role,
 }: {
   def: UtcDef
@@ -293,6 +296,8 @@ export function UtcDefDetailClient({
   enclaves: Enclave[]
   /** This workspace's shops, for the MANFOR picker. */
   workCenters: WorkCenter[]
+  /** The service catalog, for the services this UTC brings up. */
+  templates: ServiceTemplate[]
   role: Role
 }) {
   const router = useRouter()
@@ -760,6 +765,15 @@ export function UtcDefDetailClient({
         )}
       </section>
 
+      {/* After the LOGDET, because every service here is wired to gear on it. */}
+      <UtcServicesSection
+        def={def}
+        types={types}
+        enclaves={enclaves}
+        templates={templates}
+        editable={editable}
+      />
+
       {!editable && (
         <p className="text-xs text-muted-foreground">
           {def.is_global
@@ -901,16 +915,23 @@ function LineCard({
         <GripVertical className="size-3.5" />
       </button>
 
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">
-          {type?.title ?? "Unknown equipment type"}
-        </span>
-        {type?.short_name && (
-          <span className="block truncate text-[11px] text-muted-foreground">
-            {type.short_name}
+      {/* The card is narrow, so long titles truncate — the tooltip shows
+          the full name. */}
+      <Tooltip>
+        <TooltipTrigger render={<span className="min-w-0 flex-1" />}>
+          <span className="block truncate font-medium">
+            {type?.title ?? "Unknown equipment type"}
           </span>
-        )}
-      </span>
+          {type?.short_name && (
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {type.short_name}
+            </span>
+          )}
+        </TooltipTrigger>
+        <TooltipContent>
+          {type?.title ?? "Unknown equipment type"}
+        </TooltipContent>
+      </Tooltip>
 
       {/* The count and the stepper occupy the same slot — one is always
           hidden, so the card never changes width on hover. */}

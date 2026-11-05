@@ -34,6 +34,7 @@ from models import (
     PackageDef,
     PackageDefUtc,
     PackageInstance,
+    Person,
     Personnel,
     Service,
     ServiceDelivery,
@@ -46,11 +47,15 @@ from models import (
     UtcDef,
     UtcDefLine,
     UtcDefManforLine,
+    UtcDefService,
+    UtcDefServiceWire,
     UtcInstance,
     WorkCenter,
     Workspace,
 )
 from pubsub import notify
+from routers.people import IDENTITY_FIELDS
+from routers.work_centers import visible_to as work_centers_visible_to
 from workspace_slug import unique_workspace_slug
 from schemas import (
     ExportedAnnotation,
@@ -74,6 +79,8 @@ from schemas import (
     ExportedUtcDef,
     ExportedUtcDefLine,
     ExportedUtcDefManforLine,
+    ExportedUtcDefService,
+    ExportedUtcDefServiceWire,
     ExportedUtcInstance,
     ExportedWorkCenter,
     ExportedWorkspaceMeta,
@@ -288,6 +295,7 @@ def duplicate_workspace(
                 display_order=delivery.display_order,
                 notes=delivery.notes,
                 enabled_pace=list(delivery.enabled_pace),
+                category=delivery.category,
             )
             db.add(new_delivery)
             db.flush()
@@ -337,31 +345,16 @@ def duplicate_workspace(
             )
         )
 
-    # --- Personnel side: units → work_centers → teams → personnel.
-    # Units first because personnel.unit_id depends on them, and units may
-    # reference each other via parent_unit_id. We do two passes: create rows
-    # then rewire parents once the id map exists.
-    unit_id_map: dict[int, int] = {}
-    src_units = list(
-        db.query(Unit).filter(Unit.workspace_id == source.id).all()
-    )
-    for u in src_units:
-        new_u = Unit(
-            workspace_id=dest.id, name=u.name, description=u.description
-        )
-        db.add(new_u)
-        db.flush()
-        unit_id_map[u.id] = new_u.id
-    for u in src_units:
-        if u.parent_unit_id and u.parent_unit_id in unit_id_map:
-            db.get(Unit, unit_id_map[u.id]).parent_unit_id = unit_id_map[
-                u.parent_unit_id
-            ]
-
+    # --- Personnel side: work_centers → teams → personnel.
+    # Units are global, so the clone's people point at the same rows. Shared
+    # work centers likewise; only the source's local shops are copied.
     wc_id_map: dict[int, int] = {}
     for wc in db.query(WorkCenter).filter(WorkCenter.workspace_id == source.id).all():
         new_wc = WorkCenter(
-            workspace_id=dest.id, name=wc.name, description=wc.description
+            workspace_id=dest.id,
+            name=wc.name,
+            description=wc.description,
+            afsc=wc.afsc,
         )
         db.add(new_wc)
         db.flush()
@@ -379,28 +372,29 @@ def duplicate_workspace(
         db.flush()
         team_id_map[team.id] = new_team.id
 
-    personnel_id_map: dict[int, int] = {}
     src_personnel = list(
         db.query(Personnel).filter(Personnel.workspace_id == source.id).all()
     )
     for p in src_personnel:
+        person = p.person
+        if person.workspace_id is not None:
+            # A guest exists only in the picture that signed them in; the
+            # copy gets its own. Roster people are shared as they are.
+            person = Person(
+                workspace_id=dest.id,
+                **{f: getattr(p.person, f) for f in IDENTITY_FIELDS},
+            )
+            db.add(person)
         new_p = Personnel(
             workspace_id=dest.id,
-            personnel_type=p.personnel_type,
-            branch=p.branch,
-            rank=p.rank,
-            last_name=p.last_name,
-            first_name=p.first_name,
-            cellphone=p.cellphone,
-            dsn=p.dsn,
-            sipr_number=p.sipr_number,
-            email=p.email,
+            person=person,
+            is_guest=p.is_guest,
+            affiliation=p.affiliation,
+            escort=p.escort,
             notes=p.notes,
-            work_center_id=wc_id_map.get(p.work_center_id)
+            work_center_id=wc_id_map.get(p.work_center_id, p.work_center_id)
             if p.work_center_id
             else None,
-            unit_id=unit_id_map.get(p.unit_id) if p.unit_id else None,
-            # supervisor rewired in second pass once every id is known
             assigned_site_id=site_id_map.get(p.assigned_site_id)
             if p.assigned_site_id
             else None,
@@ -417,13 +411,6 @@ def duplicate_workspace(
             db.get(Team, team_id_map[t.id]) for t in p.teams if t.id in team_id_map
         ]
         db.add(new_p)
-        db.flush()
-        personnel_id_map[p.id] = new_p.id
-    for p in src_personnel:
-        if p.supervisor_id and p.supervisor_id in personnel_id_map:
-            db.get(Personnel, personnel_id_map[p.id]).supervisor_id = (
-                personnel_id_map[p.supervisor_id]
-            )
 
     _duplicate_equipment(
         db, source, dest, site_id_map, service_id_map, gateway_id_map, enclave_map
@@ -551,6 +538,33 @@ def _duplicate_equipment(
                     display_order=position.display_order,
                 )
             )
+        # Templates are global, so they copy by id; the wire's type and
+        # enclave remap exactly the way the lines above do, which is what
+        # keeps a wire matching its line in the copy.
+        for svc in (
+            db.query(UtcDefService).filter(UtcDefService.utc_def_id == d.id).all()
+        ):
+            new_svc = UtcDefService(
+                utc_def_id=new_d.id,
+                service_template_id=svc.service_template_id,
+                display_order=svc.display_order,
+            )
+            db.add(new_svc)
+            db.flush()
+            for wire in svc.wires:
+                db.add(
+                    UtcDefServiceWire(
+                        utc_def_service_id=new_svc.id,
+                        equipment_type_id=equipment_type_map.get(
+                            wire.equipment_type_id, wire.equipment_type_id
+                        ),
+                        enclave_id=enclave_map.get(wire.enclave_id, wire.enclave_id),
+                        capability_kind=wire.capability_kind,
+                        role=wire.role,
+                        required=wire.required,
+                        group_key=wire.group_key,
+                    )
+                )
 
     package_def_map: dict[int, int] = {}
     for pd in db.query(PackageDef).filter(PackageDef.workspace_id == source.id).all():
@@ -770,6 +784,14 @@ def _export_equipment(
         )
     }
     local_utc_defs = db.query(UtcDef).filter(UtcDef.workspace_id == ws.id).all()
+    # Service templates are global and travel by name, like types do.
+    utc_template_names = {t.id: t.name for t in db.query(ServiceTemplate)}
+    utc_enclave_names = {
+        e.id: e.name
+        for e in db.query(Enclave).filter(
+            (Enclave.workspace_id.is_(None)) | (Enclave.workspace_id == ws.id)
+        )
+    }
     all_utc_codes = {
         d.id: d.code
         for d in db.query(UtcDef).filter(
@@ -959,6 +981,31 @@ def _export_equipment(
                     .filter(UtcDefManforLine.utc_def_id == d.id)
                     .order_by(UtcDefManforLine.display_order)
                 ],
+                services=[
+                    ExportedUtcDefService(
+                        service_template_name=utc_template_names[svc.service_template_id],
+                        display_order=svc.display_order,
+                        wires=[
+                            ExportedUtcDefServiceWire(
+                                equipment_type_title=all_type_titles[
+                                    wire.equipment_type_id
+                                ],
+                                enclave_name=utc_enclave_names.get(wire.enclave_id)
+                                if wire.enclave_id
+                                else None,
+                                capability_kind=wire.capability_kind,
+                                role=wire.role,
+                                required=wire.required,
+                                group_key=wire.group_key,
+                            )
+                            for wire in svc.wires
+                            if all_type_titles.get(wire.equipment_type_id)
+                        ],
+                    )
+                    for svc in db.query(UtcDefService)
+                    .filter(UtcDefService.utc_def_id == d.id)
+                    .order_by(UtcDefService.display_order)
+                ],
             )
             for d in local_utc_defs
         ],
@@ -1144,13 +1191,13 @@ def export_workspace(
         ):
             template_name_by_id[tpl.id] = tpl.name
 
-    units = (
-        db.query(Unit).filter(Unit.workspace_id == ws.id).order_by(Unit.name).all()
-    )
+    # Units and shared shops are global, but they travel with the bundle by
+    # name all the same: the instance it lands on may not have them.
+    units = db.query(Unit).order_by(Unit.name).all()
     unit_name_by_id = {u.id: u.name for u in units}
     work_centers = (
         db.query(WorkCenter)
-        .filter(WorkCenter.workspace_id == ws.id)
+        .filter(work_centers_visible_to(ws))
         .order_by(WorkCenter.name)
         .all()
     )
@@ -1164,12 +1211,16 @@ def export_workspace(
     team_name_by_id = {t.id: t.name for t in teams}
     people = (
         db.query(Personnel)
+        .join(Person, Person.id == Personnel.person_id)
         .filter(Personnel.workspace_id == ws.id)
-        .order_by(Personnel.last_name, Personnel.first_name)
+        .order_by(Person.last_name, Person.first_name)
         .all()
     )
-    supervisor_key_by_id = {
-        p.id: f"{p.last_name}, {p.first_name}" for p in people
+    # Keyed by person: the roster's supervisor pointer names a person, and
+    # only supervisors in this picture make it into the bundle.
+    supervisor_key_by_person = {
+        p.person_id: f"{p.person.last_name}, {p.person.first_name}"
+        for p in people
     }
 
     equipment_export = _export_equipment(db, ws, site_name_by_id)
@@ -1193,7 +1244,9 @@ def export_workspace(
             for u in units
         ],
         work_centers=[
-            ExportedWorkCenter(name=wc.name, description=wc.description)
+            ExportedWorkCenter(
+                name=wc.name, description=wc.description, afsc=wc.afsc
+            )
             for wc in work_centers
         ],
         teams=[
@@ -1204,23 +1257,27 @@ def export_workspace(
         ],
         personnel=[
             ExportedPersonnel(
-                personnel_type=p.personnel_type,
-                branch=p.branch,
-                rank=p.rank,
-                skill_level=p.skill_level,
-                last_name=p.last_name,
-                first_name=p.first_name,
-                cellphone=p.cellphone,
-                dsn=p.dsn,
-                sipr_number=p.sipr_number,
-                email=p.email,
+                personnel_type=p.person.personnel_type,
+                branch=p.person.branch,
+                rank=p.person.rank,
+                skill_level=p.person.skill_level,
+                last_name=p.person.last_name,
+                first_name=p.person.first_name,
+                cellphone=p.person.cellphone,
+                dsn=p.person.dsn,
+                sipr_number=p.person.sipr_number,
+                email=p.person.email,
                 notes=p.notes,
                 work_center_name=wc_name_by_id.get(p.work_center_id)
                 if p.work_center_id
                 else None,
-                unit_name=unit_name_by_id.get(p.unit_id) if p.unit_id else None,
-                supervisor_key=supervisor_key_by_id.get(p.supervisor_id)
-                if p.supervisor_id
+                unit_name=unit_name_by_id.get(p.person.unit_id)
+                if p.person.unit_id
+                else None,
+                supervisor_key=supervisor_key_by_person.get(
+                    p.person.supervisor_id
+                )
+                if p.person.supervisor_id
                 else None,
                 assigned_site_name=site_name_by_id.get(p.assigned_site_id)
                 if p.assigned_site_id
@@ -1267,7 +1324,7 @@ def export_workspace(
                 else None,
                 name=svc.name,
                 kind=svc.kind,
-                category=svc.category,
+                category=d.category,
                 reach=d.reach,
                 icon=svc.icon,
                 description=svc.description,
@@ -1464,6 +1521,7 @@ def import_workspace(
             display_order=svc.display_order,
             notes=svc.notes,
             enabled_pace=list(svc.enabled_pace),
+            category=svc.category,
         )
         db.add(new_delivery)
         db.flush()
@@ -1505,24 +1563,41 @@ def import_workspace(
     # --- Personnel side ---
     # Units first (self-referential parent), then work centers, teams,
     # personnel. Rewire supervisor after all people exist.
-    unit_id_by_name: dict[str, int] = {}
+    #
+    # Units are global, so a bundled unit that already exists here is reused
+    # as it stands — only the ones this instance lacks are created, and only
+    # those get their parent wired from the bundle.
+    existing_units = {u.name: u.id for u in db.query(Unit).all()}
+    unit_id_by_name: dict[str, int] = dict(existing_units)
     for u in payload.units:
-        new_u = Unit(
-            workspace_id=ws.id, name=u.name, description=u.description
-        )
+        if u.name in unit_id_by_name:
+            continue
+        new_u = Unit(name=u.name, description=u.description)
         db.add(new_u)
         db.flush()
         unit_id_by_name[u.name] = new_u.id
     for u in payload.units:
+        if u.name in existing_units:
+            continue
         if u.parent_unit_name and u.parent_unit_name in unit_id_by_name:
             db.get(Unit, unit_id_by_name[u.name]).parent_unit_id = (
                 unit_id_by_name[u.parent_unit_name]
             )
 
-    wc_id_by_name: dict[str, int] = {}
+    # A bundled shop matching a shared one is the shared one; anything else
+    # becomes a local shop of the new workspace.
+    wc_id_by_name: dict[str, int] = {
+        wc.name: wc.id
+        for wc in db.query(WorkCenter).filter(WorkCenter.workspace_id.is_(None))
+    }
     for wc in payload.work_centers:
+        if wc.name in wc_id_by_name:
+            continue
         new_wc = WorkCenter(
-            workspace_id=ws.id, name=wc.name, description=wc.description
+            workspace_id=ws.id,
+            name=wc.name,
+            description=wc.description,
+            afsc=wc.afsc,
         )
         db.add(new_wc)
         db.flush()
@@ -1540,11 +1615,13 @@ def import_workspace(
         db.flush()
         team_id_by_name[t.name] = new_t.id
 
-    personnel_id_by_key: dict[str, int] = {}
-    people_records: list[tuple[Personnel, str | None]] = []
+    # Bundles carry people by value, and identity is the row id, so an
+    # import adds new people to the roster rather than guessing at matches.
+    person_by_key: dict[str, Person] = {}
+    people_records: list[tuple[Person, str | None]] = []
     for p in payload.personnel:
-        new_p = Personnel(
-            workspace_id=ws.id,
+        person = Person(
+            workspace_id=None,
             personnel_type=p.personnel_type,
             branch=p.branch,
             rank=p.rank,
@@ -1555,11 +1632,16 @@ def import_workspace(
             dsn=p.dsn,
             sipr_number=p.sipr_number,
             email=p.email,
+            unit_id=unit_id_by_name.get(p.unit_name) if p.unit_name else None,
+        )
+        db.add(person)
+        new_p = Personnel(
+            workspace_id=ws.id,
+            person=person,
             notes=p.notes,
             work_center_id=wc_id_by_name.get(p.work_center_name)
             if p.work_center_name
             else None,
-            unit_id=unit_id_by_name.get(p.unit_name) if p.unit_name else None,
             assigned_site_id=site_id_by_name.get(p.assigned_site_name)
             if p.assigned_site_name
             else None,
@@ -1581,11 +1663,11 @@ def import_workspace(
         key = f"{p.last_name}, {p.first_name}"
         # First occurrence wins for supervisor lookup — duplicates are rare
         # in practice.
-        personnel_id_by_key.setdefault(key, new_p.id)
-        people_records.append((new_p, p.supervisor_key))
-    for new_p, sup_key in people_records:
-        if sup_key and sup_key in personnel_id_by_key:
-            new_p.supervisor_id = personnel_id_by_key[sup_key]
+        person_by_key.setdefault(key, person)
+        people_records.append((person, p.supervisor_key))
+    for person, sup_key in people_records:
+        if sup_key and sup_key in person_by_key:
+            person.supervisor_id = person_by_key[sup_key].id
 
     _import_equipment(
         db,
@@ -1724,6 +1806,39 @@ def _import_equipment(
                     display_order=order,
                 )
             )
+        for order, svc in enumerate(d.services):
+            template = (
+                db.query(ServiceTemplate)
+                .filter(ServiceTemplate.name == svc.service_template_name)
+                .first()
+            )
+            # Survivable, like a missing UTC def on a deployed UTC: the
+            # definition keeps its gear and loses the service it would raise.
+            if template is None:
+                continue
+            new_svc = UtcDefService(
+                utc_def_id=new_d.id,
+                service_template_id=template.id,
+                display_order=order,
+            )
+            db.add(new_svc)
+            db.flush()
+            for wire in svc.wires:
+                db.add(
+                    UtcDefServiceWire(
+                        utc_def_service_id=new_svc.id,
+                        equipment_type_id=resolve_type(
+                            wire.equipment_type_title, f"UTC definition '{d.code}'"
+                        ),
+                        enclave_id=enclave_id_by_name.get(wire.enclave_name)
+                        if wire.enclave_name
+                        else None,
+                        capability_kind=wire.capability_kind,
+                        role=wire.role,
+                        required=wire.required,
+                        group_key=wire.group_key,
+                    )
+                )
 
     def resolve_utc_def(code: str) -> int | None:
         if code in utc_def_id_by_code:

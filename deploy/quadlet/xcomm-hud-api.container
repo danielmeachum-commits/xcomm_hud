@@ -1,0 +1,21 @@
+[Unit]
+Description=xcomm_hud API
+Requires=xcomm-hud-postgres.service xcomm-hud-minio.service
+After=xcomm-hud-postgres.service xcomm-hud-minio.service
+
+[Container]
+ContainerName=xcomm-hud-api
+Image=localhost/xcomm-hud-api:latest
+Network=xcomm-hud.network
+EnvironmentFile=@ENV_FILE@
+Environment=POSTGRES_HOST=xcomm-hud-postgres POSTGRES_PORT=5432
+Environment=S3_ENDPOINT_URL=http://xcomm-hud-minio:9000 S3_REGION=us-east-1
+
+[Service]
+# Postgres can still be initialising when this starts; migrations fail fast
+# and systemd retries until it is ready.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

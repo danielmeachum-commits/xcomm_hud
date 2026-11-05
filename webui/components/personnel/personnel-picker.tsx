@@ -19,7 +19,11 @@ import {
 import type { Personnel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-function personLabel(p: Personnel): string {
+/** Just what the picker reads, so roster people (`Person`) fit as well as
+ *  a workspace's personnel. */
+type Pickable = Pick<Personnel, "id" | "rank" | "last_name" | "first_name">
+
+function personLabel(p: Pickable): string {
   return `${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`
 }
 
@@ -27,7 +31,7 @@ interface Props {
   /** Selected person id as a string ("" = none), matching the form drafts. */
   value: string
   onChange: (value: string) => void
-  personnel: Personnel[]
+  personnel: Pickable[]
   disabled?: boolean
   placeholder?: string
   emptyLabel?: string

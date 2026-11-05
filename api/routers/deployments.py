@@ -34,6 +34,7 @@ from models import (
     PackageInstance,
     Service,
     ServiceDelivery,
+    ServiceTemplate,
     Site,
     User,
     UtcDef,
@@ -736,6 +737,93 @@ def delete_holding(
 # ---------- the deploy wizard's one-shot endpoint ----------
 
 
+def _stand_up_services(
+    db: Session, body: UtcDeployIn, site: Site, workspace: Workspace
+) -> tuple[list[ServiceDelivery], int, int]:
+    """Resolve each requested service to a delivery at the deploy site.
+
+    Returns the deliveries in payload order — wiring names them by index — and
+    how many were created versus joined.
+
+    Identity follows `POST /services` exactly: (workspace, name, enclave) finds
+    the existing "NIPR Web" rather than minting a second one, so a package that
+    deploys to three sites gives one service three deliveries.
+
+    A delivery the site already has is JOINED unchanged. Its PACE plan and
+    criticality were set by whoever stood it up, and a second UTC arriving to
+    back the same service is not a reason to overwrite them.
+    """
+    deliveries: list[ServiceDelivery] = []
+    created = joined = 0
+    max_order = (
+        db.query(ServiceDelivery.display_order)
+        .filter(ServiceDelivery.site_id == site.id)
+        .order_by(ServiceDelivery.display_order.desc())
+        .first()
+    )
+    next_order = (max_order[0] + 1) if max_order else 0
+    by_template: dict[int, ServiceDelivery] = {}
+    for request in body.services:
+        # The same template twice is one service; give the second the same row.
+        if request.service_template_id in by_template:
+            deliveries.append(by_template[request.service_template_id])
+            continue
+        template = db.get(ServiceTemplate, request.service_template_id)
+        if template is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Service template {request.service_template_id} not found.",
+            )
+        service = (
+            db.query(Service)
+            .filter(
+                Service.workspace_id == workspace.id,
+                Service.name == template.name,
+                Service.enclave_id.is_not_distinct_from(template.enclave_id),
+            )
+            .first()
+        )
+        if service is None:
+            service = Service(
+                workspace_id=workspace.id,
+                service_template_id=template.id,
+                name=template.name,
+                enclave_id=template.enclave_id,
+                kind=template.kind,
+                category=request.category,
+                icon=template.icon,
+                description=template.description,
+            )
+            db.add(service)
+            db.flush()
+        delivery = (
+            db.query(ServiceDelivery)
+            .filter(
+                ServiceDelivery.service_id == service.id,
+                ServiceDelivery.site_id == site.id,
+            )
+            .first()
+        )
+        if delivery is None:
+            delivery = ServiceDelivery(
+                service_id=service.id,
+                site_id=site.id,
+                reach=template.reach,
+                category=request.category,
+                enabled_pace=list(request.enabled_pace),
+                display_order=next_order,
+            )
+            next_order += 1
+            db.add(delivery)
+            db.flush()
+            created += 1
+        else:
+            joined += 1
+        by_template[template.id] = delivery
+        deliveries.append(delivery)
+    return deliveries, created, joined
+
+
 @router.post("/utcs/deploy", response_model=UtcDeployOut, status_code=status.HTTP_201_CREATED)
 def deploy_utc(
     body: UtcDeployIn,
@@ -862,7 +950,7 @@ def deploy_utc(
                         "item_index": index,
                     },
                 )
-            # A stale draft is the realistic cause: the force element pinned a radio that
+            # A stale draft is the realistic cause: the picker claimed a radio that
             # has since been re-typed. Better to say so than to silently deploy
             # the wrong box against a line that called for something else.
             if existing_eq.equipment_type_id != eq_type.id:
@@ -968,7 +1056,7 @@ def deploy_utc(
 
         if asset is not None:
             # This workspace's copy of a globally-owned box. Find-or-create:
-            # redeploying the same force element into the same picture moves the row it
+            # redeploying the same box into the same picture moves the row it
             # already made rather than registering the radio twice.
             eq, created_new = materialize_asset(
                 db, asset, workspace, site, utc.id, item.enclave_id
@@ -1132,6 +1220,11 @@ def deploy_utc(
             )
         )
 
+    # --- services the UTC brings up ---
+    new_deliveries, deliveries_created, deliveries_joined = _stand_up_services(
+        db, body, site, workspace
+    )
+
     # --- capability wiring ---
     bindings_created = 0
     for wire in body.wiring:
@@ -1141,7 +1234,16 @@ def deploy_utc(
             # (operator unchecked it on the previous step). Skipping is right:
             # failing the whole deploy over a stale proposal would be hostile.
             continue
-        if wire.service_id is not None:
+        svc: ServiceDelivery | None = None
+        if wire.new_service_index is not None:
+            if not 0 <= wire.new_service_index < len(new_deliveries):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Wiring names service #{wire.new_service_index + 1}, which "
+                    "this deploy doesn't bring up.",
+                )
+            svc = new_deliveries[wire.new_service_index]
+        elif wire.service_id is not None:
             svc = db.get(ServiceDelivery, wire.service_id)
             if svc is None:
                 raise HTTPException(
@@ -1154,6 +1256,7 @@ def deploy_utc(
             # made the real case unrepresentable: gear at an extension site
             # backs the service it reaches, which is at the other end.
             _site_in_workspace(db, svc.site_id, workspace)
+        if svc is not None:
             if db.get(CapabilityServiceLink, (cap.id, svc.id)) is None:
                 db.add(
                     CapabilityServiceLink(
@@ -1166,6 +1269,12 @@ def deploy_utc(
                         equipment_capability_id=cap.id,
                         service_delivery_id=svc.id,
                         role=wire.role,
+                        required=wire.required,
+                        group_key=(
+                            (wire.group_key or "").strip() or None
+                            if wire.required
+                            else None
+                        ),
                     )
                 )
                 bindings_created += 1
@@ -1214,5 +1323,7 @@ def deploy_utc(
         equipment=equipment_out_bulk(db, created),
         holdings=[_holding_out(db, h) for h in holdings],
         bindings_created=bindings_created,
+        deliveries_created=deliveries_created,
+        deliveries_joined=deliveries_joined,
         reassigned=reassigned,
     )

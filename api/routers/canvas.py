@@ -130,7 +130,7 @@ def map_bundle(
             service_template_id=svc.service_template_id,
             enclave_id=svc.enclave_id,
             kind=svc.kind,
-            category=svc.category,
+            category=s.category,
             reach=s.reach,
             icon=svc.icon,
             description=svc.description,

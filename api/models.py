@@ -439,6 +439,13 @@ class ServiceDelivery(Base):
     )
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Criticality HERE (critical / sustainment / other). Per delivery since
+    # 0068: it is chosen when a package deploys, and one service can be
+    # critical at the main site and sustainment at an extension.
+    # `Service.category` is only the default a new delivery starts from.
+    category: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="other", server_default=text("'other'")
+    )
     # Which PACE tiers this delivery uses. Defaults to all four (full fan-out =
     # previous behavior). Operators clear PACE letters it can't use.
     enabled_pace: Mapped[list[str]] = mapped_column(
@@ -971,6 +978,10 @@ class WorkspaceRuleState(Base):
 class Unit(Base):
     """A military unit / organization (squadron, wing, group, ...) for chain of command.
 
+    Global: the squadron exists whether or not an exercise is running, so a
+    unit belongs to no workspace and every picture files people under the same
+    rows. Writes are admin-only, like the rest of the global tier.
+
     Distinct from WorkCenter (physical/functional workshop) — a person may
     belong to the 375th Communications Squadron (Unit) while working in the
     "Radio Shop" (WorkCenter). Unit primarily applies to military members
@@ -980,23 +991,17 @@ class Unit(Base):
 
     __tablename__ = "unit"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", name="uq_unit_workspace_name"),
+        UniqueConstraint("name", name="uq_unit_name"),
+        Index("uq_unit_default", "is_default", unique=True, postgresql_where=text("is_default")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Service branch of the organization — prepopulates a new member's branch
     # in the personnel form once their unit is picked.
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
-    # At most one per workspace (partial unique index) — preselected when
-    # adding personnel.
+    # At most one (partial unique index) — preselected when adding personnel.
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     parent_unit_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
@@ -1013,27 +1018,41 @@ class Unit(Base):
 
 
 class WorkCenter(Base):
-    """A logical grouping of personnel (and later, equipment) within a workspace.
+    """The shop a person works in, and the shop that answers for a kind of gear.
 
-    Work centers are the physical/functional bucket a person belongs to — one
-    person to one work center. Distinct from Unit (military org) and Team
+    One person to one work center. Distinct from Unit (military org) and Team
     (many-to-many overlay for ad-hoc collaboration across work centers).
+
+    Same global-vs-workspace shape as Enclave: `workspace_id IS NULL` is a
+    shared, admin-managed shop (Net Ops, RF, ...), a non-null one is a local
+    addition — the non-players one picture accounts for and another doesn't.
+    A local row may not take a global row's name, so a MANFOR line that names
+    its shop resolves to one row and only one.
     """
 
     __tablename__ = "work_center"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_work_center_workspace_name"),
+        Index(
+            "uq_work_center_global_name",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
+    workspace_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The specialty (or specialties — "3D1X2, 3D1X3") the shop draws on. Free
+    # text: a shop is often more than one AFSC, and nothing branches on it.
+    afsc: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
@@ -1087,40 +1106,44 @@ class Team(Base):
     )
 
 
-class Personnel(Base):
-    """A person assigned to this workspace's roster.
+class Person(Base):
+    """Who someone is, once for the unit — the global roster.
 
-    Covers both uniformed members and DoD civilians. For civilians the
-    `branch` field records the service they support (rank is optional or
-    a GS grade). Contact fields are all optional so a partial CSV import
+    Mirrors the property book: `Person` is identity, `Personnel` is a
+    workspace's entry for them. Covers uniformed members and DoD civilians;
+    for civilians `branch` records the service they support (rank is optional
+    or a GS grade). Contact fields are optional so a partial CSV import
     doesn't reject rows.
+
+    `workspace_id` takes the enclave shape: NULL is the shared roster, a
+    workspace id is a person local to that one picture — guests, who are not
+    on the unit's books. Identity is the row id; nothing matches people by
+    name.
     """
 
-    __tablename__ = "personnel"
+    __tablename__ = "person"
+    __table_args__ = (
+        # Unit commander/OIC — at most one per unit, and only meaningful with
+        # a unit set (the API rejects a unitless commander). Marked with a
+        # gold star wherever the person's name is rendered.
+        Index(
+            "uq_person_unit_commander",
+            "unit_id",
+            unique=True,
+            postgresql_where=text("is_commander AND unit_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[int] = mapped_column(
+    workspace_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     personnel_type: Mapped[str] = mapped_column(
         String(16), nullable=False, default="military"
     )
-    # Guests / visitors are flagged so they can be signed in and tracked like
-    # anyone else (on-site list, accountability, check-out) while staying out of
-    # the permanent roster. `affiliation` is their org/unit, `escort` the on-site
-    # point of contact hosting them.
-    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Unit commander/OIC — at most one per unit (partial unique index), and
-    # only meaningful with a unit set (the API rejects a unitless commander).
-    # Marked with a gold star wherever the person's name is rendered.
-    is_commander: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
-    affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     rank: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # AFSC skill level for Air Force enlisted members (1 Helper, 3 Apprentice,
@@ -1133,24 +1156,73 @@ class Personnel(Base):
     dsn: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     sipr_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    work_center_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        ForeignKey("work_center.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     unit_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("unit.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    # Direct supervisor for chain-of-command display. SET NULL on delete so
-    # a departing supervisor doesn't cascade-remove their reports.
+    # Direct supervisor for chain-of-command display — organizational, so it
+    # holds in every picture both people are in. SET NULL on delete so a
+    # departing supervisor doesn't cascade-remove their reports.
     supervisor_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        ForeignKey("personnel.id", ondelete="SET NULL"),
+        ForeignKey("person.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_commander: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+
+class Personnel(Base):
+    """A person's part in one workspace's picture.
+
+    Identity lives on `person` (shared across pictures); this row holds what
+    differs per picture — assignment, live status, shop, teams, guest details,
+    notes. Its id is what location history, teams and site properties point at.
+    """
+
+    __tablename__ = "personnel"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "person_id", name="uq_personnel_workspace_person"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    person_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("person.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Guests / visitors are flagged so they can be signed in and tracked like
+    # anyone else (on-site list, accountability, check-out) while staying out of
+    # the permanent roster — their person is local to this workspace.
+    # `affiliation` is their org/unit, `escort` the on-site point of contact
+    # hosting them.
+    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Per picture, not on Person: a shop can be local to one workspace.
+    work_center_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("work_center.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -1189,6 +1261,8 @@ class Personnel(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
+    # Joined: nearly every reader wants the name.
+    person: Mapped[Person] = relationship(Person, lazy="joined")
     teams: Mapped[list["Team"]] = relationship(
         "Team",
         secondary="personnel_team",
@@ -1847,6 +1921,13 @@ class UtcDef(Base):
         cascade="all, delete-orphan",
         order_by="UtcDefManforLine.display_order",
     )
+    # The services it brings up, each pre-wired to the gear that backs it.
+    services: Mapped[list["UtcDefService"]] = relationship(
+        "UtcDefService",
+        back_populates="utc_def",
+        cascade="all, delete-orphan",
+        order_by="UtcDefService.display_order",
+    )
 
 
 class UtcDefLine(Base):
@@ -1967,6 +2048,102 @@ class UtcDefManforLine(Base):
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="manfor")
+
+
+class UtcDefService(Base):
+    """A service this UTC brings up wherever it deploys.
+
+    Names a service TEMPLATE, not a workspace's `service`: UTC definitions are
+    global, and a global row cannot point at one workspace's services. The
+    deploy wizard resolves the template to the workspace's service (finding
+    the existing "NIPR Web" or creating it) and stands up a delivery at the
+    site. The template carries the enclave, so there is no enclave column here.
+
+    What it deliberately does NOT carry is the PACE plan or the criticality.
+    Both are decided per deployment — which tiers a site can use depends on
+    the gateways it actually has — so the wizard asks for them every time.
+    """
+
+    __tablename__ = "utc_def_service"
+    __table_args__ = (
+        UniqueConstraint(
+            "utc_def_id", "service_template_id", name="uq_utc_def_service_template"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_def_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("utc_def.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    service_template_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("service_template.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    utc_def: Mapped["UtcDef"] = relationship("UtcDef", back_populates="services")
+    wires: Mapped[list["UtcDefServiceWire"]] = relationship(
+        "UtcDefServiceWire",
+        back_populates="utc_def_service",
+        cascade="all, delete-orphan",
+        order_by="UtcDefServiceWire.id",
+    )
+
+
+class UtcDefServiceWire(Base):
+    """This line's capability backs that service — the doctrine version of a
+    `capability_service_link`, materialized into one at deploy.
+
+    Points at its line by (equipment type, enclave) and at its capability by
+    kind, not by id. `utc_def_line` and `equipment_type_capability` are both
+    saved delete-and-reinsert, so an id FK would cascade the wiring away on
+    every LOGDET edit. The natural keys are what those tables already keep
+    unique, and what the deploy wizard matches items on.
+
+    `required` and `group_key` mean exactly what they do on
+    `CapabilityServiceLink`: required wires in one group are OR'd, groups are
+    AND'd. Carrying them here is what makes derived status work the moment the
+    UTC is deployed instead of after someone re-ticks every binding by hand.
+    """
+
+    __tablename__ = "utc_def_service_wire"
+    __table_args__ = (
+        Index(
+            "uq_utc_def_service_wire_target",
+            "utc_def_service_id",
+            "equipment_type_id",
+            "enclave_id",
+            "capability_kind",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    utc_def_service_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("utc_def_service.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    equipment_type_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("equipment_type.id", ondelete="CASCADE"), nullable=False
+    )
+    enclave_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
+    )
+    capability_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="endpoint")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group_key: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+
+    utc_def_service: Mapped["UtcDefService"] = relationship(
+        "UtcDefService", back_populates="wires"
+    )
 
 
 class PackageDef(Base):
@@ -2647,227 +2824,4 @@ class EquipmentAssetCapability(Base):
 
     asset: Mapped["EquipmentAsset"] = relationship(
         "EquipmentAsset", back_populates="capabilities"
-    )
-
-
-# ===================== Equipment: force elements =====================
-
-
-class ForceElement(Base):
-    """A reusable roster: the UTCs a force element brings, and the *specific*
-    gear that goes in them.
-
-    The layer between doctrine and deployment. A UTC definition says a Flyaway
-    Comms Package carries two AN/TSC-198s; a force element says ours are the
-    ones with these serials — by pinning `equipment_asset` rows from the
-    property book.
-
-    Global by default (`workspace_id IS NULL`), like enclaves and the equipment
-    catalog: the force element describes the unit's gear, and the unit's gear
-    outlives any one operating picture. A workspace may still own a local one,
-    and reads merge both — the same global-or-workspace shape used everywhere
-    else.
-
-    That global default is also why nothing here points at `personnel`.
-    `personnel.workspace_id` is NOT NULL, so a global force element cannot name
-    a person without borrowing one workspace's roster. Assigning people is a
-    workspace-scoped question and has to be answered somewhere that is allowed
-    to know the answer.
-
-    Force elements pin no site and no workspace contents. Where the gear went,
-    which enclaves were supported, and what it was wired to are all
-    per-deployment facts settled in the wizard against the target workspace.
-    """
-
-    __tablename__ = "force_element"
-    __table_args__ = (
-        Index(
-            "uq_force_element_global_name",
-            "name",
-            unique=True,
-            postgresql_where=text("workspace_id IS NULL"),
-        ),
-        UniqueConstraint("workspace_id", "name", name="uq_force_element_name"),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    # The doctrine this force element realizes, when there is one. Nullable
-    # because one
-    # captured from a hand-built deployment answers to no package definition.
-    package_def_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("package_def.id", ondelete="SET NULL"), nullable=True
-    )
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Retire rather than delete, matching `package_def`: a force element that
-    # fielded a
-    # past deployment is part of how that deployment is explained.
-    retired_at: Mapped[Optional[datetime.datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
-    )
-
-    utcs: Mapped[list["ForceElementUtc"]] = relationship(
-        "ForceElementUtc",
-        back_populates="force_element",
-        cascade="all, delete-orphan",
-        order_by="ForceElementUtc.display_order",
-    )
-
-
-class ForceElementUtc(Base):
-    """One UTC slot in a force element.
-
-    There is no `quantity` here, unlike `package_def_utc`. A package definition
-    can say "two extensions" because it is talking about types; a force element is
-    talking about specific boxes, and the two extensions carry different
-    radios. Quantity is expressed as repeated rows so each slot owns its own
-    pinned gear.
-
-    `utc_def_id` is nullable: building a UTC by hand is a first-class path in
-    the deploy wizard, and a force element captured from one has no definition
-    to point
-    at.
-    """
-
-    __tablename__ = "force_element_utc"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    force_element_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("force_element.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    utc_def_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("utc_def.id", ondelete="SET NULL"), nullable=True
-    )
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    role_hint: Mapped[str] = mapped_column(String(16), nullable=False, default="either")
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-    force_element: Mapped["ForceElement"] = relationship("ForceElement", back_populates="utcs")
-    items: Mapped[list["ForceElementItem"]] = relationship(
-        "ForceElementItem",
-        back_populates="force_element_utc",
-        cascade="all, delete-orphan",
-        order_by="ForceElementItem.display_order",
-    )
-    bulk: Mapped[list["ForceElementBulk"]] = relationship(
-        "ForceElementBulk",
-        back_populates="force_element_utc",
-        cascade="all, delete-orphan",
-    )
-
-
-class ForceElementItem(Base):
-    """One pinned asset from the property book.
-
-    Points at `equipment_asset`, not at a workspace's `equipment` row — that is
-    what lets a force element be global. A workspace row is an operating
-    picture's copy
-    of a box; the asset is the box.
-
-    CASCADE on `asset_id`: gear struck from the property book leaves every force
-    element that listed it, rather than leaving one promising a radio the unit no
-    longer owns.
-
-    Pinning is deliberately non-exclusive, in two directions. The same TACLANE
-    belongs to the FCP and the JIP because the unit owns one and both
-    packages would use it; and the same asset may be materialized into several
-    workspaces at once, because planning next month's exercise while this
-    month's is live is normal. Cross-workspace commitment is reported, never
-    blocked.
-
-    No `enclave_id`: which network a box serves is a property of the deployment,
-    settled in the wizard against the target workspace's enclaves.
-    """
-
-    __tablename__ = "force_element_item"
-    __table_args__ = (
-        UniqueConstraint("force_element_utc_id", "asset_id", name="uq_force_element_item_pair"),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    force_element_utc_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("force_element_utc.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    asset_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("equipment_asset.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-    force_element_utc: Mapped["ForceElementUtc"] = relationship(
-        "ForceElementUtc", back_populates="items"
-    )
-
-
-class ForceElementBulk(Base):
-    """Bulk gear a force element slot expects. Counted, never pinned — there is
-    no such
-    thing as a specific cable.
-
-    Unlike `equipment_holding`, this keeps `enclave_id` in its uniqueness: the
-    holding folds per-enclave lines together because a deployed box of cables
-    serves everything, but a force element is a plan, and "six SIPR patch cables
-    and six
-    NIPR" is a meaningful thing to plan.
-    """
-
-    __tablename__ = "force_element_bulk"
-    __table_args__ = (
-        UniqueConstraint(
-            "force_element_utc_id",
-            "equipment_type_id",
-            "enclave_id",
-            name="uq_force_element_bulk_type_enclave",
-        ),
-        Index(
-            "uq_force_element_bulk_type_no_enclave",
-            "force_element_utc_id",
-            "equipment_type_id",
-            unique=True,
-            postgresql_where=text("enclave_id IS NULL"),
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    force_element_utc_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("force_element_utc.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    equipment_type_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("equipment_type.id", ondelete="RESTRICT"), nullable=False
-    )
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    # Enclaves are themselves global-or-workspace, so a global force element
-    # can only
-    # safely reference a global one. The router enforces that; SET NULL keeps a
-    # retired enclave from taking the line with it.
-    enclave_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("enclave.id", ondelete="SET NULL"), nullable=True
-    )
-
-    force_element_utc: Mapped["ForceElementUtc"] = relationship(
-        "ForceElementUtc", back_populates="bulk"
     )

@@ -40,7 +40,7 @@ export default async function ServiceTypeDetailPage({
     <div className="flex h-full min-w-0 flex-col gap-4 p-4 sm:p-6">
       <PageBreadcrumbs
         items={[
-          { label: "Admin" },
+          { label: "Global" },
           { label: "Services", href: "/admin/service-types" },
           { label: template.name },
         ]}

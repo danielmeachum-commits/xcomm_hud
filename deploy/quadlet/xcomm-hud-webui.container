@@ -1,0 +1,19 @@
+[Unit]
+Description=xcomm_hud web UI
+Requires=xcomm-hud-api.service
+After=xcomm-hud-api.service
+
+[Container]
+ContainerName=xcomm-hud-webui
+Image=localhost/xcomm-hud-webui:latest
+Network=xcomm-hud.network
+Environment=API_URL=http://xcomm-hud-api:8000
+# Only the webui is published; it proxies every API call server-side.
+PublishPort=@WEB_PORT@:3000
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

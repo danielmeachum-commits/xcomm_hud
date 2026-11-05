@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "setup": "./scripts/setup.sh",
+    "services:install": "./scripts/install-services.sh",
     "domscribe:doctor": "./scripts/domscribe-doctor.sh",
     "domscribe:check": "./scripts/domscribe-doctor.sh --check"
   },

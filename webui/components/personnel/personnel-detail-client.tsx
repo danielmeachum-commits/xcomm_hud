@@ -97,7 +97,11 @@ export function PersonnelDetailClient({
   const bg = branchColor(person.branch, person.personnel_type)
 
   async function del() {
-    if (!confirm(`Delete ${person.last_name}, ${person.first_name}?`)) return
+    // A roster person only leaves this workspace; a guest exists only here.
+    const prompt = person.is_guest
+      ? `Delete ${person.last_name}, ${person.first_name}?`
+      : `Remove ${person.last_name}, ${person.first_name} from this workspace? They stay on the roster.`
+    if (!confirm(prompt)) return
     setDeleting(true)
     const res = await fetch(`/api/be/personnel/${person.id}`, {
       method: "DELETE",
@@ -174,6 +178,7 @@ export function PersonnelDetailClient({
               teams={teams}
               sites={sites}
               supervisors={allPersonnel}
+              userRole={userRole}
             />
             {canDelete && (
               <Button
@@ -182,7 +187,11 @@ export function PersonnelDetailClient({
                 onClick={del}
                 disabled={deleting}
               >
-                {deleting ? "Deleting…" : "Delete"}
+                {deleting
+                  ? "Removing…"
+                  : person.is_guest
+                    ? "Delete"
+                    : "Remove"}
               </Button>
             )}
           </div>

@@ -207,6 +207,8 @@ export interface Service {
    *  parse them to know. */
   enclave_id: number | null
   kind: ServiceKind
+  /** Criticality AT THIS SITE. Per delivery: the same service can be
+   *  critical at the main site and sustainment at an extension. */
   category: ServiceCategory
   reach: ServiceReach
   icon: string | null
@@ -545,14 +547,14 @@ export type Branch =
   | "space_force"
   | "coast_guard"
 
+/** Global — units belong to no workspace. */
 export interface Unit {
   id: number
-  workspace_id: number
   name: string
   description: string | null
   /** Service branch of the org — prepopulates a new member's branch. */
   branch: Branch | null
-  /** At most one per workspace — preselected when adding personnel. */
+  /** At most one — preselected when adding personnel. */
   is_default: boolean
   parent_unit_id: number | null
   created_at: string
@@ -561,9 +563,13 @@ export interface Unit {
 
 export interface WorkCenter {
   id: number
-  workspace_id: number
+  /** Null for a shared shop; set for one this workspace added for itself. */
+  workspace_id: number | null
+  is_global: boolean
   name: string
   description: string | null
+  /** The specialty or specialties the shop draws on ("3D1X3"). */
+  afsc: string | null
   created_at: string
   updated_at: string
 }
@@ -598,9 +604,40 @@ export type PersonnelStatus =
   | "sick"
   | "training"
 
+/** Someone on the global roster — identity only. Each workspace they're in
+ *  has its own `Personnel` row for their part in that picture. */
+export interface Person {
+  id: number
+  personnel_type: PersonnelType
+  is_commander: boolean
+  branch: Branch | null
+  rank: string | null
+  skill_level: number | null
+  last_name: string
+  first_name: string
+  cellphone: string | null
+  dsn: string | null
+  sipr_number: string | null
+  email: string | null
+  unit_id: number | null
+  /** A person id, unlike `Personnel.supervisor_id`. */
+  supervisor_id: number | null
+  workspaces: {
+    workspace_id: number
+    slug: string
+    name: string
+    personnel_id: number
+  }[]
+  created_at: string
+  updated_at: string
+}
+
+/** A person's entry in one workspace, flattened with their roster identity
+ *  (name, rank, unit, contact, supervisor, command). */
 export interface Personnel {
   id: number
   workspace_id: number
+  person_id: number
   personnel_type: PersonnelType
   is_guest: boolean
   /** Unit commander/OIC — at most one per unit, officers only, requires a
@@ -620,6 +657,8 @@ export interface Personnel {
   notes: string | null
   work_center_id: number | null
   unit_id: number | null
+  /** Their supervisor's personnel id in this workspace — null when the
+   *  supervisor isn't in it. */
   supervisor_id: number | null
   assigned_site_id: number | null
   room_number: string | null
@@ -930,6 +969,41 @@ export interface UtcDefManforLine {
   display_order: number
 }
 
+/** One pre-wired capability: this LOGDET line's capability backs the
+ *  service. The line is named by (type, enclave), not by id — lines are saved
+ *  delete-and-reinsert, so an id would not survive an edit. */
+export interface UtcDefServiceWire {
+  id?: number
+  equipment_type_id: number
+  enclave_id: number | null
+  capability_kind: CapabilityKind
+  role: CapabilityBindRole
+  /** Gates the service in derived status; unrequired wires are context. */
+  required: boolean
+  /** Required wires sharing a group are redundant (best-of). */
+  group_key: string | null
+}
+
+/** A service this UTC brings up wherever it deploys. PACE plan and
+ *  criticality are NOT here — the deploy wizard asks for both every time. */
+export interface UtcDefService {
+  id: number
+  utc_def_id: number
+  service_template_id: number
+  display_order: number
+  wires: UtcDefServiceWire[]
+  service_template_name: string | null
+  kind: ServiceKind | null
+  enclave_id: number | null
+  /** The template's category — a suggestion, never applied unasked. */
+  default_category: ServiceCategory | null
+}
+
+export interface UtcDefServiceInput {
+  service_template_id: number
+  wires: Omit<UtcDefServiceWire, "id">[]
+}
+
 export interface UtcDef {
   id: number
   workspace_id: number | null
@@ -943,6 +1017,8 @@ export interface UtcDef {
   lines: UtcDefLine[]
   /** The MANFOR — who deploys with it. */
   manfor: UtcDefManforLine[]
+  /** The services it brings up, pre-wired to the LOGDET above. */
+  services: UtcDefService[]
   is_global: boolean
 }
 
@@ -1256,9 +1332,8 @@ export interface SiteEquipmentAdvisory {
 export interface UtcDeployItem {
   equipment_type_id: number
   /** Materialize this workspace's copy of a global property-book asset. The
-   *  normal path when deploying from a force element: serial and equipment ID
-   *  come from
-   *  the asset, so nobody retypes them. If this workspace already has a row
+   *  normal path when deploying from the property book: serial and equipment
+   *  ID come from the asset, so nobody retypes them. If this workspace already has a row
    *  for the asset, that row is reused rather than duplicated. */
   asset_id?: number | null
   /** Claim gear the workspace already owns instead of registering new. When
@@ -1281,8 +1356,22 @@ export interface CapabilityWiring {
   item_index: number
   capability_kind: CapabilityKind
   service_id?: number | null
+  /** Index into the payload's `services` — a delivery this deploy stands up,
+   *  which has no id yet. */
+  new_service_index?: number | null
   gateway_id?: number | null
   role?: CapabilityBindRole
+  required?: boolean
+  group_key?: string | null
+}
+
+/** A service the deploy brings up at the site. Joined unchanged when the
+ *  site already delivers it; otherwise created with this PACE plan and
+ *  criticality, which have no defaults on purpose. */
+export interface UtcDeployService {
+  service_template_id: number
+  enabled_pace: GatewayPace[]
+  category: ServiceCategory
 }
 
 export interface UtcDeployPayload {
@@ -1304,6 +1393,7 @@ export interface UtcDeployPayload {
     enclave_id?: number | null
     notes?: string | null
   }[]
+  services?: UtcDeployService[]
   wiring: CapabilityWiring[]
 }
 
@@ -1328,6 +1418,8 @@ export interface UtcDeployResult {
   equipment: Equipment[]
   holdings: EquipmentHolding[]
   bindings_created: number
+  deliveries_created: number
+  deliveries_joined: number
   /** Empty on a deploy that only registered new gear. */
   reassigned: ReassignedEquipment[]
 }
@@ -1366,74 +1458,4 @@ export interface AssetImportResult {
   created: EquipmentAsset[]
   linked: number
   skipped: string[]
-}
-
-// --- force elements ---
-
-/** A pinned item, carrying everything the picker needs to be read without a
- *  second call. `current_utc_*` is the disclosure that makes taking gear from
- *  another deployment workable: the operator sees "held by FCP-2 (Site Bravo)"
- *  before choosing, not after. Null means it is idle in the pool. */
-export interface ForceElementItem {
-  id: number
-  force_element_utc_id: number
-  /** The property-book asset this pin points at. */
-  asset_id: number
-  display_order: number
-  equipment_code: string | null
-  serial_number: string | null
-  equipment_type_id: number | null
-  type_title: string | null
-  type_short_name: string | null
-  capability_kinds: string[]
-  /** The asset has been struck from the property book. */
-  retired: boolean
-  commitments: AssetCommitment[]
-  /** This workspace already has a row materialized from the asset, so
-   *  deploying reuses it rather than creating another. */
-  in_this_workspace: boolean
-}
-
-export interface ForceElementBulk {
-  id: number
-  force_element_utc_id: number
-  equipment_type_id: number
-  quantity: number
-  enclave_id: number | null
-  type_title: string | null
-  type_short_name: string | null
-}
-
-export interface ForceElementUtc {
-  id: number
-  force_element_id: number
-  utc_def_id: number | null
-  name: string
-  role_hint: UtcRoleHint
-  notes: string | null
-  display_order: number
-  utc_def_code: string | null
-  utc_def_name: string | null
-  items: ForceElementItem[]
-  bulk: ForceElementBulk[]
-}
-
-export interface ForceElement {
-  id: number
-  /** Null for a global force element — the normal case. */
-  workspace_id: number | null
-  is_global: boolean
-  package_def_id: number | null
-  name: string
-  description: string | null
-  retired_at: string | null
-  package_def_code: string | null
-  utcs: ForceElementUtc[]
-  item_count: number
-  bulk_count: number
-  /** How many pinned assets some picture already has in play. Context, not a
-   *  shortage — the gear is still deployable here. */
-  committed_count: number
-  /** Pins whose asset has been struck from the property book. */
-  retired_count: number
 }

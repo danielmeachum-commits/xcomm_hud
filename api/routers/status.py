@@ -47,7 +47,7 @@ def rollup(
         db.query(ServiceDelivery, Service)
         .join(Service, Service.id == ServiceDelivery.service_id)
         .filter(ServiceDelivery.site_id.in_(site_ids))
-        .order_by(Service.category, ServiceDelivery.display_order, Service.name)
+        .order_by(ServiceDelivery.category, ServiceDelivery.display_order, Service.name)
         .all()
     ) if site_ids else []
     services = [d for d, _ in pairs]
@@ -114,7 +114,7 @@ def rollup(
                 id=d.id,
                 name=svc.name,
                 kind=svc.kind,
-                category=svc.category,
+                category=d.category,
                 reach=d.reach,
                 icon=svc.icon,
                 status=d.status,

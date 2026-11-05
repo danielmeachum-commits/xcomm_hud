@@ -168,8 +168,7 @@ export const LINK_KIND_DASH: Record<EquipmentLinkKind, string | undefined> = {
 }
 
 /** What a package says a UTC is *for*, as opposed to `UtcRole`, which is what a
- *  deployed UTC turned out to be. Shared by the force-element list and the
- *  package detail page so the two never drift apart. */
+ *  deployed UTC turned out to be. */
 export const UTC_ROLE_HINT_LABELS: Record<UtcRoleHint, string> = {
   primary: "Primary",
   alternate: "Alternate",

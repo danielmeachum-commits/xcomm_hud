@@ -1,0 +1,21 @@
+[Unit]
+Description=xcomm_hud Postgres
+
+[Container]
+ContainerName=xcomm-hud-postgres
+Image=docker.io/library/postgres:16-alpine
+Network=xcomm-hud.network
+Volume=xcomm-hud-pgdata.volume:/var/lib/postgresql/data
+EnvironmentFile=@ENV_FILE@
+# Name the real user and database: a bare pg_isready connects as root (or to a
+# database named after the user), and Postgres logs a FATAL for every check.
+# `$$` reaches the container as `$`, where the shell expands it.
+HealthCmd=sh -c 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+HealthInterval=10s
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

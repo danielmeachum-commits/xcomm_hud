@@ -1,0 +1,22 @@
+[Unit]
+Description=xcomm_hud MinIO object storage
+
+[Container]
+ContainerName=xcomm-hud-minio
+Image=cgr.dev/chainguard/minio:latest
+Exec=server /data --console-address :9001
+Network=xcomm-hud.network
+Volume=xcomm-hud-miniodata.volume:/data
+EnvironmentFile=@ENV_FILE@
+# `mc ready` retries forever while the server is down, so the timeout is what
+# turns that into a failed check. The probe credentials are never checked.
+HealthCmd=env MC_HOST_local=http://probe:probe@localhost:9000 mc ready local
+HealthInterval=10s
+HealthTimeout=5s
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

@@ -130,7 +130,7 @@ def _enrich(db: Session, v: Event) -> EventOut:
             # events table's site column stays useful.
             p = db.get(Personnel, v.subject_id)
             if p:
-                out.subject_name = f"{p.last_name}, {p.first_name}"
+                out.subject_name = f"{p.person.last_name}, {p.person.first_name}"
             if v.second_subject_id is not None:
                 site = db.get(Site, v.second_subject_id)
                 if site:

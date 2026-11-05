@@ -17,7 +17,7 @@ export default async function GatewaysAdminPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
-      <PageBreadcrumbs items={[{ label: "Admin" }, { label: "Gateways" }]} />
+      <PageBreadcrumbs items={[{ label: "Global" }, { label: "Gateways" }]} />
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Gateways</h1>
         <p className="text-xs text-muted-foreground">

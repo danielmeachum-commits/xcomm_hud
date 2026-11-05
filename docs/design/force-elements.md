@@ -1,6 +1,12 @@
 # Equipment force elements — deploying the gear we already own
 
-Status: **SHIPPED** (2026-08-08), migrations 0058 and 0059.
+Status: **REMOVED** (2026-10-29), migration 0065. Force elements never found
+a use that the deploy wizard and the property book didn't already cover, and a
+third way to group gear made the other two harder to explain. What survives:
+deploying gear that already exists (§3) and the global property book (§9).
+Everything about saving, editing, or deploying from a force element is history.
+
+Originally shipped 2026-08-08, migrations 0058 and 0059.
 
 §1–§8 describe the workspace-scoped first cut (0058). **§9 supersedes its
 scoping**: force elements are global, pinning a global property book, and deploy

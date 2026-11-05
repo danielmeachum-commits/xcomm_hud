@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import requires
-from models import ServiceTemplate
+from models import ServiceTemplate, UtcDefService
 from pubsub import notify
 from schemas import ServiceTemplateIn, ServiceTemplateOut, ServiceTemplatePatch
 
@@ -88,5 +88,16 @@ def delete_template(
     t = db.get(ServiceTemplate, template_id)
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+    # The FK is RESTRICT; answer with the reason instead of an integrity error.
+    if (
+        db.query(UtcDefService)
+        .filter(UtcDefService.service_template_id == t.id)
+        .first()
+        is not None
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A UTC definition provides this service — remove it there first.",
+        )
     db.delete(t)
     notify(background_tasks, "service_templates")

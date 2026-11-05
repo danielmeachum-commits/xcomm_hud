@@ -139,24 +139,6 @@ ACTIONS: dict[str, Action] = {
         event_type="general",
         kinds=(SubjectKinds.EQUIPMENT_ASSET,),
     ),
-    # ---------- Force elements ----------
-    # The keys keep their original "kit." spelling on purpose. They are stored
-    # identifiers, not labels: 0058 seeded `event_type` rows under these slugs
-    # and every event written since points at them, so renaming the key would
-    # orphan that history to buy nothing a user can see. What a user sees is
-    # the event type's label, which 0064 renames.
-    "kit.saved": Action(
-        record_class="log",
-        severity="info",
-        event_type="general",
-        kinds=(SubjectKinds.FORCE_ELEMENT,),
-    ),
-    "kit.deleted": Action(
-        record_class="log",
-        severity="info",
-        event_type="general",
-        kinds=(SubjectKinds.FORCE_ELEMENT,),
-    ),
 }
 
 

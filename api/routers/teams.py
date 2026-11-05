@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from db import get_db
 from deps import get_current_workspace, requires
-from models import Personnel, Team, TeamWorkCenterLead, WorkCenter, Workspace
+from models import Personnel, Team, TeamWorkCenterLead, Workspace
 from pubsub import notify
+from routers.work_centers import load_visible as load_work_center
 from schemas import TeamIn, TeamLeadIn, TeamOut, TeamPatch
 
 router = APIRouter(prefix="/teams", tags=["personnel"])
@@ -52,8 +53,8 @@ def _build_leads(
                 "Duplicate work center in leads",
             )
         seen.add(lead.work_center_id)
-        wc = db.get(WorkCenter, lead.work_center_id)
-        if wc is None or wc.workspace_id != workspace.id:
+        wc = load_work_center(db, lead.work_center_id, workspace)
+        if wc is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Work center not found"
             )

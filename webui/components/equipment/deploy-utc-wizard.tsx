@@ -1,6 +1,6 @@
 "use client"
 
-import { Boxes, Check, Link2, Plus, Trash2 } from "lucide-react"
+import { Check, Link2, Plus, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 
@@ -14,6 +14,13 @@ import {
 } from "@/components/ui/dialog"
 import { enclaveChipClass, enclaveChipStyle } from "@/lib/enclave-meta"
 import { CAPABILITY_LABELS, UTC_ROLE_LABELS } from "@/lib/equipment-meta"
+import {
+  GATEWAY_PACE_VALUES,
+  SERVICE_CATEGORIES,
+  categoryLabel,
+  paceLabel,
+  paceShort,
+} from "@/lib/service-meta"
 import { useWorkspace } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 import type {
@@ -21,15 +28,17 @@ import type {
   Enclave,
   Equipment,
   EquipmentAsset,
-  ForceElement,
   EquipmentType,
   Gateway,
+  GatewayPace,
   PackageDef,
   PackageInstance,
   ReassignedEquipment,
   Service,
+  ServiceCategory,
   Site,
   UtcDef,
+  UtcDefService,
   UtcDeployPayload,
   UtcRole,
   UtcRoleHint,
@@ -41,6 +50,7 @@ const STEPS = [
   { key: "site", label: "Site & role" },
   { key: "items", label: "Serialized" },
   { key: "bulk", label: "Bulk" },
+  { key: "services", label: "Services" },
   { key: "wiring", label: "Wiring" },
   { key: "review", label: "Review" },
 ] as const
@@ -72,8 +82,8 @@ function chipClass(on: boolean): string {
 interface ItemDraft {
   equipment_type_id: number
   /** Set when this row draws a box from the global property book. The normal
-   *  path from a force element — this workspace's row is materialized from the asset at
-   *  deploy, carrying the serial and ID that were typed once, globally. */
+   *  path for gear the unit owns — this workspace's row is materialized from the
+   *  asset at deploy, carrying the serial and ID that were typed once, globally. */
   asset_id: number | null
   /** Set when this row claims gear THIS workspace already registered. The
    *  serial, ID and capabilities all come off the existing row, so those
@@ -92,6 +102,18 @@ interface ItemDraft {
   enclave_id: number | null
   /** Which declared capabilities this particular kit actually has. */
   capability_kinds: string[]
+}
+
+/** One service the UTC definition brings up, as planned for this deployment.
+ *
+ *  PACE and criticality start EMPTY. Both are calls about this site and this
+ *  mission — which tiers are usable depends on the gateways actually there —
+ *  so the wizard will not advance until someone has made them. */
+interface ServicePlan {
+  service_template_id: number
+  included: boolean
+  enabled_pace: GatewayPace[]
+  category: ServiceCategory | null
 }
 
 interface BulkDraft {
@@ -120,7 +142,12 @@ interface UtcDraft {
   supported: Set<number> | null
   items: ItemDraft[]
   bulk: BulkDraft[]
-  /** "<itemIndex>:<kind>" -> ["service:3", "gateway:1", …]. A capability can
+  /** The definition's services, in its order. Index is what a `new:<i>`
+   *  wiring target refers to. */
+  services: ServicePlan[]
+  /** "<itemIndex>:<kind>" -> ["service:3", "new:0", "gateway:1", …]. `new:`
+   *  names a planned service this deploy stands up, by index into
+   *  `services`. A capability can
    *  back more than one service — a TACLANE's crypto covers every service
    *  behind it — so this is a set, not a single choice. */
   wiring: Record<string, string[]>
@@ -144,6 +171,7 @@ function emptyDraft(role: UtcRole = "independent", siteId: number | "" = ""): Ut
     supported: null,
     items: [],
     bulk: [],
+    services: [],
     wiring: {},
     deployed: false,
   }
@@ -173,15 +201,11 @@ interface Props {
   utcDefs: UtcDef[]
   packages: PackageInstance[]
   packageDefs: PackageDef[]
-  /** Saved rosters. Deploying from one is what turns "retype nine serials"
-   *  into "uncheck the two that aren't going". */
-  forceElements: ForceElement[]
   /** Everything the workspace has already registered, for the local half of
    *  the picker. Carries `utc_name` and `site_name` already, so "held by
    *  FCP-2 (Site Bravo)" needs no extra round-trip. */
   equipment: Equipment[]
-  /** The unit's property book. The other half of the picker, and where force element
-   *  pins resolve from. */
+  /** The unit's property book. The other half of the picker. */
   assets: EquipmentAsset[]
   services: Service[]
   gateways: Gateway[]
@@ -197,7 +221,6 @@ export function DeployUtcWizard({
   utcDefs,
   packages,
   packageDefs,
-  forceElements,
   equipment,
   assets,
   services,
@@ -224,10 +247,9 @@ export function DeployUtcWizard({
   const [submitted, setSubmitted] = useState(false)
 
   // step 1 — package and the UTCs going out under it
-  const [packageMode, setPackageMode] = useState<
-    "force-element" | "existing" | "new" | "none"
-  >(forceElements.length > 0 ? "force-element" : "new")
-  const [forceElementId, setForceElementId] = useState<number | "">("")
+  const [packageMode, setPackageMode] = useState<"existing" | "new" | "none">(
+    "new",
+  )
   const [packageId, setPackageId] = useState<number | "">("")
   const [newPackageName, setNewPackageName] = useState("")
   const [newPackageDefId, setNewPackageDefId] = useState<number | "">("")
@@ -240,9 +262,14 @@ export function DeployUtcWizard({
    *  enclaves this deployment supports — this is what turns "we're leaving the
    *  SIPR stack home" into one checkbox instead of a row-by-row delete. */
   function buildContents(defId: number | "", keep: Set<number> | null) {
-    if (!defId) return { items: [] as ItemDraft[], bulk: [] as BulkDraft[] }
+    const none = {
+      items: [] as ItemDraft[],
+      bulk: [] as BulkDraft[],
+      services: [] as ServicePlan[],
+    }
+    if (!defId) return none
     const def = utcDefs.find((d) => d.id === defId)
-    if (!def) return { items: [] as ItemDraft[], bulk: [] as BulkDraft[] }
+    if (!def) return none
     const nextItems: ItemDraft[] = []
     const nextBulk: BulkDraft[] = []
     for (const line of def.lines) {
@@ -276,7 +303,18 @@ export function DeployUtcWizard({
         })
       }
     }
-    return { items: nextItems, bulk: nextBulk }
+    // A service on an enclave this deployment isn't supporting starts left
+    // out, the same way that enclave's gear does — it would have nothing
+    // behind it.
+    const nextServices: ServicePlan[] = [...def.services]
+      .sort((a, b) => a.display_order - b.display_order)
+      .map((svc) => ({
+        service_template_id: svc.service_template_id,
+        included: svc.enclave_id === null || !keep || keep.has(svc.enclave_id),
+        enabled_pace: [],
+        category: null,
+      }))
+    return { items: nextItems, bulk: nextBulk, services: nextServices }
   }
 
   function makeDraft(
@@ -301,6 +339,7 @@ export function DeployUtcWizard({
       supported: all,
       items: built.items,
       bulk: built.bulk,
+      services: built.services,
     }
   }
 
@@ -319,61 +358,10 @@ export function DeployUtcWizard({
     return out.length > 0 ? out : [emptyDraft()]
   }
 
-  /** Expand a saved force element into one draft per UTC slot, with its pinned gear
-   *  already claimed and checked. This is the whole point of forceElements: the
-   *  operator arrives at the Serialized step with nine rows filled in and
-   *  unchecks the two staying home, instead of typing nine serials. */
-  function draftsFromForceElement(forceElement: ForceElement): UtcDraft[] {
-    const ordered = [...forceElement.utcs].sort(
-      (a, b) => a.display_order - b.display_order,
-    )
-    const out: UtcDraft[] = ordered.map((ku) => {
-      const base = makeDraft(ku.utc_def_id ?? "", roleFromHint(ku.role_hint))
-      const items: ItemDraft[] = ku.items
-        // A pin whose asset was struck from the property book is gear the unit
-        // no longer has. Dropping it beats queueing a row that cannot deploy.
-        .filter((pin) => !pin.retired)
-        .map((pin) => {
-          return {
-            equipment_type_id: pin.equipment_type_id ?? 0,
-            asset_id: pin.asset_id,
-            equipment_id: null,
-            included: true,
-            serial_number: pin.serial_number ?? "",
-            equipment_code: pin.equipment_code ?? "",
-            // Enclave is a property of THIS deployment, not of the box — the
-            // force element is global and knows nothing about this workspace's networks.
-            // Left unset so the enclave step is a real decision.
-            enclave_id: null,
-            // The asset's own capabilities, not the type's declaration: a box
-            // that had `los_rf` struck must not be promised one here.
-            capability_kinds: pin.capability_kinds,
-          } satisfies ItemDraft
-        })
-      const bulk: BulkDraft[] = ku.bulk.map((b) => ({
-        equipment_type_id: b.equipment_type_id,
-        authorized_qty: b.quantity,
-        on_hand_qty: b.quantity,
-        enclave_id: b.enclave_id,
-      }))
-      return {
-        ...base,
-        name: ku.name,
-        // The force element named these; keeping the name means the suggestion machinery
-        // doesn't overwrite something the operator already curated.
-        nameTouched: true,
-        items,
-        bulk,
-      }
-    })
-    return out.length > 0 ? out : [emptyDraft()]
-  }
-
   function reset() {
     setStep(0)
     setMaxVisited(0)
-    setPackageMode(forceElements.length > 0 ? "force-element" : "new")
-    setForceElementId("")
+    setPackageMode("new")
     setReassigned([])
     setSubmitted(false)
     setPackageId("")
@@ -402,7 +390,7 @@ export function DeployUtcWizard({
    *  so repeats get numbered. */
   const suggestedNames = useMemo(() => {
     const packageBase =
-      packageMode === "new" || packageMode === "force-element"
+      packageMode === "new"
         ? newPackageName.trim()
         : packageMode === "existing" && packageId
           ? (packages.find((p) => p.id === packageId)?.name ?? "")
@@ -523,7 +511,7 @@ export function DeployUtcWizard({
     // The site survives the swap, so the proposals can be rebuilt for the new
     // contents rather than leaving the wiring step blank.
     if (prev.siteId) {
-      rebuilt.wiring = proposeWiring(rebuilt.items, Number(prev.siteId))
+      rebuilt.wiring = proposeWiring(rebuilt, Number(prev.siteId))
     }
     setDrafts((ds) =>
       ds.map((d, i) => (i === index ? { ...rebuilt, key: d.key } : d)),
@@ -540,11 +528,17 @@ export function DeployUtcWizard({
     if (nextSet.has(id)) nextSet.delete(id)
     else nextSet.add(id)
     const built = buildContents(current.utcDefId, nextSet)
+    const rebuilt = { ...current, ...built }
     patchDraft(active, {
       supported: nextSet,
       items: built.items,
       bulk: built.bulk,
-      wiring: {},
+      services: built.services,
+      // Re-propose rather than clear: the definition's pre-wiring still
+      // applies to whatever gear survived the toggle.
+      wiring: current.siteId
+        ? proposeWiring(rebuilt, Number(current.siteId))
+        : {},
     })
   }
 
@@ -558,14 +552,38 @@ export function DeployUtcWizard({
    *  told them apart. When the enclave can't disambiguate a genuinely
    *  ambiguous choice, propose nothing: a wrong pre-checked binding is worse
    *  than an empty one, because the operator has no reason to look at it. */
-  function proposeWiring(items: ItemDraft[], targetSiteId: number) {
+  function proposeWiring(
+    d: Pick<UtcDraft, "items" | "services" | "utcDefId">,
+    targetSiteId: number,
+  ) {
+    const { items } = d
     const proposals: Record<string, string[]> = {}
     const svc = services.filter((s) => s.site_id === targetSiteId)
     const gws = gateways.filter((g) => g.site_id === targetSiteId)
+    const defServices = defServicesOf(d.utcDefId)
     items.forEach((item, index) => {
       const t = typeById.get(item.equipment_type_id)
       if (!t) return
       for (const kind of item.capability_kinds) {
+        // The definition's own pre-wiring wins outright. It is the doctrine
+        // answer, so the kind-matching guess below only fills in for
+        // capabilities the definition is silent about.
+        const preWired = d.services.flatMap((plan, planIndex) => {
+          const defSvc = defServices.get(plan.service_template_id)
+          const hit = defSvc?.wires.some(
+            (w) =>
+              w.equipment_type_id === item.equipment_type_id &&
+              w.enclave_id === item.enclave_id &&
+              w.capability_kind === kind,
+          )
+          if (!hit || !defSvc) return []
+          const existing = deliveredAt(defSvc, targetSiteId)
+          return [existing ? `service:${existing.id}` : `new:${planIndex}`]
+        })
+        if (preWired.length > 0) {
+          proposals[`${index}:${kind}`] = preWired
+          continue
+        }
         // Service kinds and capability kinds share vocabulary for voice/data,
         // which is exactly the common case worth auto-proposing.
         if (kind === "voice" || kind === "data") {
@@ -591,16 +609,100 @@ export function DeployUtcWizard({
     return proposals
   }
 
-  /** Site services bucketed by enclave, with the ones matching this force element first
+  /** The definition's service lines, by template. */
+  function defServicesOf(defId: number | ""): Map<number, UtcDefService> {
+    const def = defId ? utcDefs.find((x) => x.id === defId) : null
+    return new Map(
+      (def?.services ?? []).map((svc) => [svc.service_template_id, svc]),
+    )
+  }
+
+  /** The delivery a site already has for this service line, if any — matched
+   *  the way the API finds a service: by name and enclave, which is what
+   *  keeps a hand-made "NIPR Web" from being stood up twice. */
+  function deliveredAt(
+    defSvc: UtcDefService,
+    siteId: number | "",
+  ): Service | undefined {
+    if (!siteId) return undefined
+    return services.find(
+      (s) =>
+        s.site_id === siteId &&
+        s.name === defSvc.service_template_name &&
+        (s.enclave_id ?? null) === defSvc.enclave_id,
+    )
+  }
+
+  /** The pre-wired required/group for one binding, if the definition has it.
+   *  Looked up at submit rather than carried in the wiring map, so a binding
+   *  the operator added by hand still picks up what doctrine says about it. */
+  function preWireFor(
+    d: UtcDraft,
+    item: ItemDraft,
+    kind: string,
+    templateId: number | undefined,
+  ) {
+    if (templateId === undefined) return undefined
+    return defServicesOf(d.utcDefId)
+      .get(templateId)
+      ?.wires.find(
+        (w) =>
+          w.equipment_type_id === item.equipment_type_id &&
+          w.enclave_id === item.enclave_id &&
+          w.capability_kind === kind,
+      )
+  }
+
+  /** Planned services that will be NEW at the site — joined ones are wired
+   *  to as the existing delivery instead. */
+  function newServicePlans(d: UtcDraft) {
+    const defServices = defServicesOf(d.utcDefId)
+    return d.services.flatMap((plan, index) => {
+      const defSvc = defServices.get(plan.service_template_id)
+      if (!plan.included || !defSvc || deliveredAt(defSvc, d.siteId)) return []
+      return [{ plan, index, defSvc }]
+    })
+  }
+
+  function patchServicePlan(index: number, patch: Partial<ServicePlan>) {
+    if (!current) return
+    patchDraft(active, {
+      services: current.services.map((p, i) =>
+        i === index ? { ...p, ...patch } : p,
+      ),
+    })
+  }
+
+  /** Site services bucketed by enclave, with the ones matching this kit first
    *  so the right answer is the first thing in the list. Nothing is hidden —
    *  an operator wiring a shared box across enclaves still needs the others. */
   function serviceGroupsFor(enclaveId: number | null) {
-    const byEnclave = new Map<number | null, Service[]>()
-    for (const svc of siteServices) {
-      const k = svc.enclave_id ?? null
+    const byEnclave = new Map<
+      number | null,
+      { value: string; name: string; isNew: boolean }[]
+    >()
+    const add = (k: number | null, entry: { value: string; name: string; isNew: boolean }) => {
       const bucket = byEnclave.get(k)
-      if (bucket) bucket.push(svc)
-      else byEnclave.set(k, [svc])
+      if (bucket) bucket.push(entry)
+      else byEnclave.set(k, [entry])
+    }
+    for (const svc of siteServices) {
+      add(svc.enclave_id ?? null, {
+        value: `service:${svc.id}`,
+        name: svc.name,
+        isNew: false,
+      })
+    }
+    // Services this deploy is about to stand up are targets too — that is
+    // what lets gear be wired to a service the site doesn't have yet.
+    if (current) {
+      for (const { index, defSvc } of newServicePlans(current)) {
+        add(defSvc.enclave_id, {
+          value: `new:${index}`,
+          name: defSvc.service_template_name ?? "Service",
+          isNew: true,
+        })
+      }
     }
     const groups = [...byEnclave.entries()].map(([k, grouped]) => ({
       key: String(k ?? "none"),
@@ -741,7 +843,7 @@ export function DeployUtcWizard({
   }
 
   /** Copy one capability's targets onto every other capability of the same
-   *  forceElement. A TACLANE's crypto and routing back the same services far more often
+   *  kit. A TACLANE's crypto and routing back the same services far more often
    *  than not, and setting them one at a time is the tedious part. */
   function matchAcrossCapabilities(itemIndex: number, kind: string) {
     if (!current) return
@@ -775,21 +877,55 @@ export function DeployUtcWizard({
     const renumber = new Map<number, number>()
     shipping.forEach((original, position) => renumber.set(original, position))
 
+    // Same renumbering for services: only new, included ones ship, and a
+    // `new:<i>` wire has to point at its position in what shipped.
+    const newPlans = newServicePlans(d)
+    const serviceRenumber = new Map<number, number>()
+    newPlans.forEach(({ index }, position) =>
+      serviceRenumber.set(index, position),
+    )
+
     const wiringOut = Object.entries(d.wiring).flatMap(([key, values]) => {
       const [indexStr, kind] = key.split(":")
       const target = renumber.get(Number(indexStr))
       // Wiring proposed for a row the operator then unchecked. Dropping it is
       // right: the gear isn't going, so neither is its binding.
       if (target === undefined) return []
-      return values.map((value) => {
+      const item = d.items[Number(indexStr)]
+      return values.flatMap((value) => {
         const [targetKind, targetId] = value.split(":")
-        return {
-          item_index: target,
-          capability_kind: kind as CapabilityKind,
-          service_id: targetKind === "service" ? Number(targetId) : null,
-          gateway_id: targetKind === "gateway" ? Number(targetId) : null,
-          role: "endpoint" as const,
+        let templateId: number | undefined
+        let newIndex: number | null = null
+        if (targetKind === "new") {
+          const position = serviceRenumber.get(Number(targetId))
+          // A service the operator then left out — or one the site turned out
+          // to have already. Either way there is nothing new to wire to.
+          if (position === undefined) return []
+          newIndex = position
+          templateId = d.services[Number(targetId)]?.service_template_id
+        } else if (targetKind === "service") {
+          const svc = services.find((s) => s.id === Number(targetId))
+          templateId = svc
+            ? [...defServicesOf(d.utcDefId).values()].find(
+                (x) =>
+                  x.service_template_name === svc.name &&
+                  x.enclave_id === (svc.enclave_id ?? null),
+              )?.service_template_id
+            : undefined
         }
+        const pre = item ? preWireFor(d, item, kind, templateId) : undefined
+        return [
+          {
+            item_index: target,
+            capability_kind: kind as CapabilityKind,
+            service_id: targetKind === "service" ? Number(targetId) : null,
+            new_service_index: newIndex,
+            gateway_id: targetKind === "gateway" ? Number(targetId) : null,
+            role: pre?.role ?? ("endpoint" as const),
+            required: pre?.required ?? false,
+            group_key: pre?.group_key ?? null,
+          },
+        ]
       })
     })
     // Every UTC after the first joins the package the first one resolved or
@@ -798,15 +934,7 @@ export function DeployUtcWizard({
     const joinExisting =
       packageInstanceId ??
       (packageMode === "existing" && packageId ? Number(packageId) : null)
-    // Deploying from a force element creates a package too — it is the roster, not
-    // the deployment, and its gear still has to land under something.
-    const creatingNew =
-      joinExisting === null &&
-      (packageMode === "new" || packageMode === "force-element")
-    const selectedForceElement =
-      packageMode === "force-element" && forceElementId
-        ? forceElements.find((k) => k.id === forceElementId)
-        : undefined
+    const creatingNew = joinExisting === null && packageMode === "new"
     return {
       site_id: Number(d.siteId),
       name: nameOf(index).trim(),
@@ -816,8 +944,9 @@ export function DeployUtcWizard({
       new_package_name:
         creatingNew && newPackageName.trim() ? newPackageName.trim() : null,
       new_package_def_id: creatingNew
-        ? (selectedForceElement?.package_def_id ??
-          (newPackageDefId ? Number(newPackageDefId) : null))
+        ? newPackageDefId
+          ? Number(newPackageDefId)
+          : null
         : null,
       items: shipping.map((ii) => {
         const i = d.items[ii]
@@ -857,6 +986,12 @@ export function DeployUtcWizard({
           on_hand_qty: b.on_hand_qty,
           enclave_id: b.enclave_id,
         })),
+      services: newPlans.map(({ plan }) => ({
+        service_template_id: plan.service_template_id,
+        enabled_pace: plan.enabled_pace,
+        // canAdvance holds the wizard on the services step until this is set.
+        category: plan.category ?? "other",
+      })),
       wiring: wiringOut,
     }
   }
@@ -948,8 +1083,18 @@ export function DeployUtcWizard({
   }
 
   const pendingDrafts = drafts.filter((d) => !d.deployed)
+  /** A new service with no PACE tier or no criticality yet. Checked across
+   *  the whole queue, not just the UTC on screen — a package can be deployed
+   *  from the review step without visiting every UTC's services step. */
+  function servicesUnset(d: UtcDraft): boolean {
+    return newServicePlans(d).some(
+      ({ plan }) => plan.enabled_pace.length === 0 || plan.category === null,
+    )
+  }
+
   const incomplete = drafts.some(
-    (d, i) => !d.deployed && (!d.siteId || !nameOf(i).trim()),
+    (d, i) =>
+      !d.deployed && (!d.siteId || !nameOf(i).trim() || servicesUnset(d)),
   )
 
   const canAdvance = (() => {
@@ -957,11 +1102,16 @@ export function DeployUtcWizard({
       case "package":
         return (
           drafts.length > 0 &&
-          (packageMode !== "existing" || packageId !== "") &&
-          (packageMode !== "force-element" || forceElementId !== "")
+          (packageMode !== "existing" || packageId !== "")
         )
       case "site":
         return !!current?.siteId && nameOf(active).trim().length > 0
+      case "services":
+        return current
+          ? newServicePlans(current).every(
+              ({ plan }) => plan.enabled_pace.length > 0 && plan.category !== null,
+            )
+          : true
       default:
         return true
     }
@@ -971,6 +1121,157 @@ export function DeployUtcWizard({
 
   /** UTC switcher for the per-UTC steps. Only earns its space once there's
    *  more than one in the queue. */
+  /** Step: the services the UTC brings up. Each is joined if the site already
+   *  delivers it, or stood up with a PACE plan and criticality chosen here. */
+  function servicesStep() {
+    if (!current) return null
+    const defServices = defServicesOf(current.utcDefId)
+    const site = sites.find((x) => x.id === current.siteId)
+    // How many gateways this site has on each tier, so "which tiers can this
+    // service use" is answered by what is actually there.
+    const gatewaysPerTier = new Map<GatewayPace, number>()
+    for (const g of siteGateways) {
+      gatewaysPerTier.set(g.pace, (gatewaysPerTier.get(g.pace) ?? 0) + 1)
+    }
+    return (
+      <div className="space-y-3">
+        {draftTabs()}
+        <p className="text-xs text-muted-foreground">
+          The services this UTC brings up at {site?.name ?? "the site"}. Choose
+          which PACE tiers each one uses and how critical it is here.
+        </p>
+        {current.services.length === 0 && (
+          <p className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+            {current.utcDefId
+              ? "This UTC's definition doesn't bring up any services."
+              : "A hand-built UTC brings up no services — wire its gear to existing ones on the next step."}
+          </p>
+        )}
+        {current.services.map((plan, index) => {
+          const defSvc = defServices.get(plan.service_template_id)
+          if (!defSvc) return null
+          const en =
+            defSvc.enclave_id !== null
+              ? enclaves.find((e) => e.id === defSvc.enclave_id)
+              : null
+          const existing = deliveredAt(defSvc, current.siteId)
+          const needsChoice =
+            plan.included &&
+            !existing &&
+            (plan.enabled_pace.length === 0 || plan.category === null)
+          return (
+            <div
+              key={plan.service_template_id}
+              className={cn(
+                "space-y-2.5 rounded-lg border p-3",
+                needsChoice ? "border-amber-500/50" : "border-border",
+                !plan.included && "opacity-60",
+              )}
+            >
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  className="size-4"
+                  checked={plan.included}
+                  onChange={(e) =>
+                    patchServicePlan(index, { included: e.target.checked })
+                  }
+                />
+                {defSvc.service_template_name}
+                {en && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                      enclaveChipClass(en.color),
+                    )}
+                    style={enclaveChipStyle(en.color)}
+                  >
+                    {en.short_name || en.name}
+                  </span>
+                )}
+                <span className="ml-auto text-[11px] font-normal text-muted-foreground">
+                  {defSvc.wires.length > 0
+                    ? `${defSvc.wires.length} pre-wired`
+                    : "Not pre-wired"}
+                </span>
+              </label>
+
+              {plan.included && existing && (
+                <p className="text-xs text-muted-foreground">
+                  Already delivered here — this UTC joins it. Its PACE plan (
+                  {existing.enabled_pace.map(paceShort).join("") || "none"}) and
+                  criticality ({categoryLabel(existing.category)}) stay as they
+                  are.
+                </p>
+              )}
+
+              {plan.included && !existing && (
+                <>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="w-20 shrink-0 text-xs">PACE</span>
+                    {GATEWAY_PACE_VALUES.map((p) => {
+                      const on = plan.enabled_pace.includes(p)
+                      const n = gatewaysPerTier.get(p) ?? 0
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() =>
+                            patchServicePlan(index, {
+                              enabled_pace: on
+                                ? plan.enabled_pace.filter((x) => x !== p)
+                                : GATEWAY_PACE_VALUES.filter(
+                                    (x) => x === p || plan.enabled_pace.includes(x),
+                                  ),
+                            })
+                          }
+                          className={chipClass(on)}
+                          title={`${n} gateway${n === 1 ? "" : "s"} on ${paceLabel(p)} at this site`}
+                        >
+                          {paceLabel(p)}
+                          <span className="ml-1 tabular-nums opacity-60">
+                            {n}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="w-20 shrink-0 text-xs">Criticality</span>
+                    {SERVICE_CATEGORIES.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-pressed={plan.category === c}
+                        onClick={() => patchServicePlan(index, { category: c })}
+                        className={chipClass(plan.category === c)}
+                      >
+                        {categoryLabel(c)}
+                      </button>
+                    ))}
+                    {/* The catalog's value as a hint, never a default: it is
+                        what this service usually is, not what it is here. */}
+                    {defSvc.default_category && plan.category === null && (
+                      <span className="text-[11px] text-muted-foreground">
+                        Usually {categoryLabel(defSvc.default_category).toLowerCase()}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
+        {!canAdvance && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Choose PACE tiers and a criticality for each service to continue.
+          </p>
+        )}
+      </div>
+    )
+  }
+
   function draftTabs() {
     if (drafts.length < 2) return null
     return (
@@ -1091,112 +1392,24 @@ export function DeployUtcWizard({
                 belong to the same one.
               </p>
               <div className="flex flex-wrap gap-2">
-                {(["force-element", "new", "existing", "none"] as const)
-                  .filter((m) => m !== "force-element" || forceElements.length > 0)
-                  .map((m) => (
-                    <Button
-                      key={m}
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className={cn("gap-1.5", choiceClass(packageMode === m))}
-                      onClick={() => setPackageMode(m)}
-                    >
-                      {packageMode === m && <Check className="size-3.5" />}
-                      {m === "force-element"
-                        ? "From a force element"
-                        : m === "new"
-                          ? "New package"
-                          : m === "existing"
-                            ? "Existing"
-                            : "Standalone"}
-                    </Button>
-                  ))}
-              </div>
-
-              {packageMode === "force-element" && (
-                <div className="space-y-2">
-                  <select
-                    value={forceElementId}
-                    onChange={(e) => {
-                      const id = e.target.value ? Number(e.target.value) : ""
-                      setForceElementId(id)
-                      const forceElement = id ? forceElements.find((k) => k.id === id) : null
-                      if (forceElement) {
-                        setDrafts(draftsFromForceElement(forceElement))
-                        setActive(0)
-                        if (!newPackageName.trim()) setNewPackageName(forceElement.name)
-                      }
-                    }}
-                    className={selectClass}
+                {(["new", "existing", "none"] as const).map((m) => (
+                  <Button
+                    key={m}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className={cn("gap-1.5", choiceClass(packageMode === m))}
+                    onClick={() => setPackageMode(m)}
                   >
-                    <option value="">Select a force element…</option>
-                    {forceElements.map((k) => (
-                      <option key={k.id} value={k.id}>
-                        {k.name} — {k.utcs.length} UTC
-                        {k.utcs.length === 1 ? "" : "s"}, {k.item_count} item
-                        {k.item_count === 1 ? "" : "s"}
-                      </option>
-                    ))}
-                  </select>
-                  {(() => {
-                    const forceElement = forceElementId ? forceElements.find((k) => k.id === forceElementId) : null
-                    if (!forceElement) {
-                      return (
-                        <p className="text-xs text-muted-foreground">
-                          A force element remembers which UTCs go out and exactly which
-                          gear is in them, so this deployment only has to check
-                          off what is actually going.
-                        </p>
-                      )
-                    }
-                    return (
-                      <div className="space-y-1.5 rounded-lg border border-border p-2.5">
-                        <div className="flex items-center gap-2 text-xs">
-                          <Boxes className="size-3.5 text-muted-foreground" />
-                          <span className="font-medium">{forceElement.name}</span>
-                          {forceElement.package_def_code && (
-                            <span className="text-muted-foreground">
-                              {forceElement.package_def_code}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {forceElement.item_count} serialized item
-                          {forceElement.item_count === 1 ? "" : "s"} pinned
-                          {forceElement.bulk_count > 0 &&
-                            `, ${forceElement.bulk_count} bulk unit${
-                              forceElement.bulk_count === 1 ? "" : "s"
-                            }`}
-                          .
-                        </p>
-                        {forceElement.committed_count > 0 && (
-                          /* Not a warning. Gear moving between packages is the
-                             normal workflow for a unit that owns one of
-                             something — this is here so the number isn't a
-                             surprise on the review step. */
-                          <p className="text-[11px] text-muted-foreground">
-                            {forceElement.committed_count} of them{" "}
-                            {forceElement.committed_count === 1 ? "is" : "are"} currently
-                            on another deployment and will move here.
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })()}
-                  <div>
-                    <label className="mb-1 block text-xs font-medium">
-                      Package name
-                    </label>
-                    <input
-                      value={newPackageName}
-                      onChange={(e) => setNewPackageName(e.target.value)}
-                      placeholder="FCP-1"
-                      className={selectClass}
-                    />
-                  </div>
-                </div>
-              )}
+                    {packageMode === m && <Check className="size-3.5" />}
+                    {m === "new"
+                      ? "New package"
+                      : m === "existing"
+                        ? "Existing"
+                        : "Standalone"}
+                  </Button>
+                ))}
+              </div>
 
               {packageMode === "existing" && (
                 <select
@@ -1450,7 +1663,7 @@ export function DeployUtcWizard({
                     const v = Number(e.target.value)
                     patchDraft(active, {
                       siteId: v,
-                      wiring: proposeWiring(current.items, v),
+                      wiring: proposeWiring(current, v),
                     })
                   }}
                   className={selectClass}
@@ -2026,14 +2239,18 @@ export function DeployUtcWizard({
           )}
 
           {/* ---- 6. wiring ---- */}
-          {step === 5 && current && (
+          {STEPS[step].key === "services" && current && servicesStep()}
+
+          {STEPS[step].key === "wiring" && current && (
             <div className="space-y-3">
               {draftTabs()}
               <p className="text-xs text-muted-foreground">
                 Which services or gateways each capability backs — a capability
                 can back several. Pre-selected where the match was obvious.
               </p>
-              {siteServices.length === 0 && siteGateways.length === 0 && (
+              {siteServices.length === 0 &&
+                siteGateways.length === 0 &&
+                newServicePlans(current).length === 0 && (
                 <p className="rounded-lg border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
                   This site has no services or gateways yet — you can wire this
                   gear up later from the equipment detail page.
@@ -2106,21 +2323,28 @@ export function DeployUtcWizard({
                                       }`
                                     : "No enclave"}
                                 </span>
-                                {g.services.map((s) => {
-                                  const value = `service:${s.id}`
-                                  return (
-                                    <button
-                                      key={s.id}
-                                      type="button"
-                                      onClick={() => toggleTarget(key, value)}
-                                      className={chipClass(
-                                        chosen.includes(value),
-                                      )}
-                                    >
-                                      {s.name}
-                                    </button>
-                                  )
-                                })}
+                                {g.services.map((s) => (
+                                  <button
+                                    key={s.value}
+                                    type="button"
+                                    onClick={() => toggleTarget(key, s.value)}
+                                    className={chipClass(
+                                      chosen.includes(s.value),
+                                    )}
+                                    title={
+                                      s.isNew
+                                        ? "Brought up by this deployment"
+                                        : undefined
+                                    }
+                                  >
+                                    {s.name}
+                                    {s.isNew && (
+                                      <span className="ml-1 opacity-70">
+                                        · new
+                                      </span>
+                                    )}
+                                  </button>
+                                ))}
                               </div>
                             ))}
                             {siteGateways.length > 0 && (
@@ -2177,27 +2401,16 @@ export function DeployUtcWizard({
           )}
 
           {/* ---- 7. review ---- */}
-          {step === 6 && (
+          {STEPS[step].key === "review" && (
             <div className="space-y-3 text-sm">
               <dl className="grid grid-cols-3 gap-y-2">
                 <dt className="text-xs text-muted-foreground">Package</dt>
                 <dd className="col-span-2">
-                  {packageMode === "new" || packageMode === "force-element"
+                  {packageMode === "new"
                     ? newPackageName || "—"
                     : packageMode === "existing"
                       ? (packages.find((p) => p.id === packageId)?.name ?? "—")
                       : "Standalone"}
-                  {/* Only worth saying when the two differ — the package name
-                      is seeded from the kit's, so the common case would read
-                      "FCP-1 from FCP-1". */}
-                  {packageMode === "force-element" &&
-                    forceElementId &&
-                    forceElements.find((k) => k.id === forceElementId)?.name !==
-                      newPackageName.trim() && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        from {forceElements.find((k) => k.id === forceElementId)?.name}
-                      </span>
-                    )}
                 </dd>
                 <dt className="text-xs text-muted-foreground">UTCs</dt>
                 <dd className="col-span-2">
@@ -2212,6 +2425,16 @@ export function DeployUtcWizard({
                   ? utcDefs.find((x) => x.id === d.utcDefId)
                   : null
                 const missing = !d.siteId || !nameOf(i).trim()
+                const unset = servicesUnset(d)
+                const newCount = newServicePlans(d).length
+                const joinCount = d.services.filter((plan) => {
+                  const defSvc = def?.services.find(
+                    (x) => x.service_template_id === plan.service_template_id,
+                  )
+                  return (
+                    plan.included && defSvc && deliveredAt(defSvc, d.siteId)
+                  )
+                }).length
                 return (
                   <div
                     key={d.key}
@@ -2246,10 +2469,18 @@ export function DeployUtcWizard({
                       · {d.bulk.length} bulk{" "}
                       {d.bulk.length === 1 ? "line" : "lines"} ·{" "}
                       {bindingCount(d)} bindings
+                      {(newCount > 0 || joinCount > 0) &&
+                        ` · ${newCount} new service${newCount === 1 ? "" : "s"}`}
+                      {joinCount > 0 && `, ${joinCount} joined`}
                     </div>
                     {missing && !d.deployed && (
                       <p className="mt-1 text-xs text-destructive">
                         Needs a site and a name before it can deploy.
+                      </p>
+                    )}
+                    {!missing && unset && !d.deployed && (
+                      <p className="mt-1 text-xs text-destructive">
+                        Needs PACE tiers and a criticality for each new service.
                       </p>
                     )}
                   </div>

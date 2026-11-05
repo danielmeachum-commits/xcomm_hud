@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from auth import get_current_user, hash_password
@@ -26,13 +27,13 @@ from routers import (
     equipment,
     equipment_assets,
     equipment_catalog,
-    force_elements,
     equipment_topology,
     event_types,
     events,
     folders,
     gateways,
     ingest,
+    people,
     personnel,
     rules,
     scoi_sources,
@@ -163,6 +164,7 @@ app.include_router(scoi_sources.router)
 app.include_router(units.router)
 app.include_router(work_centers.router)
 app.include_router(teams.router)
+app.include_router(people.router)
 app.include_router(personnel.router)
 # Enclaves are referenced by the equipment catalog and by services, so they
 # read first in the docs.
@@ -173,12 +175,25 @@ app.include_router(equipment_assets.router)
 app.include_router(equipment_catalog.router)
 app.include_router(equipment.router)
 app.include_router(deployments.router)
-app.include_router(force_elements.router)
 app.include_router(equipment_topology.router)
 
 
 @app.get("/health")
 def health() -> dict[str, bool]:
+    return {"ok": True}
+
+
+@app.get("/healthz")
+def healthz(db: Session = Depends(get_db)) -> dict[str, bool]:
+    """Readiness: the process is up AND the database answers.
+
+    `/health` only proves the process is alive, which is true while Postgres
+    is still starting and every real request would fail. The offline bundle's
+    container health check and `xcomm status` read this one instead, so
+    "healthy" means usable. Raising here is the point — an unreachable
+    database comes back as a 500, which is what marks the container unhealthy.
+    """
+    db.execute(text("SELECT 1"))
     return {"ok": True}
 
 

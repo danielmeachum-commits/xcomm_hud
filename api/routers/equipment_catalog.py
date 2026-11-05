@@ -30,14 +30,18 @@ from models import (
     EquipmentTypeWorkCenter,
     PackageDef,
     PackageDefUtc,
+    ServiceTemplate,
     User,
     UtcDef,
     UtcDefLine,
     UtcDefManforLine,
+    UtcDefService,
+    UtcDefServiceWire,
     WorkCenter,
     Workspace,
 )
 from pubsub import notify
+from routers.work_centers import load_visible as load_work_center
 from schemas import (
     EquipmentTypeCapabilityIn,
     EquipmentTypeIn,
@@ -52,6 +56,7 @@ from schemas import (
     UtcDefLineIn,
     UtcDefManforLineIn,
     UtcDefOut,
+    UtcDefServiceIn,
     UtcDefPatch,
 )
 
@@ -101,13 +106,19 @@ def _norm_tags(tags: list[str]) -> list[str]:
     return list(seen)
 
 
-def _type_out(db: Session, row: EquipmentType) -> EquipmentTypeOut:
+def _type_out(
+    db: Session, row: EquipmentType, workspace: Workspace
+) -> EquipmentTypeOut:
     out = EquipmentTypeOut.model_validate(row)
     out.is_global = row.workspace_id is None
     out.enclave_ids = sorted(link.enclave_id for link in row.enclave_links)
-    # Primary first, then by name — the responsible shop is the one people
-    # look for, and it should not be buried mid-list.
-    links = sorted(row.work_center_links, key=lambda l: (not l.is_primary, l.id))
+    # Ownership is answered per workspace, so a global type carries every
+    # workspace's links — only this one's are its answer. Primary first, then
+    # by id: the responsible shop is the one people look for.
+    links = sorted(
+        (l for l in row.work_center_links if l.workspace_id == workspace.id),
+        key=lambda l: (not l.is_primary, l.id),
+    )
     names = {
         w.id: w.name
         for w in db.query(WorkCenter).filter(
@@ -151,8 +162,8 @@ def _set_type_work_centers(
 
     seen_primary = False
     for link in {l.work_center_id: l for l in links}.values():
-        wc = db.get(WorkCenter, link.work_center_id)
-        if wc is None or wc.workspace_id != workspace.id:
+        wc = load_work_center(db, link.work_center_id, workspace)
+        if wc is None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 f"Work center {link.work_center_id} not found",
@@ -224,7 +235,7 @@ def list_equipment_types(
         )
         .all()
     )
-    return [_type_out(db, r) for r in rows]
+    return [_type_out(db, r, workspace) for r in rows]
 
 
 @router.post(
@@ -263,7 +274,7 @@ def create_equipment_type(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.patch("/equipment-types/{type_id}", response_model=EquipmentTypeOut)
@@ -288,7 +299,7 @@ def patch_equipment_type(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.put(
@@ -328,7 +339,7 @@ def replace_type_capabilities(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.put("/equipment-types/{type_id}/enclaves", response_model=EquipmentTypeOut)
@@ -353,7 +364,7 @@ def replace_type_enclaves(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.delete("/equipment-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -450,7 +461,116 @@ def _utc_def_out(db: Session, row: UtcDef) -> UtcDefOut:
                 line_out.equipment_type_title = t.title
                 line_out.equipment_type_short_name = t.short_name
                 line_out.serialized = t.serialized
+    if row.services:
+        templates = {
+            t.id: t
+            for t in db.query(ServiceTemplate).filter(
+                ServiceTemplate.id.in_([s.service_template_id for s in row.services])
+            )
+        }
+        for svc_out in out.services:
+            t = templates.get(svc_out.service_template_id)
+            if t is not None:
+                svc_out.service_template_name = t.name
+                svc_out.kind = t.kind
+                svc_out.enclave_id = t.enclave_id
+                svc_out.default_category = t.category
     return out
+
+
+def _set_utc_def_services(
+    db: Session, row: UtcDef, services: list[UtcDefServiceIn]
+) -> None:
+    """Replace the UTC's service lines and their pre-wiring, wholesale.
+
+    Every wire must name a line the LOGDET actually has and a capability kind
+    that line's type declares. Checked here rather than left for deploy to
+    skip, because a wire that can never match is a mistake the person editing
+    the definition can still fix — at deploy it would only vanish silently.
+
+    Duplicates are folded rather than 409'd, the `_merge_manfor` instinct: the
+    same template twice merges its wires, and the same wire twice keeps the
+    first.
+    """
+    db.flush()
+    lines = {(line.equipment_type_id, line.enclave_id) for line in row.lines}
+    type_ids = {type_id for type_id, _ in lines}
+    kinds_by_type: dict[int, set[str]] = {}
+    for cap in db.query(EquipmentTypeCapability).filter(
+        EquipmentTypeCapability.equipment_type_id.in_(type_ids)
+    ):
+        kinds_by_type.setdefault(cap.equipment_type_id, set()).add(cap.kind)
+
+    merged: dict[int, list] = {}
+    for svc in services:
+        merged.setdefault(svc.service_template_id, []).extend(svc.wires)
+
+    for template_id in merged:
+        if db.get(ServiceTemplate, template_id) is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"Service template {template_id} not found"
+            )
+    for wires in merged.values():
+        for wire in wires:
+            if (wire.equipment_type_id, wire.enclave_id) not in lines:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "A pre-wired capability names equipment this UTC's LOGDET "
+                    "doesn't carry.",
+                )
+            if wire.capability_kind not in kinds_by_type.get(
+                wire.equipment_type_id, set()
+            ):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"That equipment type has no '{wire.capability_kind}' "
+                    "capability to wire.",
+                )
+
+    db.query(UtcDefService).filter(UtcDefService.utc_def_id == row.id).delete(
+        synchronize_session=False
+    )
+    db.flush()
+    for order, (template_id, wires) in enumerate(merged.items()):
+        svc_row = UtcDefService(
+            utc_def_id=row.id, service_template_id=template_id, display_order=order
+        )
+        db.add(svc_row)
+        db.flush()
+        seen: set[tuple[int, int | None, str]] = set()
+        for wire in wires:
+            key = (wire.equipment_type_id, wire.enclave_id, wire.capability_kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            group_key = (wire.group_key or "").strip() or None
+            db.add(
+                UtcDefServiceWire(
+                    utc_def_service_id=svc_row.id,
+                    equipment_type_id=wire.equipment_type_id,
+                    enclave_id=wire.enclave_id,
+                    capability_kind=wire.capability_kind,
+                    role=wire.role,
+                    required=wire.required,
+                    # A group only means something on a required wire.
+                    group_key=group_key if wire.required else None,
+                )
+            )
+
+
+def _prune_service_wires(db: Session, row: UtcDef) -> None:
+    """Drop pre-wiring whose equipment line no longer exists.
+
+    Called after the LOGDET is replaced. A wire for a line that was removed
+    can never match at deploy, and keeping it would leave a binding the
+    editor can't show against any row.
+    """
+    db.flush()
+    lines = {(line.equipment_type_id, line.enclave_id) for line in row.lines}
+    for svc in row.services:
+        for wire in list(svc.wires):
+            if (wire.equipment_type_id, wire.enclave_id) not in lines:
+                svc.wires.remove(wire)
 
 
 def _load_utc_def(db: Session, utc_def_id: int, workspace: Workspace) -> UtcDef:
@@ -471,7 +591,11 @@ def list_utc_defs(
 ):
     rows = (
         db.query(UtcDef)
-        .options(selectinload(UtcDef.lines), selectinload(UtcDef.manfor))
+        .options(
+            selectinload(UtcDef.lines),
+            selectinload(UtcDef.manfor),
+            selectinload(UtcDef.services).selectinload(UtcDefService.wires),
+        )
         .filter(_visible(UtcDef, workspace, include_retired))
         .order_by(UtcDef.code)
         .all()
@@ -493,7 +617,8 @@ def create_utc_def(
     owner_id = None if make_global else workspace.id
     _require_write(owner_id, current_user)
     row = UtcDef(
-        workspace_id=owner_id, **body.model_dump(exclude={"lines", "manfor"})
+        workspace_id=owner_id,
+        **body.model_dump(exclude={"lines", "manfor", "services"}),
     )
     db.add(row)
     db.flush()
@@ -512,6 +637,10 @@ def create_utc_def(
         db.add(_manfor_row(row.id, position, order))
     db.flush()
     db.refresh(row)
+    if body.services:
+        _set_utc_def_services(db, row, body.services)
+        db.flush()
+        db.refresh(row)
     notify(background_tasks)
     return _utc_def_out(db, row)
 
@@ -563,7 +692,7 @@ def replace_type_work_centers(
     db.flush()
     db.refresh(row)
     notify(background_tasks)
-    return _type_out(db, row)
+    return _type_out(db, row, workspace)
 
 
 @router.put("/utc-defs/{utc_def_id}/lines", response_model=UtcDefOut)
@@ -597,6 +726,8 @@ def replace_utc_def_lines(
         )
     db.flush()
     db.refresh(row)
+    _prune_service_wires(db, row)
+    db.flush()
     notify(background_tasks)
     return _utc_def_out(db, row)
 
@@ -625,6 +756,31 @@ def replace_utc_def_manfor(
     )
     for order, position in enumerate(_merge_manfor(body)):
         db.add(_manfor_row(row.id, position, order))
+    db.flush()
+    db.refresh(row)
+    notify(background_tasks)
+    return _utc_def_out(db, row)
+
+
+@router.put("/utc-defs/{utc_def_id}/services", response_model=UtcDefOut)
+def replace_utc_def_services(
+    utc_def_id: int,
+    body: list[UtcDefServiceIn],
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    """Replace the services this UTC brings up, and their pre-wiring.
+
+    Same wholesale shape as `/lines` and `/manfor`. Nothing outside the
+    definition points at these rows — a deploy copies them into live
+    `capability_service_link`s rather than referencing them — so
+    delete-and-reinsert is safe.
+    """
+    row = _load_utc_def(db, utc_def_id, workspace)
+    _require_write(row.workspace_id, current_user)
+    _set_utc_def_services(db, row, body)
     db.flush()
     db.refresh(row)
     notify(background_tasks)

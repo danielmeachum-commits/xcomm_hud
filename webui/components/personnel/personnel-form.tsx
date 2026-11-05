@@ -30,8 +30,10 @@ import {
 } from "@/lib/personnel-data"
 import type {
   Branch,
+  Person,
   Personnel,
   PersonnelType,
+  Role,
   Site,
   Team,
   Unit,
@@ -237,6 +239,11 @@ interface Props {
   teams: Team[]
   sites: Site[]
   supervisors: Personnel[]
+  /** The global roster. A new name that matches someone on it who isn't in
+   *  this workspace yet is offered as "add them" instead of a second copy. */
+  roster?: Person[]
+  /** Gates the shared identity fields — see `lockIdentity`. */
+  userRole?: Role
   triggerLabel?: string
   triggerVariant?: "default" | "outline"
 }
@@ -248,11 +255,18 @@ export function PersonnelForm({
   teams,
   sites,
   supervisors,
+  roster = [],
+  userRole,
   triggerLabel,
   triggerVariant,
 }: Props) {
   const router = useRouter()
   const editing = !!person
+  const isAdmin = userRole === "admin"
+  // Who someone is lives on the global roster and shows in every workspace
+  // they're in, so past contact details only an admin changes it. Guests are
+  // local to this workspace and stay fully editable.
+  const lockIdentity = editing && !person!.is_guest && !isAdmin
   const defaultUnit = units.find((u) => u.is_default) ?? null
   // No "default site" flag exists yet, so new people start at the first site
   // in the workspace list — one less field to touch for single-site setups.
@@ -400,6 +414,43 @@ export function PersonnelForm({
         p.first_name.trim().toLowerCase() === first,
     )
   }, [supervisors, draft.last_name, draft.first_name, editing, person])
+
+  const rosterMatches = useMemo(() => {
+    if (editing) return []
+    const last = draft.last_name.trim().toLowerCase()
+    const first = draft.first_name.trim().toLowerCase()
+    if (!last || !first) return []
+    const here = new Set(supervisors.map((p) => p.person_id))
+    return roster.filter(
+      (p) =>
+        !here.has(p.id) &&
+        p.last_name.trim().toLowerCase() === last &&
+        p.first_name.trim().toLowerCase() === first,
+    )
+  }, [roster, supervisors, draft.last_name, draft.first_name, editing])
+
+  /** Bring an existing roster person in rather than creating a duplicate. */
+  async function addFromRoster(p: Person) {
+    setPending(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/be/personnel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: p.id }),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}))
+        throw new Error(detail.detail ?? "Failed to add")
+      }
+      router.refresh()
+      setCreatedName(`${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error")
+    } finally {
+      setPending(false)
+    }
+  }
 
   const exactDuplicate =
     nameMatches.find((p) => (p.rank ?? "") === draft.rank) ?? null
@@ -610,7 +661,7 @@ export function PersonnelForm({
           <DialogTitle>
             {editing
               ? `Edit ${person!.last_name}, ${person!.first_name}`
-              : "Add personnel"}
+              : "New person"}
           </DialogTitle>
         </DialogHeader>
 
@@ -672,7 +723,13 @@ export function PersonnelForm({
 
             <div className="min-h-[300px] space-y-4">
               {step === 0 && (
-                <>
+                <fieldset disabled={lockIdentity} className="contents">
+                  {lockIdentity && (
+                    <p className="rounded-md border border-input bg-muted/50 p-3 text-xs text-muted-foreground">
+                      Name, rank and unit are shared with every workspace
+                      this person is in — ask an admin to change them.
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="last_name">Last name</Label>
@@ -745,6 +802,43 @@ export function PersonnelForm({
                     </div>
                   )}
 
+                  {rosterMatches.length > 0 && (
+                    <div
+                      className="space-y-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-3 text-sm"
+                      role="status"
+                    >
+                      <p className="font-medium">
+                        Already on the roster — add them instead of creating a
+                        second copy?
+                      </p>
+                      <ul className="space-y-1.5">
+                        {rosterMatches.map((p) => (
+                          <li key={p.id} className="flex items-center gap-2">
+                            <span>
+                              {p.rank ? `${p.rank} ` : ""}
+                              {p.last_name}, {p.first_name}
+                              <span className="text-muted-foreground">
+                                {p.unit_id
+                                  ? ` — ${allUnits.find((u) => u.id === p.unit_id)?.name ?? "unknown unit"}`
+                                  : ""}
+                              </span>
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="ml-auto"
+                              disabled={pending}
+                              onClick={() => addFromRoster(p)}
+                            >
+                              Add this person
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   {/* Unit ahead of branch — picking a unit with a branch
                       prefills the branch (still editable below). */}
                   <div className="space-y-1.5">
@@ -771,16 +865,19 @@ export function PersonnelForm({
                         </option>
                       ))}
                     </select>
-                    <InlineCreator<Unit>
-                      noun="unit"
-                      endpoint="/api/be/units"
-                      disabled={pending}
-                      onCreated={(u) => {
-                        createdRef.current = true
-                        setExtraUnits((xs) => [...xs, u])
-                        setDraft((d) => ({ ...d, unit_id: u.id.toString() }))
-                      }}
-                    />
+                    {/* Units are global; creating one needs admin. */}
+                    {isAdmin && (
+                      <InlineCreator<Unit>
+                        noun="unit"
+                        endpoint="/api/be/units"
+                        disabled={pending}
+                        onCreated={(u) => {
+                          createdRef.current = true
+                          setExtraUnits((xs) => [...xs, u])
+                          setDraft((d) => ({ ...d, unit_id: u.id.toString() }))
+                        }}
+                      />
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -885,7 +982,7 @@ export function PersonnelForm({
                       </div>
                     )}
                   </div>
-                </>
+                </fieldset>
               )}
 
               {step === 1 && (
@@ -932,7 +1029,7 @@ export function PersonnelForm({
                       personnel={supervisors.filter(
                         (s) => !editing || s.id !== person!.id,
                       )}
-                      disabled={pending}
+                      disabled={pending || lockIdentity}
                       placeholder="Search supervisors…"
                     />
                   </div>
@@ -948,7 +1045,7 @@ export function PersonnelForm({
                         onChange={(e) =>
                           setDraft({ ...draft, is_commander: e.target.checked })
                         }
-                        disabled={pending}
+                        disabled={pending || lockIdentity}
                       />
                       <CommanderStar size={14} />
                       <span className="font-medium">Commander</span>
@@ -1023,6 +1120,12 @@ export function PersonnelForm({
 
               {step === 2 && (
                 <div className="grid grid-cols-2 gap-3">
+                  {!person?.is_guest && (
+                    <p className="col-span-2 text-xs text-muted-foreground">
+                      Contact details are shared with every workspace this
+                      person is in.
+                    </p>
+                  )}
                   <div className="space-y-1.5">
                     <Label htmlFor="email">Email</Label>
                     <Input

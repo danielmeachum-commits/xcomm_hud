@@ -1,6 +1,6 @@
 "use client"
 
-import { Boxes, List, Network, Package, Search, Trash2 } from "lucide-react"
+import { Boxes, List, Network, Search, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useMemo, useState } from "react"
@@ -13,7 +13,6 @@ import {
   enclaveHeadingStyle,
   enclaveLabel,
 } from "@/lib/enclave-meta"
-import { ForceElementsView, SaveAsForceElementButton } from "@/components/equipment/force-elements-view"
 import { UtcCompletenessPanel } from "@/components/equipment/utc-completeness-panel"
 import { ViewTabs } from "@/components/ui/view-tabs"
 import {
@@ -29,7 +28,6 @@ import type {
   Enclave,
   Equipment,
   EquipmentAsset,
-  ForceElement,
   EquipmentType,
   Gateway,
   NetworkTopology,
@@ -41,7 +39,7 @@ import type {
   UtcInstance,
 } from "@/lib/types"
 
-type View = "list" | "topology" | "utcs" | "force-elements"
+type View = "list" | "topology" | "utcs"
 
 interface Props {
   equipment: Equipment[]
@@ -52,7 +50,6 @@ interface Props {
   types: EquipmentType[]
   utcDefs: UtcDef[]
   packageDefs: PackageDef[]
-  forceElements: ForceElement[]
   assets: EquipmentAsset[]
   services: Service[]
   gateways: Gateway[]
@@ -68,7 +65,6 @@ export function EquipmentPageClient({
   types,
   utcDefs,
   packageDefs,
-  forceElements,
   assets,
   services,
   gateways,
@@ -279,7 +275,6 @@ export function EquipmentPageClient({
           utcDefs={utcDefs}
           packages={packages}
           packageDefs={packageDefs}
-          forceElements={forceElements}
           equipment={equipment}
           assets={assets}
           services={services}
@@ -295,7 +290,6 @@ export function EquipmentPageClient({
           options={[
             { value: "list", label: "List", icon: List },
             { value: "utcs", label: "UTCs", icon: Boxes },
-            { value: "force-elements", label: "Force elements", icon: Package },
             { value: "topology", label: "Topology", icon: Network },
           ]}
         />
@@ -385,8 +379,6 @@ export function EquipmentPageClient({
 
       {view === "topology" ? (
         <NetworkCanvas topology={topology} enclaves={enclaves} />
-      ) : view === "force-elements" ? (
-        <ForceElementsView forceElements={forceElements} />
       ) : view === "utcs" ? (
         utcs.length === 0 && packages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-12 text-center">
@@ -410,17 +402,6 @@ export function EquipmentPageClient({
                   </span>
                   {g.package && (
                     <>
-                      <SaveAsForceElementButton
-                        packageInstance={g.package}
-                        pinnedCount={
-                          equipment.filter(
-                            (e) =>
-                              e.utc_instance_id !== null &&
-                              g.utcs.some((u) => u.id === e.utc_instance_id),
-                          ).length
-                        }
-                        existingForceElements={forceElements}
-                      />
                       <PackageTeardown
                         packageInstance={g.package}
                         utcs={g.utcs}
