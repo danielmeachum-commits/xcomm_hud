@@ -101,7 +101,7 @@ export function RosterAddDialog({ roster, present, units }: Props) {
     >
       <DialogTrigger
         render={
-          <Button size="sm" variant="outline">
+          <Button size="sm">
             Add from roster
           </Button>
         }
@@ -112,9 +112,9 @@ export function RosterAddDialog({ roster, present, units }: Props) {
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            People already on the unit roster from other workspaces. Their
-            name, rank, unit and contact details come along; shop, site and
-            teams here start blank.
+            Everyone on the unit roster who isn&apos;t in this workspace yet.
+            Their name, rank, unit and contact details come along; shop, site
+            and teams here start blank.
           </p>
           <Input
             value={query}

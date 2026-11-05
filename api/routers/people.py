@@ -13,6 +13,9 @@ current since phone numbers change constantly.
 
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -20,7 +23,13 @@ from db import get_db
 from deps import requires
 from models import Person, Personnel, Unit, User, Workspace
 from pubsub import notify
-from schemas import PersonIn, PersonOut, PersonPatch
+from schemas import (
+    PersonIn,
+    PersonnelCsvImportOut,
+    PersonOut,
+    PersonPatch,
+    RosterCsvImportIn,
+)
 
 router = APIRouter(prefix="/people", tags=["personnel"])
 
@@ -42,6 +51,59 @@ IDENTITY_FIELDS = (
     "unit_id",
 )
 CONTACT_FIELDS = {"cellphone", "dsn", "sipr_number", "email"}
+
+_BRANCHES = {"air_force", "army", "navy", "marines", "space_force", "coast_guard"}
+
+
+def person_from_csv_row(
+    db: Session,
+    row: dict[str, str],
+    unit_by_name: dict[str, Unit],
+    create_missing: bool,
+    created_units: list[str],
+) -> Person:
+    """A new roster person from one CSV row (keys lowercased, values
+    stripped, names already checked). Units match by name; a missing one is
+    created when `create_missing`, and recorded in `created_units`."""
+    personnel_type = row.get("personnel_type") or "military"
+    if personnel_type not in {"military", "civilian"}:
+        personnel_type = "military"
+
+    branch = row.get("branch") or None
+    if branch and branch not in _BRANCHES:
+        # Normalize a few common variants; unrecognized -> drop.
+        normalized = branch.lower().replace(" ", "_").replace("-", "_")
+        if normalized == "marine_corps":
+            branch = "marines"
+        else:
+            branch = normalized if normalized in _BRANCHES else None
+    if personnel_type == "military" and branch is None:
+        branch = "air_force"
+
+    unit_name = row.get("unit") or ""
+    unit_row: Unit | None = None
+    if unit_name:
+        unit_row = unit_by_name.get(unit_name.lower())
+        if unit_row is None and create_missing:
+            unit_row = Unit(name=unit_name)
+            db.add(unit_row)
+            db.flush()
+            unit_by_name[unit_name.lower()] = unit_row
+            created_units.append(unit_name)
+
+    return Person(
+        workspace_id=None,
+        personnel_type=personnel_type,
+        branch=branch,
+        rank=row.get("rank") or None,
+        last_name=row["last_name"],
+        first_name=row["first_name"],
+        cellphone=row.get("cellphone") or None,
+        dsn=row.get("dsn") or None,
+        sipr_number=row.get("sipr_number") or None,
+        email=row.get("email") or None,
+        unit_id=unit_row.id if unit_row else None,
+    )
 
 
 def changed_fields(person: Person, data: dict) -> dict:
@@ -241,3 +303,75 @@ def delete_person(
         )
     db.delete(person)
     notify(background_tasks)
+
+
+@router.post(
+    "/import-csv",
+    response_model=PersonnelCsvImportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_roster_csv(
+    body: RosterCsvImportIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _=Depends(requires("admin")),
+):
+    """Load people onto the roster ahead of any workspace. See
+    RosterCsvImportIn docs."""
+    reader = csv.DictReader(io.StringIO(body.csv_text))
+    if reader.fieldnames is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "CSV has no header row"
+        )
+    headers = {(h or "").strip().lower() for h in reader.fieldnames}
+    missing = {"first_name", "last_name"} - headers
+    if missing:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Missing required CSV columns: {', '.join(sorted(missing))}",
+        )
+
+    unit_by_name = {u.name.lower(): u for u in db.query(Unit).all()}
+    existing = {
+        (p.last_name.lower(), p.first_name.lower(), (p.rank or "").lower())
+        for p in db.query(Person).filter(Person.workspace_id.is_(None))
+    }
+
+    imported = 0
+    skipped = 0
+    created_units: list[str] = []
+    errors: list[str] = []
+    for idx, raw in enumerate(reader, start=2):  # header is line 1
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+        if not (row.get("first_name") and row.get("last_name")):
+            skipped += 1
+            errors.append(f"line {idx}: missing first_name or last_name")
+            continue
+        key = (
+            row["last_name"].lower(),
+            row["first_name"].lower(),
+            (row.get("rank") or "").lower(),
+        )
+        if body.skip_existing and key in existing:
+            skipped += 1
+            errors.append(
+                f"line {idx}: {row['last_name']}, {row['first_name']} is "
+                "already on the roster"
+            )
+            continue
+        db.add(
+            person_from_csv_row(
+                db, row, unit_by_name, body.create_missing, created_units
+            )
+        )
+        existing.add(key)
+        imported += 1
+
+    db.flush()
+    notify(background_tasks)
+    return PersonnelCsvImportOut(
+        imported=imported,
+        skipped=skipped,
+        created_units=created_units,
+        errors=errors,
+    )

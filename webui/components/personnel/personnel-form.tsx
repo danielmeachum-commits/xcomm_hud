@@ -30,6 +30,7 @@ import {
 } from "@/lib/personnel-data"
 import type {
   Branch,
+  Person,
   Personnel,
   PersonnelType,
   Role,
@@ -238,6 +239,9 @@ interface Props {
   teams: Team[]
   sites: Site[]
   supervisors: Personnel[]
+  /** The global roster. A new name that matches someone on it who isn't in
+   *  this workspace yet is offered as "add them" instead of a second copy. */
+  roster?: Person[]
   /** Gates the shared identity fields — see `lockIdentity`. */
   userRole?: Role
   triggerLabel?: string
@@ -251,6 +255,7 @@ export function PersonnelForm({
   teams,
   sites,
   supervisors,
+  roster = [],
   userRole,
   triggerLabel,
   triggerVariant,
@@ -409,6 +414,43 @@ export function PersonnelForm({
         p.first_name.trim().toLowerCase() === first,
     )
   }, [supervisors, draft.last_name, draft.first_name, editing, person])
+
+  const rosterMatches = useMemo(() => {
+    if (editing) return []
+    const last = draft.last_name.trim().toLowerCase()
+    const first = draft.first_name.trim().toLowerCase()
+    if (!last || !first) return []
+    const here = new Set(supervisors.map((p) => p.person_id))
+    return roster.filter(
+      (p) =>
+        !here.has(p.id) &&
+        p.last_name.trim().toLowerCase() === last &&
+        p.first_name.trim().toLowerCase() === first,
+    )
+  }, [roster, supervisors, draft.last_name, draft.first_name, editing])
+
+  /** Bring an existing roster person in rather than creating a duplicate. */
+  async function addFromRoster(p: Person) {
+    setPending(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/be/personnel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_id: p.id }),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}))
+        throw new Error(detail.detail ?? "Failed to add")
+      }
+      router.refresh()
+      setCreatedName(`${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error")
+    } finally {
+      setPending(false)
+    }
+  }
 
   const exactDuplicate =
     nameMatches.find((p) => (p.rank ?? "") === draft.rank) ?? null
@@ -619,7 +661,7 @@ export function PersonnelForm({
           <DialogTitle>
             {editing
               ? `Edit ${person!.last_name}, ${person!.first_name}`
-              : "Add personnel"}
+              : "New person"}
           </DialogTitle>
         </DialogHeader>
 
@@ -757,6 +799,43 @@ export function PersonnelForm({
                           )}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {rosterMatches.length > 0 && (
+                    <div
+                      className="space-y-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-3 text-sm"
+                      role="status"
+                    >
+                      <p className="font-medium">
+                        Already on the roster — add them instead of creating a
+                        second copy?
+                      </p>
+                      <ul className="space-y-1.5">
+                        {rosterMatches.map((p) => (
+                          <li key={p.id} className="flex items-center gap-2">
+                            <span>
+                              {p.rank ? `${p.rank} ` : ""}
+                              {p.last_name}, {p.first_name}
+                              <span className="text-muted-foreground">
+                                {p.unit_id
+                                  ? ` — ${allUnits.find((u) => u.id === p.unit_id)?.name ?? "unknown unit"}`
+                                  : ""}
+                              </span>
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="ml-auto"
+                              disabled={pending}
+                              onClick={() => addFromRoster(p)}
+                            >
+                              Add this person
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
 

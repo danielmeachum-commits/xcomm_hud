@@ -40,6 +40,7 @@ from routers.people import (
     changed_fields,
     check_commander,
     ensure_commander_slot,
+    person_from_csv_row,
     require_identity_write,
     validate_unit,
 )
@@ -648,9 +649,7 @@ def import_personnel_csv(
         .filter(work_centers_visible_to(workspace))
         .all()
     }
-    unit_by_name = {
-        u.name.lower(): u for u in db.query(Unit).all()
-    }
+    unit_by_name = {u.name.lower(): u for u in db.query(Unit).all()}
 
     in_picture = {
         pid
@@ -688,42 +687,10 @@ def import_personnel_csv(
                 )
                 continue
 
-        first_name = row.get("first_name") or ""
-        last_name = row.get("last_name") or ""
-        if person is None and (not first_name or not last_name):
+        if person is None and not (row.get("first_name") and row.get("last_name")):
             skipped += 1
             errors.append(f"line {idx}: missing first_name or last_name")
             continue
-
-        personnel_type = row.get("personnel_type") or "military"
-        if personnel_type not in {"military", "civilian"}:
-            personnel_type = "military"
-
-        branch = row.get("branch") or None
-        if branch and branch not in {
-            "air_force",
-            "army",
-            "navy",
-            "marines",
-            "space_force",
-            "coast_guard",
-        }:
-            # Normalize a few common variants; unrecognized -> drop.
-            normalized = branch.lower().replace(" ", "_").replace("-", "_")
-            if normalized in {
-                "air_force",
-                "army",
-                "navy",
-                "marines",
-                "marine_corps",
-                "space_force",
-                "coast_guard",
-            }:
-                branch = "marines" if normalized == "marine_corps" else normalized
-            else:
-                branch = None
-        if personnel_type == "military" and branch is None:
-            branch = "air_force"
 
         wc_name = row.get("work_center") or ""
         wc_row: WorkCenter | None = None
@@ -738,32 +705,13 @@ def import_personnel_csv(
                 wc_by_name[wc_name.lower()] = wc_row
                 created_wc.append(wc_name)
 
-        unit_name = row.get("unit") or ""
-        unit_row: Unit | None = None
-        if unit_name and person is None:
-            unit_row = unit_by_name.get(unit_name.lower())
-            if unit_row is None and body.create_missing:
-                unit_row = Unit(name=unit_name)
-                db.add(unit_row)
-                db.flush()
-                unit_by_name[unit_name.lower()] = unit_row
-                created_units.append(unit_name)
-
         if person is None:
-            person = Person(
-                workspace_id=None,
-                personnel_type=personnel_type,
-                branch=branch,
-                rank=row.get("rank") or None,
-                last_name=last_name,
-                first_name=first_name,
-                cellphone=row.get("cellphone") or None,
-                dsn=row.get("dsn") or None,
-                sipr_number=row.get("sipr_number") or None,
-                email=row.get("email") or None,
-                unit_id=unit_row.id if unit_row else None,
+            person = person_from_csv_row(
+                db, row, unit_by_name, body.create_missing, created_units
             )
             db.add(person)
+        else:
+            in_picture.add(person.id)
         p = Personnel(
             workspace_id=workspace.id,
             person=person,
@@ -772,7 +720,6 @@ def import_personnel_csv(
             room_number=row.get("room_number") or None,
         )
         db.add(p)
-        in_picture.add(person.id)
         imported += 1
 
     db.flush()

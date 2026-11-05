@@ -172,18 +172,23 @@ export function PersonnelListClient({
           <div className="flex items-center gap-2">
             <EndOfDayButton />
             <PersonnelCsvImport />
-            <RosterAddDialog
-              roster={roster}
-              present={new Set(personnel.map((p) => p.person_id))}
-              units={units}
-            />
+            {/* New people normally go on the roster first (Global → Roster);
+                this one still creates them there, after checking for a match. */}
             <PersonnelForm
               workCenters={workCenters}
               units={units}
               teams={teams}
               sites={sites}
               supervisors={personnel}
+              roster={roster}
               userRole={userRole}
+              triggerLabel="New person"
+              triggerVariant="outline"
+            />
+            <RosterAddDialog
+              roster={roster}
+              present={new Set(personnel.map((p) => p.person_id))}
+              units={units}
             />
           </div>
         )}

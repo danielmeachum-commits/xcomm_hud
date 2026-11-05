@@ -1704,6 +1704,23 @@ class PersonnelCsvImportIn(BaseModel):
     create_missing: bool = True
 
 
+class RosterCsvImportIn(BaseModel):
+    """Bulk add people to the global roster, in no workspace.
+
+    Same identity columns as the personnel import: first_name and last_name
+    required; personnel_type, branch, rank, cellphone, dsn, sipr_number,
+    email, unit optional. Per-picture columns (work_center, room_number,
+    notes) don't apply and are ignored.
+    """
+
+    csv_text: str
+    create_missing: bool = True
+    # Re-importing a sheet is the usual way a roster gets doubled, so rows
+    # naming someone already on it (same last name, first name and rank) are
+    # skipped unless this is turned off — two real people can share all three.
+    skip_existing: bool = True
+
+
 class PersonnelCsvImportOut(BaseModel):
     imported: int
     skipped: int

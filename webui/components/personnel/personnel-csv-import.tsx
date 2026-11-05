@@ -18,13 +18,23 @@ import type { PersonnelCsvImportResult } from "@/lib/types"
 
 const SAMPLE_HEADER =
   "first_name,last_name,personnel_type,branch,rank,cellphone,dsn,sipr_number,email,notes,work_center,unit,room_number"
+const ROSTER_SAMPLE_HEADER =
+  "first_name,last_name,personnel_type,branch,rank,cellphone,dsn,sipr_number,email,unit"
 
-export function PersonnelCsvImport() {
+interface Props {
+  /** "roster" loads people onto the global roster in no workspace;
+   *  "workspace" (default) adds them to this workspace too. */
+  target?: "workspace" | "roster"
+}
+
+export function PersonnelCsvImport({ target = "workspace" }: Props) {
+  const roster = target === "roster"
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [csvText, setCsvText] = useState("")
   const [createMissing, setCreateMissing] = useState(true)
+  const [skipExisting, setSkipExisting] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PersonnelCsvImportResult | null>(null)
 
@@ -33,14 +43,18 @@ export function PersonnelCsvImport() {
     setError(null)
     setResult(null)
     try {
-      const res = await fetch("/api/be/personnel/import-csv", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          csv_text: csvText,
-          create_missing: createMissing,
-        }),
-      })
+      const res = await fetch(
+        roster ? "/api/be/people/import-csv" : "/api/be/personnel/import-csv",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            csv_text: csvText,
+            create_missing: createMissing,
+            ...(roster ? { skip_existing: skipExisting } : {}),
+          }),
+        },
+      )
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}))
         throw new Error(detail.detail ?? "Failed to import CSV")
@@ -76,27 +90,41 @@ export function PersonnelCsvImport() {
       />
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Import personnel from CSV</DialogTitle>
+          <DialogTitle>
+            {roster ? "Import roster from CSV" : "Import personnel from CSV"}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <p className="text-xs text-muted-foreground">
-            Paste CSV content below. Required columns:{" "}
-            <code className="rounded bg-muted px-1">first_name</code>,{" "}
-            <code className="rounded bg-muted px-1">last_name</code>. Optional
-            columns are matched by header name (case-insensitive):
-            personnel_type, branch, rank, cellphone, dsn, sipr_number, email,
-            notes, work_center, unit, room_number. Each row adds a new person
-            to the roster; a row with a roster{" "}
-            <code className="rounded bg-muted px-1">person_id</code> adds that
-            person instead, and needs no name.
-          </p>
+          {roster ? (
+            <p className="text-xs text-muted-foreground">
+              Paste CSV content below. Required columns:{" "}
+              <code className="rounded bg-muted px-1">first_name</code>,{" "}
+              <code className="rounded bg-muted px-1">last_name</code>. Optional
+              columns are matched by header name (case-insensitive):
+              personnel_type, branch, rank, cellphone, dsn, sipr_number, email,
+              unit. People land on the roster only — add them to a workspace
+              from its Personnel page.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Paste CSV content below. Required columns:{" "}
+              <code className="rounded bg-muted px-1">first_name</code>,{" "}
+              <code className="rounded bg-muted px-1">last_name</code>. Optional
+              columns are matched by header name (case-insensitive):
+              personnel_type, branch, rank, cellphone, dsn, sipr_number, email,
+              notes, work_center, unit, room_number. Each row adds a new person
+              to the roster; a row with a roster{" "}
+              <code className="rounded bg-muted px-1">person_id</code> adds that
+              person instead, and needs no name.
+            </p>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="csv">CSV</Label>
             <Textarea
               id="csv"
               value={csvText}
               onChange={(e) => setCsvText(e.target.value)}
-              placeholder={SAMPLE_HEADER}
+              placeholder={roster ? ROSTER_SAMPLE_HEADER : SAMPLE_HEADER}
               rows={12}
               className="font-mono text-xs"
               disabled={pending}
@@ -109,8 +137,21 @@ export function PersonnelCsvImport() {
               onChange={(e) => setCreateMissing(e.target.checked)}
               disabled={pending}
             />
-            Auto-create missing work centers and units
+            {roster
+              ? "Auto-create missing units"
+              : "Auto-create missing work centers and units"}
           </label>
+          {roster && (
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={skipExisting}
+                onChange={(e) => setSkipExisting(e.target.checked)}
+                disabled={pending}
+              />
+              Skip people already on the roster (same name and rank)
+            </label>
+          )}
           {error && (
             <p className="text-sm text-destructive" role="alert">
               {error}

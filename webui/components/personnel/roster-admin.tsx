@@ -5,6 +5,8 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { CommanderStar } from "@/components/personnel/commander-star"
+import { PersonnelCsvImport } from "@/components/personnel/personnel-csv-import"
+import { RosterPersonDialog } from "@/components/personnel/roster-person-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Person, Unit } from "@/lib/types"
@@ -16,9 +18,8 @@ interface Props {
 
 /**
  * The global roster: everyone on the unit's books, and which workspaces each
- * person is in. Editing happens from a person's page in any of those
- * workspaces — this list is for finding people and clearing out ones who
- * have left.
+ * person is in. People are entered here once and then added to workspaces
+ * from each one's Personnel page, so nobody is retyped per exercise.
  */
 export function RosterAdmin({ people, units }: Props) {
   const router = useRouter()
@@ -58,18 +59,21 @@ export function RosterAdmin({ people, units }: Props) {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Roster</h1>
           <p className="text-xs text-muted-foreground">
-            Everyone on the unit&apos;s books, shared by every workspace. Add
-            people from a workspace&apos;s Personnel page; edit them from
-            their page in any workspace they&apos;re in.
+            Everyone on the unit&apos;s books. Enter people here once, then
+            add them to a workspace from its Personnel page.
           </p>
         </div>
-        <div className="w-full max-w-xs">
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name, rank, unit, email…"
-          />
+        <div className="flex items-center gap-2">
+          <PersonnelCsvImport target="roster" />
+          <RosterPersonDialog roster={people} units={units} />
         </div>
+      </div>
+      <div className="max-w-xs">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, rank, unit, email…"
+        />
       </div>
 
       <div className="overflow-x-auto rounded-md border">
@@ -127,7 +131,9 @@ export function RosterAdmin({ people, units }: Props) {
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right">
+                  <RosterPersonDialog person={p} roster={people} units={units} />
                   <Button
+                    className="ml-2"
                     size="sm"
                     variant="outline"
                     onClick={() => del(p)}

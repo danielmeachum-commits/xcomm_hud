@@ -47,6 +47,12 @@ them on the roster.
 
 ## 3. Decisions
 
+- **Roster first.** People are entered once under Global → Roster (one at a
+  time or by CSV) and then pulled into each workspace with "Add from roster",
+  so an exercise never retypes or duplicates them. A workspace can still
+  create someone new; they land on the roster too, and the form first offers
+  any roster person with the same name.
+
 - **Identity is the row id.** Nothing matches people by name, rank or email.
   The 0067 backfill made one person per existing personnel row, reusing its
   id; two rows that were the same human in different workspaces became two
@@ -69,7 +75,9 @@ them on the roster.
 ## 4. Where it lives
 
 - `routers/people.py` — `/people`: the roster with each person's workspaces,
-  plus the shared identity rules (`IDENTITY_FIELDS`, the commander slot, the
+  create/edit/delete, a roster-only CSV import (skips rows matching someone
+  already on it by name and rank, unless told not to), plus the shared
+  identity rules (`IDENTITY_FIELDS`, the commander slot, the
   admin check) that `routers/personnel.py` reuses.
 - `routers/personnel.py` — reads flatten person + personnel; writes split a
   body between them. `POST` with `person_id` links a roster person.
@@ -77,14 +85,12 @@ them on the roster.
   export carries identity by value; import adds new roster people (it can't
   know an id from another instance, so importing into the same instance
   duplicates people).
-- Web UI — Global → Personnel → Roster (`/admin/roster`), "Add from roster"
-  on the Personnel page, and the personnel form locks shared fields for
-  non-admins.
+- Web UI — Global → Personnel → Roster (`/admin/roster`) with Add, Edit and
+  Import CSV; "Add from roster" as the Personnel page's main action; the
+  personnel form locks shared fields for non-admins.
 
 ## 5. Not done
 
-- No edit form on the roster page itself: a person in no workspace can only be
-  added to one or deleted.
 - No merge tool for duplicates the backfill or an import created.
 - Export bundles don't carry `is_guest`, so imported guests land on the roster
   (true before 0067 as well).
