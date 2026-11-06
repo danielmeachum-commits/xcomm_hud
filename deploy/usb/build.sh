@@ -39,6 +39,9 @@ step() { echo; echo "${B}== $*${N}"; }
 die() { echo "✗ $*" >&2; exit 1; }
 
 command -v podman >/dev/null || die "podman is required."
+# The password prompt below and sudo both need a terminal to type into.
+# Without one, `read` hits end-of-input and the script used to exit silently.
+[[ -t 0 ]] || die "Run this in a terminal window: it asks for passwords (the stick's account, then sudo)."
 git -C "$REPO_ROOT" rev-parse >/dev/null || die "Run this from the xcomm_hud checkout."
 
 # ---- password for the stick's account (sudo, screen unlock) ----
