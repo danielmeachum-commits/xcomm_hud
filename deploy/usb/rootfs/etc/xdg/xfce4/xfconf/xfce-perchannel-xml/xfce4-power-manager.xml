@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Defaults for the stick's account. The screen is the xcomm host's display,
+     so it never blanks; lid handling is left to logind (see
+     usr/lib/systemd/logind.conf.d/xcomm-hud.conf). -->
+<channel name="xfce4-power-manager" version="1.0">
+  <property name="xfce4-power-manager" type="empty">
+    <property name="dpms-enabled" type="bool" value="false"/>
+    <property name="blank-on-ac" type="int" value="0"/>
+    <property name="blank-on-battery" type="int" value="0"/>
+    <property name="logind-handle-lid-switch" type="bool" value="true"/>
+  </property>
+</channel>

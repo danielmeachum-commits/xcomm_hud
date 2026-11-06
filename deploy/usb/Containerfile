@@ -34,10 +34,16 @@ RUN dnf -y install \
         realtek-firmware atheros-firmware brcmfmac-firmware mt7xxx-firmware \
         avahi nss-mdns \
         git podman-compose curl python3 \
+    # The XFCE group's update notifier: a bootc system isn't updated with dnf,
+    # and offline it only spins trying to reach Fedora's mirrors. And the
+    # screensaver: it locked the host's screen after 10 idle minutes, behind a
+    # password nobody at the console may know.
+    && dnf -y remove dnfdragora dnfdragora-updater xfce4-screensaver \
     && dnf clean all \
-    # Package-manager leftovers in /var: bootc ships /var only as
-    # initial content, and lint flags logs and caches left there.
-    && rm -rf /var/cache/* /var/log/* /var/lib/dnf/repos
+    # Only the package manager's own leftovers. Clearing all of /var/cache once
+    # took LightDM's cache directory with it, and SELinux then stopped LightDM
+    # from recreating it at boot.
+    && rm -rf /var/cache/dnf /var/cache/libdnf5 /var/log/dnf5.log* /var/lib/dnf/repos
 
 # Includes /etc/hostname (`xcomm`, so others can use http://xcomm.local). It
 # has to be COPYed: during a RUN step podman mounts its own /etc/hostname, so
@@ -50,7 +56,12 @@ COPY rootfs/ /
 # writable for `git pull`.
 COPY seed/ /usr/share/xcomm-hud/
 
-RUN systemctl set-default graphical.target \
+# `autologin` must exist in the image's /etc/group, not only in sysusers.d:
+# bootc-image-builder creates the xcomm account (and adds it to this group)
+# while building the disk, long before systemd-sysusers runs at first boot.
+# Without this the disk build fails with "group 'autologin' does not exist".
+RUN groupadd --system autologin \
+    && systemctl set-default graphical.target \
     && systemctl enable lightdm.service avahi-daemon.service NetworkManager.service \
     # Start xcomm for whichever user session exists; only `xcomm` lingers.
     && systemctl --global enable xcomm-hud.service \

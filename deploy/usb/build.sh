@@ -4,13 +4,20 @@
 #
 #   deploy/usb/build.sh                 # the stick tracks main
 #   deploy/usb/build.sh --branch dev    # …or another branch on GitHub
+#   deploy/usb/build.sh --debug         # for diagnosing a stick that won't boot
+#
+# --debug stops on a boot failure instead of rebooting (rd.emergency=halt) and
+# opens a root shell on Ctrl+Alt+F9 that works even though root is locked
+# (systemd.debug_shell). From it:
+#   mkdir -p /tmp/e && mount /dev/disk/by-label/EFI-SYSTEM /tmp/e
+#   cp /run/initramfs/rdsosreport.txt /tmp/e/ && umount /tmp/e
+# puts the boot report on the stick, readable from any other machine. Never
+# ship a --debug stick: that shell needs no password.
 #
 # Steps:
-#   1. Check out the branch as it is on GitHub into a clean temporary
-#      worktree, so the stick never carries uncommitted edits.
-#   2. Build and save the app images from that checkout (deploy/bundle/xcomm
-#      build + save-images, rootless).
-#   3. Seed: a git bundle of the branch and the saved images file.
+#   1–3. The seed (deploy/bundle/make-seed.sh): the branch as it is on
+#        GitHub, its app images, and a git bundle of it — never uncommitted
+#        edits from this machine.
 #   4. Build the bootable OS image from deploy/usb/Containerfile (sudo podman).
 #   5. Turn it into a raw disk image with bootc-image-builder (sudo).
 #
@@ -20,9 +27,11 @@ set -euo pipefail
 USB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$USB_DIR/../.." && pwd)"
 BRANCH=main
+DEBUG=0
 while (( $# )); do
   case "$1" in
     --branch) BRANCH="${2:?--branch needs a value}"; shift 2 ;;
+    --debug) DEBUG=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -39,6 +48,9 @@ step() { echo; echo "${B}== $*${N}"; }
 die() { echo "✗ $*" >&2; exit 1; }
 
 command -v podman >/dev/null || die "podman is required."
+# The password prompt below and sudo both need a terminal to type into.
+# Without one, `read` hits end-of-input and the script used to exit silently.
+[[ -t 0 ]] || die "Run this in a terminal window: it asks for passwords (the stick's account, then sudo)."
 git -C "$REPO_ROOT" rev-parse >/dev/null || die "Run this from the xcomm_hud checkout."
 
 # ---- password for the stick's account (sudo, screen unlock) ----
@@ -52,38 +64,11 @@ while :; do
   echo "Didn't match (or empty) — try again."
 done
 
-# ---- 1. clean checkout of the branch as it is on GitHub ----
-step "1/5  Checking out origin/$BRANCH"
-git -C "$REPO_ROOT" fetch -q origin "$BRANCH"
-REV="$(git -C "$REPO_ROOT" rev-parse --short "origin/$BRANCH")"
-WT="$(mktemp -d -t xcomm-usb-XXXXXX)"
-cleanup() { git -C "$REPO_ROOT" worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"; }
-trap cleanup EXIT
-git -C "$REPO_ROOT" worktree add -q --detach "$WT" "origin/$BRANCH"
-echo "Building $BRANCH at $REV."
-
-# ---- 2. app images from that checkout ----
-step "2/5  Building the app images"
-"$WT/deploy/bundle/xcomm" build
-"$WT/deploy/bundle/xcomm" save-images
-
-# ---- 3. seed ----
-step "3/5  Assembling the seed"
-rm -rf "$SEED"
-mkdir -p "$SEED/images"
-mv "$WT"/.bundle/images/xcomm-"$REV".tar "$SEED/images/"
-# Bundled under a throwaway branch name, never `$BRANCH` itself: branches are
-# shared by every worktree, so `git branch -f main` here would move — and
-# could rewind — the main in the checkout this script was run from.
-# boot.sh renames it back to $BRANCH on the stick.
-SEED_REF="xcomm-usb-seed-$REV-$$"
-git -C "$WT" branch "$SEED_REF" HEAD
-git -C "$WT" bundle create -q "$SEED/xcomm_hud.bundle" "$SEED_REF"
-git -C "$REPO_ROOT" branch -D -q "$SEED_REF"
-echo "$BRANCH" > "$SEED/branch"
-echo "$SEED_REF" > "$SEED/bundle-ref"
-echo "$REV" > "$SEED/revision"
-du -sh "$SEED"/* | sed 's/^/  /'
+# ---- 1–3. the seed: app images + a git bundle, from GitHub ----
+# Shared with the Windows kit, so both always carry the same thing.
+step "1–3/5  Building the seed from origin/$BRANCH"
+"$REPO_ROOT/deploy/bundle/make-seed.sh" "$BRANCH" "$SEED"
+REV="$(cat "$SEED/revision")"
 
 # ---- 4. the bootable OS image ----
 # Rootful, because bootc-image-builder reads from root's image store.
@@ -94,9 +79,14 @@ sudo podman build --pull=newer -t "$IMAGE" -t localhost/xcomm-hud-usb:current "$
 # ---- 5. disk image ----
 step "5/5  Making the disk image (sudo)"
 mkdir -p "$OUT"
+KARGS_DEBUG=""
+if (( DEBUG )); then
+  KARGS_DEBUG=" rd.emergency=halt systemd.debug_shell=1"
+  echo "DEBUG build: stops on boot failures; passwordless root shell on Ctrl+Alt+F9."
+fi
 CONFIG="$(mktemp -t xcomm-usb-config-XXXXXX.toml)"
 chmod 600 "$CONFIG"
-trap 'cleanup; rm -f "$CONFIG"' EXIT
+trap 'rm -f "$CONFIG"' EXIT
 # TOML basic strings: escape backslashes and quotes in the password.
 PW_TOML="${PW1//\\/\\\\}"; PW_TOML="${PW_TOML//\"/\\\"}"
 cat >"$CONFIG" <<EOF
@@ -108,6 +98,13 @@ groups = ["wheel", "autologin"]
 [[customizations.filesystem]]
 mountpoint = "/"
 minsize = "$ROOT_SIZE"
+
+# bootc-image-builder adds "console=tty0 console=ttyS0". The LAST console is
+# the primary one, so boot status and emergency-mode errors went to a serial
+# port laptops don't have, and the screen just stopped at "emergency mode"
+# with nothing above it. Appending tty0 again makes the screen primary.
+[customizations.kernel]
+append = "console=tty0${KARGS_DEBUG}"
 EOF
 sudo podman run --rm --privileged --pull=newer \
   --security-opt label=type:unconfined_t \
