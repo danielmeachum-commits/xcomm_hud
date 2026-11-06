@@ -19,6 +19,7 @@ import {
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
 import {
   describeLocation,
+  personName,
   PERSONNEL_STATUS_LABELS,
   type PersonnelStatus,
 } from "@/lib/personnel-data"
@@ -153,7 +154,7 @@ export function PersonnelStatusPill({
               onMouseLeave={handleMouseLeave}
               onClick={handleClick}
               className="inline-flex cursor-pointer"
-              aria-label={`Location details for ${person.last_name}, ${person.first_name}`}
+              aria-label={`Location details for ${personName(person)}`}
             />
           }
         >
@@ -174,7 +175,7 @@ export function PersonnelStatusPill({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Location — {person.last_name}, {person.first_name}
+              Location — {personName(person)}
             </DialogTitle>
           </DialogHeader>
 

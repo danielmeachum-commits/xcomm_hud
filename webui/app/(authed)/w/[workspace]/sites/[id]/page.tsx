@@ -123,6 +123,10 @@ export default async function SiteDetailPage({ params }: PageProps) {
 
   return (
     <SiteDetailClient
+      // Keyed by site: moving from one site's page to another otherwise reuses
+      // every component on it, and forms opened on the new site still showed
+      // (and could save) the previous site's gateway or service.
+      key={site.id}
       site={site}
       services={siteServices}
       gateways={gateways}

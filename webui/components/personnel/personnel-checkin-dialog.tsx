@@ -16,8 +16,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  PERSONNEL_STATUSES,
+  personName,
   PERSONNEL_STATUS_LABELS,
+  PERSONNEL_STATUSES,
   SITE_BEARING_STATUSES,
   type PersonnelStatus,
 } from "@/lib/personnel-data"
@@ -186,7 +187,7 @@ export function PersonnelCheckInDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Update location — {person.last_name}, {person.first_name}
+            Update location — {personName(person)}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">

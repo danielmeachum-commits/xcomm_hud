@@ -44,6 +44,7 @@ from models import (
     WorkCenter,
     Workspace,
 )
+from personnel_data import person_display_name
 from pubsub import broadcaster, notify
 from schemas import (
     EventBulkIds,
@@ -130,7 +131,7 @@ def _enrich(db: Session, v: Event) -> EventOut:
             # events table's site column stays useful.
             p = db.get(Personnel, v.subject_id)
             if p:
-                out.subject_name = f"{p.person.last_name}, {p.person.first_name}"
+                out.subject_name = person_display_name(p.person)
             if v.second_subject_id is not None:
                 site = db.get(Site, v.second_subject_id)
                 if site:

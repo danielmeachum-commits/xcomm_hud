@@ -26,8 +26,9 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { EscortCombobox } from "@/components/personnel/escort-combobox"
 import {
-  PERSONNEL_STATUSES,
+  personName,
   PERSONNEL_STATUS_LABELS,
+  PERSONNEL_STATUSES,
   type PersonnelStatus,
 } from "@/lib/personnel-data"
 import type { Personnel, Site } from "@/lib/types"
@@ -156,8 +157,8 @@ export function SiteCheckInDialog({
   function addGuest() {
     const first = guestDraft.first_name.trim()
     const last = guestDraft.last_name.trim()
-    if (!first || !last) {
-      setError("Guest needs a first and last name")
+    if (!last) {
+      setError("Guest needs a last name")
       return
     }
     setError(null)
@@ -209,7 +210,7 @@ export function SiteCheckInDialog({
       const draftFirst = guestDraft.first_name.trim()
       const draftLast = guestDraft.last_name.trim()
       const pendingGuests = [...guests]
-      if (draftFirst && draftLast) {
+      if (draftLast) {
         pendingGuests.push({
           key: guestKey,
           first_name: draftFirst,
@@ -406,7 +407,7 @@ export function SiteCheckInDialog({
                     >
                       <span>
                         {p.rank ? `${p.rank} ` : ""}
-                        {p.last_name}, {p.first_name}
+                        {personName(p)}
                       </span>
                       {p.is_guest && (
                         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
@@ -459,14 +460,14 @@ export function SiteCheckInDialog({
                   {guests.map((g) => (
                     <Badge key={g.key} variant="secondary" className="gap-1 pr-1">
                       <span>
-                        {g.last_name}, {g.first_name}
+                        {personName(g)}
                         {g.affiliation ? ` · ${g.affiliation}` : ""}
                       </span>
                       <button
                         type="button"
                         onClick={() => removeGuest(g.key)}
                         disabled={pending}
-                        aria-label={`Remove ${g.first_name} ${g.last_name}`}
+                        aria-label={`Remove ${`${g.first_name} ${g.last_name}`.trim()}`}
                         className="rounded-full p-0.5 hover:bg-background/60"
                       >
                         <X className="size-3" />

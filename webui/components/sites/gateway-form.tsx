@@ -53,14 +53,30 @@ export function GatewayForm({
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState({
-    name: gateway?.name ?? "",
-    kind: (gateway?.kind ?? "commercial") as GatewayKind,
-    provider: gateway?.provider ?? "",
-    status: (gateway?.status ?? "ready") as GatewayStatus,
-    pace: (gateway?.pace ?? defaultPace ?? "primary") as GatewayPace,
-    notes: gateway?.notes ?? "",
-  })
+  // The form's fields, from the gateway it edits (or blank for a new one).
+  // Rebuilt every time the dialog opens: this component outlives the gateway
+  // it was first rendered for (the same instance gets another gateway's props
+  // when the page changes site), and fields captured once at mount showed -
+  // and on Save wrote - that other gateway's values.
+  function draftFromProps() {
+    return {
+      name: gateway?.name ?? "",
+      kind: (gateway?.kind ?? "commercial") as GatewayKind,
+      provider: gateway?.provider ?? "",
+      status: (gateway?.status ?? "ready") as GatewayStatus,
+      pace: (gateway?.pace ?? defaultPace ?? "primary") as GatewayPace,
+      notes: gateway?.notes ?? "",
+    }
+  }
+  const [draft, setDraft] = useState(draftFromProps)
+
+  function handleOpenChange(next: boolean) {
+    if (next) {
+      setDraft(draftFromProps())
+      setError(null)
+    }
+    setOpen(next)
+  }
 
   async function submit() {
     setPending(true)
@@ -90,16 +106,6 @@ export function GatewayForm({
         throw new Error(j.detail ?? "Failed to save gateway")
       }
       setOpen(false)
-      if (!editing) {
-        setDraft({
-          name: "",
-          kind: "commercial",
-          provider: "",
-          status: "ready",
-          pace: defaultPace ?? "primary",
-          notes: "",
-        })
-      }
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error")
@@ -109,7 +115,7 @@ export function GatewayForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           renderTrigger ?? (

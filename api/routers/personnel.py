@@ -34,6 +34,7 @@ from models import (
     WorkCenter,
     Workspace,
 )
+from personnel_data import person_display_name
 from pubsub import notify
 from routers.people import (
     IDENTITY_FIELDS,
@@ -198,7 +199,7 @@ def _apply_location_change(
         "personnel.location_changed",
         {
             "personnel_id": p.id,
-            "personnel_name": f"{p.person.last_name}, {p.person.first_name}",
+            "personnel_name": person_display_name(p.person),
             "prev_status": prev_status,
             "new_status": stat,
             "site_id": site_id,
@@ -347,14 +348,16 @@ def create_personnel(
         if already is not None:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                f"{person.last_name}, {person.first_name} is already in "
+                f"{person_display_name(person)} is already in "
                 "this workspace.",
             )
     else:
-        if not body.last_name or not body.first_name:
+        # First name is optional: in the field a surname is often all anyone
+        # has. It's stored as "" (the column is NOT NULL).
+        if not body.last_name:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "first_name and last_name are required",
+                "last_name is required",
             )
         validate_unit(db, body.unit_id)
         if body.is_commander:
@@ -365,7 +368,8 @@ def create_personnel(
             supervisor_id=_resolve_supervisor(
                 db, workspace, body.supervisor_id, self_person_id=None
             ),
-            **{f: getattr(body, f) for f in IDENTITY_FIELDS},
+            **{f: getattr(body, f) for f in IDENTITY_FIELDS if f != "first_name"},
+            first_name=body.first_name or "",
         )
         db.add(person)
     p = Personnel(
@@ -612,7 +616,7 @@ CSV_COLUMNS = {
     "unit",
     "room_number",
 }
-REQUIRED_CSV_COLUMNS = {"first_name", "last_name"}
+REQUIRED_CSV_COLUMNS = {"last_name"}
 
 
 @router.post(
@@ -682,14 +686,14 @@ def import_personnel_csv(
             if person.id in in_picture:
                 skipped += 1
                 errors.append(
-                    f"line {idx}: {person.last_name}, {person.first_name} "
+                    f"line {idx}: {person_display_name(person)} "
                     "is already in this workspace"
                 )
                 continue
 
-        if person is None and not (row.get("first_name") and row.get("last_name")):
+        if person is None and not row.get("last_name"):
             skipped += 1
-            errors.append(f"line {idx}: missing first_name or last_name")
+            errors.append(f"line {idx}: missing last_name")
             continue
 
         wc_name = row.get("work_center") or ""

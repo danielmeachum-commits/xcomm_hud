@@ -1,5 +1,6 @@
 "use client"
 
+import { personName } from "@/lib/personnel-data"
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
@@ -144,7 +145,7 @@ export function RosterAddDialog({ roster, present, units }: Props) {
                   />
                   <span>
                     {p.rank ? `${p.rank} ` : ""}
-                    {p.last_name}, {p.first_name}
+                    {personName(p)}
                   </span>
                   <span className="ml-auto truncate text-xs text-muted-foreground">
                     {[

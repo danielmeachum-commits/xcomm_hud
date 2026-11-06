@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # `unvalidated` is the seed state: nobody has said anything about this yet.
 # It was called `unknown`, which read as an assessment ("we looked and can't
@@ -1491,6 +1491,15 @@ class TeamOut(_ORM):
     updated_at: datetime.datetime
 
 
+def _first_name_or_empty(value):
+    """An unknown first name is stored as "" — the column is NOT NULL, and in
+    the field a surname is often all anyone has. Turns an explicit null into
+    "" and trims; runs only on values a caller actually sent."""
+    if value is None:
+        return ""
+    return value.strip() if isinstance(value, str) else value
+
+
 class PersonIn(BaseModel):
     """A new person on the global roster (identity only)."""
 
@@ -1500,13 +1509,15 @@ class PersonIn(BaseModel):
     rank: Optional[str] = None
     skill_level: Optional[SkillLevel] = None
     last_name: str
-    first_name: str
+    first_name: str = ""
     cellphone: Optional[str] = None
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None  # a person id
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
 
 
 class PersonPatch(BaseModel):
@@ -1523,6 +1534,8 @@ class PersonPatch(BaseModel):
     email: Optional[str] = None
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
 
 
 class PersonWorkspaceRef(BaseModel):
@@ -1585,6 +1598,8 @@ class PersonnelIn(BaseModel):
     room_number: Optional[str] = None
     team_ids: list[int] = Field(default_factory=list)
 
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+
 
 class PersonnelPatch(BaseModel):
     personnel_type: Optional[PersonnelType] = None
@@ -1608,6 +1623,8 @@ class PersonnelPatch(BaseModel):
     assigned_site_id: Optional[int] = None
     room_number: Optional[str] = None
     team_ids: Optional[list[int]] = None
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
 
 
 class PersonnelOut(_ORM):
@@ -1914,7 +1931,7 @@ class ExportedPersonnel(BaseModel):
     rank: Optional[str] = None
     skill_level: Optional[int] = None
     last_name: str
-    first_name: str
+    first_name: str = ""
     cellphone: Optional[str] = None
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None

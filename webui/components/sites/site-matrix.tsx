@@ -542,6 +542,28 @@ function MatrixGridSection({
     setCollapsed(auto)
   }, [storageKey])
 
+  // Reveal a tier when a gateway is added to it. Empty tiers auto-collapse on
+  // mount, so the first gateway added to one landed in a column that stayed
+  // collapsed — "it got added collapsed". Not a user layout change, so it
+  // doesn't touch hasUserModifiedRef or the saved preference.
+  const gatewayCountsRef = useRef<Record<GatewayPace, number> | null>(null)
+  useEffect(() => {
+    const counts = Object.fromEntries(
+      GATEWAY_PACE_VALUES.map((p) => [p, gwByPace[p].length]),
+    ) as Record<GatewayPace, number>
+    const previous = gatewayCountsRef.current
+    gatewayCountsRef.current = counts
+    if (!previous) return
+    const grown = GATEWAY_PACE_VALUES.filter((p) => counts[p] > previous[p])
+    if (grown.length === 0) return
+    setCollapsed((prev) => {
+      if (!grown.some((p) => prev[p])) return prev
+      const next = { ...prev }
+      for (const p of grown) next[p] = false
+      return next
+    })
+  }, [gwByPace])
+
   useEffect(() => {
     if (!hasUserModifiedRef.current) return
     try {

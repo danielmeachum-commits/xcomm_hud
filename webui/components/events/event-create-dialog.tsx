@@ -48,6 +48,11 @@ import type {
 import { GENERAL_SUBJECT_KINDS, SEVERITIES } from "@/lib/types"
 import { groupByCategory } from "@/lib/event-type-meta"
 
+import {
+  EventTimeField,
+  localInputToIso,
+  toLocalInput,
+} from "./event-time-field"
 import { ColorSelect, IconGrid } from "./type-style-pickers"
 
 const FPCON_LEVELS: AnyStatus[] = ["normal", "alpha", "bravo", "charlie", "delta"]
@@ -161,6 +166,10 @@ export function EventCreateDialog({
   const [status, setStatus] = useState<AnyStatus | "">("")
 
   const [note, setNote] = useState("")
+  // When it happened. Defaults to now and is only sent once changed, so an
+  // event logged as it happens still takes the server's clock.
+  const [whenLocal, setWhenLocal] = useState(() => toLocalInput(new Date()))
+  const [whenTouched, setWhenTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -232,6 +241,8 @@ export function EventCreateDialog({
     setSubjectLabel("")
     setStatus("")
     setNote("")
+    setWhenLocal(toLocalInput(new Date()))
+    setWhenTouched(false)
     setError(null)
   }
 
@@ -310,6 +321,14 @@ export function EventCreateDialog({
         severity: severity || null,
         note: note.trim() || null,
       }
+    }
+    if (whenTouched) {
+      const iso = localInputToIso(whenLocal)
+      if (!iso) {
+        setError("Enter a valid date and time.")
+        return
+      }
+      payload.validated_at = iso
     }
     setPending(true)
     setError(null)
@@ -556,6 +575,17 @@ export function EventCreateDialog({
               </div>
             </>
           )}
+
+          <EventTimeField
+            id="event-when"
+            value={whenLocal}
+            onChange={(v) => {
+              setWhenLocal(v)
+              setWhenTouched(true)
+            }}
+            disabled={pending}
+            hint="Change it to log something that happened earlier."
+          />
 
           <div className="space-y-1.5">
             <Label htmlFor="note">Note</Label>

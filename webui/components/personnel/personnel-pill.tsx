@@ -2,7 +2,10 @@ import Link from "next/link"
 
 import { CommanderStar } from "@/components/personnel/commander-star"
 import { RankInsignia } from "@/components/personnel/rank-insignia"
-import { branchColor } from "@/lib/personnel-data"
+import {
+  branchColor,
+  personName,
+} from "@/lib/personnel-data"
 import type { Personnel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -35,7 +38,7 @@ export function PersonnelPill({
   const accent = branchColor(person.branch, person.personnel_type)
   const rankLabel = person.rank || (person.personnel_type === "civilian" ? "Civ" : "")
   const name = showFirstName
-    ? `${person.last_name}, ${person.first_name}`
+    ? `${personName(person)}`
     : person.last_name
   const insigniaSize = size === "sm" ? 14 : 16
 
@@ -49,7 +52,7 @@ export function PersonnelPill({
       // Branch color rides on the border and a faint tint only, so the pill
       // reads on any background without washing out the rank.
       style={{ borderColor: accent, backgroundColor: `${accent}14` }}
-      title={`${rankLabel} ${person.last_name}, ${person.first_name}`.trim()}
+      title={`${rankLabel} ${personName(person)}`.trim()}
     >
       <RankInsignia
         branch={person.branch}
