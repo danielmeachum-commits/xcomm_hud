@@ -378,3 +378,10 @@ Debugging aids that worked without sudo, worth reusing:
   and read the guest disk with `guestfish --ro`. A VM has one GPU, so it can't
   reproduce hybrid-graphics problems — but it showed the rest of the boot path
   (auto-login → xcomm → Firefox on the login page) works.
+
+**Status (2026-11-06): the stick boots and runs xcomm on the target HP
+laptop.** Built with the console fix (errors show on the screen) and the
+display fixes above. If a stick ever fails early in boot again, build it with
+`deploy/usb/build.sh --debug`: it stops on the error instead of rebooting, and
+opens a root shell on Ctrl+Alt+F9 to copy `/run/initramfs/rdsosreport.txt`
+onto the stick's EFI partition.
