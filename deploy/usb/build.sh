@@ -111,6 +111,13 @@ groups = ["wheel", "autologin"]
 [[customizations.filesystem]]
 mountpoint = "/"
 minsize = "$ROOT_SIZE"
+
+# bootc-image-builder adds "console=tty0 console=ttyS0". The LAST console is
+# the primary one, so boot status and emergency-mode errors went to a serial
+# port laptops don't have, and the screen just stopped at "emergency mode"
+# with nothing above it. Appending tty0 again makes the screen primary.
+[customizations.kernel]
+append = "console=tty0"
 EOF
 sudo podman run --rm --privileged --pull=newer \
   --security-opt label=type:unconfined_t \
