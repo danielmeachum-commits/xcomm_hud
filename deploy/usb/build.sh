@@ -4,6 +4,15 @@
 #
 #   deploy/usb/build.sh                 # the stick tracks main
 #   deploy/usb/build.sh --branch dev    # …or another branch on GitHub
+#   deploy/usb/build.sh --debug         # for diagnosing a stick that won't boot
+#
+# --debug stops on a boot failure instead of rebooting (rd.emergency=halt) and
+# opens a root shell on Ctrl+Alt+F9 that works even though root is locked
+# (systemd.debug_shell). From it:
+#   mkdir -p /tmp/e && mount /dev/disk/by-label/EFI-SYSTEM /tmp/e
+#   cp /run/initramfs/rdsosreport.txt /tmp/e/ && umount /tmp/e
+# puts the boot report on the stick, readable from any other machine. Never
+# ship a --debug stick: that shell needs no password.
 #
 # Steps:
 #   1. Check out the branch as it is on GitHub into a clean temporary
@@ -20,9 +29,11 @@ set -euo pipefail
 USB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$USB_DIR/../.." && pwd)"
 BRANCH=main
+DEBUG=0
 while (( $# )); do
   case "$1" in
     --branch) BRANCH="${2:?--branch needs a value}"; shift 2 ;;
+    --debug) DEBUG=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -39,6 +50,9 @@ step() { echo; echo "${B}== $*${N}"; }
 die() { echo "✗ $*" >&2; exit 1; }
 
 command -v podman >/dev/null || die "podman is required."
+# The password prompt below and sudo both need a terminal to type into.
+# Without one, `read` hits end-of-input and the script used to exit silently.
+[[ -t 0 ]] || die "Run this in a terminal window: it asks for passwords (the stick's account, then sudo)."
 git -C "$REPO_ROOT" rev-parse >/dev/null || die "Run this from the xcomm_hud checkout."
 
 # ---- password for the stick's account (sudo, screen unlock) ----
@@ -94,6 +108,11 @@ sudo podman build --pull=newer -t "$IMAGE" -t localhost/xcomm-hud-usb:current "$
 # ---- 5. disk image ----
 step "5/5  Making the disk image (sudo)"
 mkdir -p "$OUT"
+KARGS_DEBUG=""
+if (( DEBUG )); then
+  KARGS_DEBUG=" rd.emergency=halt systemd.debug_shell=1"
+  echo "DEBUG build: stops on boot failures; passwordless root shell on Ctrl+Alt+F9."
+fi
 CONFIG="$(mktemp -t xcomm-usb-config-XXXXXX.toml)"
 chmod 600 "$CONFIG"
 trap 'cleanup; rm -f "$CONFIG"' EXIT
@@ -108,6 +127,13 @@ groups = ["wheel", "autologin"]
 [[customizations.filesystem]]
 mountpoint = "/"
 minsize = "$ROOT_SIZE"
+
+# bootc-image-builder adds "console=tty0 console=ttyS0". The LAST console is
+# the primary one, so boot status and emergency-mode errors went to a serial
+# port laptops don't have, and the screen just stopped at "emergency mode"
+# with nothing above it. Appending tty0 again makes the screen primary.
+[customizations.kernel]
+append = "console=tty0${KARGS_DEBUG}"
 EOF
 sudo podman run --rm --privileged --pull=newer \
   --security-opt label=type:unconfined_t \
