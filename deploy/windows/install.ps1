@@ -69,6 +69,26 @@ function Invoke-Native {
   return [pscustomobject]@{ Code = $code; Output = @($output) }
 }
 
+# Podman 6's container networking (netavark with nftables) needs kernel modules
+# that WSL kernels before 6.18 don't have. WSL 2.7.5 is the first release with
+# that kernel; on WSL 2.6.1 every container on a network fails with
+#   nftables error: "nft" did not return successfully while applying ruleset
+# (podman-container-tools/podman#25201, containers/netavark#1539).
+$MinWslVersion = [version]'2.7.5'
+
+# The installed WSL version, or $null. wsl.exe writes UTF-16, which Windows
+# PowerShell 5.1 shows with a NUL between every character, and its labels are
+# translated - so ask for UTF-8, strip any NULs, and take the first version
+# number (the first line is the WSL version itself).
+function Get-WslVersion {
+  $env:WSL_UTF8 = '1'
+  $r = Invoke-Native 'wsl.exe' @('--version')
+  if ($r.Code -ne 0) { return $null }
+  $text = ($r.Output -join "`n") -replace "`0", ''
+  if ($text -match '(\d+\.\d+\.\d+(?:\.\d+)?)') { return [version]$Matches[1] }
+  return $null
+}
+
 function Install-Msi([string]$Msi, [string[]]$Properties) {
   $msiArgs = @('/i', "`"$Msi`"", '/quiet', '/norestart', '/l*v', "`"$Log.msi.txt`"") + $Properties
   $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
@@ -130,13 +150,30 @@ foreach ($feature in @('VirtualMachinePlatform', 'Microsoft-Windows-Subsystem-Li
 # ---------- 3. WSL, Podman, Git ----------
 
 Write-Step '3/9  Installing WSL, Podman and Git'
-$wsl = Invoke-Native 'wsl.exe' @('--version')
-if ($wsl.Code -eq 0) {
-  Write-Ok 'WSL is installed.'
+$wslVersion = Get-WslVersion
+if ($wslVersion -and $wslVersion -ge $MinWslVersion) {
+  Write-Ok "WSL $wslVersion is installed."
 } else {
-  Write-Info 'Installing WSL...'
+  if ($wslVersion) {
+    # An older WSL is already here (e.g. from Docker Desktop). Upgrading it is
+    # required: Podman's networking doesn't work on it.
+    Write-Info "WSL $wslVersion is too old for Podman's networking (needs $MinWslVersion or later); upgrading..."
+  } else {
+    Write-Info 'Installing WSL...'
+  }
   if (Install-Msi (Find-Installer 'wsl.*.x64.msi') @()) { $restartNeeded = $true }
-  Write-Ok 'WSL installed.'
+  if ($wslVersion) {
+    # Running distros keep the old kernel until WSL restarts. This also stops
+    # any other WSL distros (Docker Desktop's, Ubuntu); they start again on use.
+    Invoke-Native 'wsl.exe' @('--shutdown') | Out-Null
+  }
+  if (-not $restartNeeded) {
+    $wslVersion = Get-WslVersion
+    if (-not $wslVersion -or $wslVersion -lt $MinWslVersion) {
+      Stop-WithError "WSL is still $wslVersion after installing the kit's WSL. Restart Windows and run install.cmd again."
+    }
+  }
+  Write-Ok "WSL $wslVersion installed."
 }
 
 if ($restartNeeded) {

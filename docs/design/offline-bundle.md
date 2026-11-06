@@ -437,7 +437,15 @@ Idempotent, so it resumes after the WSL reboot and can be rerun:
    reboot; HKLM `RunOnce` resumes from the copy).
 2. Turn on `VirtualMachinePlatform` and `Microsoft-Windows-Subsystem-Linux`.
 3. Install WSL (MSI), reboot if needed; then Podman (MSI, `ALLUSERS=1
-   MACHINE_PROVIDER=wsl`) and Git for Windows, silently.
+   MACHINE_PROVIDER=wsl`) and Git for Windows, silently. **WSL must be 2.7.5
+   or later**, and an older one already on the machine is upgraded from the
+   kit: Podman 6's networking (netavark + nftables) needs kernel modules WSL
+   kernels before 6.18 lack. On the first real install the host had WSL 2.6.1
+   (from Docker Desktop) and every container failed with `nftables error: "nft"
+   did not return successfully while applying ruleset` (netavark#1539,
+   podman#25201). `wsl --version` is read with `WSL_UTF8=1`, NULs stripped
+   (UTF-16 under PowerShell 5.1) and the first version number taken (labels
+   are translated). `xcomm.ps1 start` checks it too.
 4. `podman machine init --image <kit image> xcomm` — xcomm's **own machine**,
    never `podman-machine-default`. The first real install ran on a host that
    already had a default machine from an older Podman; the kit skipped

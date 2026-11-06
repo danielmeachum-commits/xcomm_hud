@@ -82,6 +82,26 @@ function Invoke-Native {
   return [pscustomobject]@{ Code = $code; Output = @($output) }
 }
 
+# Podman 6's container networking (netavark with nftables) needs kernel modules
+# that WSL kernels before 6.18 don't have. WSL 2.7.5 is the first release with
+# that kernel; on WSL 2.6.1 every container on a network fails with
+#   nftables error: "nft" did not return successfully while applying ruleset
+# (podman-container-tools/podman#25201, containers/netavark#1539).
+$MinWslVersion = [version]'2.7.5'
+
+# The installed WSL version, or $null. wsl.exe writes UTF-16, which Windows
+# PowerShell 5.1 shows with a NUL between every character, and its labels are
+# translated - so ask for UTF-8, strip any NULs, and take the first version
+# number (the first line is the WSL version itself).
+function Get-WslVersion {
+  $env:WSL_UTF8 = '1'
+  $r = Invoke-Native 'wsl.exe' @('--version')
+  if ($r.Code -ne 0) { return $null }
+  $text = ($r.Output -join "`n") -replace "`0", ''
+  if ($text -match '(\d+\.\d+\.\d+(?:\.\d+)?)') { return [version]$Matches[1] }
+  return $null
+}
+
 $Podman = Get-PodmanPath
 # Every podman command below - ps, load, compose - goes to xcomm's machine,
 # whatever the user's default connection is.
@@ -140,6 +160,11 @@ function Invoke-MachineCommand([string]$Verb) {
 # left up by `podman machine init` - and then docker-compose fails with
 # "failed to connect to the docker API at npipe:////./pipe/podman-machine-default".
 function Start-Machine {
+  $wsl = Get-WslVersion
+  if ($wsl -and $wsl -lt $MinWslVersion) {
+    Stop-WithError ("WSL $wsl is too old for Podman's container networking (needs $MinWslVersion or later). " +
+      'Run C:\xcomm\kit\install.cmd again - it upgrades WSL from the kit.')
+  }
   $state = Get-MachineState
   if ($state -eq 'missing') { Stop-WithError "No Podman machine named '$Machine'. Run the kit's install.cmd first." }
   $pipe = Get-MachinePipe
