@@ -31,3 +31,6 @@ webui/.source/
 # USB image build artifacts (deploy/usb/build.sh)
 deploy/usb/seed/
 deploy/usb/output/
+
+# Windows kit build output (deploy/windows/build-kit.sh)
+deploy/windows/output/
