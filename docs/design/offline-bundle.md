@@ -438,7 +438,14 @@ Idempotent, so it resumes after the WSL reboot and can be rerun:
 2. Turn on `VirtualMachinePlatform` and `Microsoft-Windows-Subsystem-Linux`.
 3. Install WSL (MSI), reboot if needed; then Podman (MSI, `ALLUSERS=1
    MACHINE_PROVIDER=wsl`) and Git for Windows, silently.
-4. `podman machine init --image <kit image>`.
+4. `podman machine init --image <kit image> xcomm` — xcomm's **own machine**,
+   never `podman-machine-default`. The first real install ran on a host that
+   already had a default machine from an older Podman; the kit skipped
+   creating one, and Podman 6.1.4 then failed to start it (its newer start
+   writes into `/usr/share/containers/containers.conf.d/`, which that older
+   image lacks). `xcomm.ps1` sets `CONTAINER_CONNECTION=xcomm`, so it never
+   depends on, or touches, the user's own machines. WSL machines can run side
+   by side.
 5. Clone the bundle to `C:\xcomm\xcomm_hud` with `core.autocrlf=false`, rename
    the branch, point `origin` at GitHub.
 6. Secrets, same shapes as `scripts/gen-env.sh --prod`, written UTF-8 **without

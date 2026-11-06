@@ -37,6 +37,10 @@ $EnvFile     = Join-Path $StateDir 'xcomm.env'
 $ComposeFile = Join-Path $RepoRoot 'deploy\bundle\compose.prod.yml'
 $ComposeLog  = Join-Path $StateDir 'compose.log'
 $Project     = 'xcomm-hud'
+# xcomm's own Podman machine. Never the default one: a host may already have a
+# podman-machine-default from another Podman install, possibly a different
+# version, and the kit must neither depend on it nor touch its containers.
+$Machine     = 'xcomm'
 # Where the stack listens on this machine. Port 80 is the proxy in front of it.
 $InternalPort = if ($env:XCOMM_INTERNAL_PORT) { [int]$env:XCOMM_INTERNAL_PORT } else { 18080 }
 $HealthUrl    = "http://127.0.0.1:$InternalPort/api/be/healthz"
@@ -79,6 +83,9 @@ function Invoke-Native {
 }
 
 $Podman = Get-PodmanPath
+# Every podman command below - ps, load, compose - goes to xcomm's machine,
+# whatever the user's default connection is.
+$env:CONTAINER_CONNECTION = $Machine
 
 function Set-ComposeEnvironment {
   # Read by deploy/bundle/compose.prod.yml.
@@ -100,7 +107,7 @@ function Invoke-Compose([string[]]$ArgumentList) {
 # ---------- the Podman machine ----------
 
 function Get-MachineState {
-  $r = Invoke-Native $Podman @('machine', 'inspect', '--format', '{{.State}}')
+  $r = Invoke-Native $Podman @('machine', 'inspect', '--format', '{{.State}}', $Machine)
   if ($r.Code -ne 0) { return 'missing' }
   return ($r.Output | Select-Object -Last 1).Trim()
 }
@@ -108,7 +115,7 @@ function Get-MachineState {
 # The named pipe the machine's API is served on, e.g. \\.\pipe\podman-machine-default.
 # `podman compose` points docker-compose at it.
 function Get-MachinePipe {
-  $r = Invoke-Native $Podman @('machine', 'inspect', '--format', '{{.ConnectionInfo.PodmanPipe.Path}}')
+  $r = Invoke-Native $Podman @('machine', 'inspect', '--format', '{{.ConnectionInfo.PodmanPipe.Path}}', $Machine)
   if ($r.Code -ne 0) { return $null }
   return ($r.Output | Select-Object -Last 1).Trim()
 }
@@ -121,10 +128,10 @@ function Test-Pipe([string]$Path) {
 }
 
 function Invoke-MachineCommand([string]$Verb) {
-  $r = Invoke-Native $Podman @('machine', $Verb)
+  $r = Invoke-Native $Podman @('machine', $Verb, $Machine)
   if ($r.Code -ne 0) {
     $r.Output | Select-Object -Last 15 | ForEach-Object { Write-Host "    $_" }
-    Stop-WithError "podman machine $Verb failed."
+    Stop-WithError "podman machine $Verb $Machine failed."
   }
 }
 
@@ -134,7 +141,7 @@ function Invoke-MachineCommand([string]$Verb) {
 # "failed to connect to the docker API at npipe:////./pipe/podman-machine-default".
 function Start-Machine {
   $state = Get-MachineState
-  if ($state -eq 'missing') { Stop-WithError 'No Podman machine. Run the kit''s install.cmd first.' }
+  if ($state -eq 'missing') { Stop-WithError "No Podman machine named '$Machine'. Run the kit's install.cmd first." }
   $pipe = Get-MachinePipe
   if ($state -eq 'running' -and (Test-Pipe $pipe)) { return }
   if ($state -eq 'running') {
@@ -268,7 +275,7 @@ function Invoke-Stop {
 }
 
 function Invoke-Status {
-  Write-Host "xcomm_hud  version $(Get-RunningRevision)  -  Podman machine: $(Get-MachineState)"
+  Write-Host "xcomm_hud  version $(Get-RunningRevision)  -  Podman machine '$Machine': $(Get-MachineState)"
   $r = Invoke-Native $Podman @('ps', '-a', '--filter', "label=com.docker.compose.project=$Project",
     '--format', '{{.Names}}  {{.Status}}')
   if ($r.Code -ne 0 -or -not ($r.Output -join '').Trim()) {

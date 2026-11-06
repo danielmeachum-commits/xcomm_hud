@@ -37,6 +37,10 @@ $InternalPort = 18080   # must match xcomm.ps1
 $RunOnceKey   = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
 $RunOnceName  = 'xcomm-install'
 $TaskName     = 'xcomm'
+# xcomm's own machine (must match xcomm.ps1). Never podman-machine-default: a
+# host may already have one from another Podman install - on the first real
+# install it did, from an older Podman, and starting it with this Podman failed.
+$Machine      = 'xcomm'
 $Log          = Join-Path $InstallRoot 'install.log'
 
 function Write-Step([string]$Message) { Write-Host ''; Write-Host "== $Message" -ForegroundColor Cyan }
@@ -175,15 +179,15 @@ Write-Ok "docker-compose in $ToolsDir."
 
 # ---------- 4. the Podman machine ----------
 
-Write-Step '4/9  Creating the Podman machine'
-$inspect = Invoke-Native $podmanExe @('machine', 'inspect')
+Write-Step "4/9  Creating the Podman machine '$Machine'"
+$inspect = Invoke-Native $podmanExe @('machine', 'inspect', $Machine)
 if ($inspect.Code -eq 0) {
-  Write-Ok 'The Podman machine exists.'
+  Write-Ok "The Podman machine '$Machine' exists."
 } else {
   Write-Info 'Importing the machine image into WSL (a few minutes)...'
   # From the kit's copy - `podman machine init` would otherwise download it.
   $image = Find-Installer 'podman-machine.x86_64.wsl.tar.zst'
-  $r = Invoke-Native $podmanExe @('machine', 'init', '--image', $image)
+  $r = Invoke-Native $podmanExe @('machine', 'init', '--image', $image, $Machine)
   if ($r.Code -ne 0) {
     $r.Output | Select-Object -Last 15 | ForEach-Object { Write-Host "    $_" }
     Stop-WithError 'Creating the Podman machine failed.'
