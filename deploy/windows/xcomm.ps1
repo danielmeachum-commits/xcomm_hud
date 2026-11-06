@@ -105,16 +105,48 @@ function Get-MachineState {
   return ($r.Output | Select-Object -Last 1).Trim()
 }
 
+# The named pipe the machine's API is served on, e.g. \\.\pipe\podman-machine-default.
+# `podman compose` points docker-compose at it.
+function Get-MachinePipe {
+  $r = Invoke-Native $Podman @('machine', 'inspect', '--format', '{{.ConnectionInfo.PodmanPipe.Path}}')
+  if ($r.Code -ne 0) { return $null }
+  return ($r.Output | Select-Object -Last 1).Trim()
+}
+
+function Test-Pipe([string]$Path) {
+  if (-not $Path) { return $false }
+  # Test-Path is unreliable on named pipes; list them instead.
+  $pipes = [IO.Directory]::GetFiles('\\.\pipe\')
+  return ($pipes -contains $Path)
+}
+
+function Invoke-MachineCommand([string]$Verb) {
+  $r = Invoke-Native $Podman @('machine', $Verb)
+  if ($r.Code -ne 0) {
+    $r.Output | Select-Object -Last 15 | ForEach-Object { Write-Host "    $_" }
+    Stop-WithError "podman machine $Verb failed."
+  }
+}
+
+# "Running" is not enough: the API pipe only exists if `podman machine start`
+# made it. WSL can report the machine's distro as running without that - e.g.
+# left up by `podman machine init` - and then docker-compose fails with
+# "failed to connect to the docker API at npipe:////./pipe/podman-machine-default".
 function Start-Machine {
   $state = Get-MachineState
   if ($state -eq 'missing') { Stop-WithError 'No Podman machine. Run the kit''s install.cmd first.' }
-  if ($state -ne 'running') {
+  $pipe = Get-MachinePipe
+  if ($state -eq 'running' -and (Test-Pipe $pipe)) { return }
+  if ($state -eq 'running') {
+    Write-Info "The Podman machine is running without its API ($pipe); restarting it..."
+    Invoke-MachineCommand 'stop'
+  } else {
     Write-Info 'Starting the Podman machine...'
-    $r = Invoke-Native $Podman @('machine', 'start')
-    if ($r.Code -ne 0) {
-      $r.Output | Select-Object -Last 15 | ForEach-Object { Write-Host "    $_" }
-      Stop-WithError 'The Podman machine did not start.'
-    }
+  }
+  Invoke-MachineCommand 'start'
+  $pipe = Get-MachinePipe
+  if (-not (Test-Pipe $pipe)) {
+    Stop-WithError "The Podman machine started, but its API pipe ($pipe) isn't there."
   }
 }
 
