@@ -190,6 +190,8 @@ export interface ServiceGatewayStatus {
   validated_at: string | null
   validated_by_user_id: number | null
   validated_by_username: string | null
+  /** The gateway IS the device providing the service on this path. */
+  same_device: boolean
 }
 
 export interface Service {
@@ -233,6 +235,9 @@ export interface Service {
   /** Per-(service × gateway) matrix cells for every gateway on this site
    *  whose PACE tier the service enables. Materialized by the API on read. */
   gateway_statuses: ServiceGatewayStatus[]
+  /** Every enabled path is a same-device gateway, so local status follows
+   *  those cells instead of being validated by hand. */
+  local_follows_gateways: boolean
 }
 
 export interface ServiceTemplate {

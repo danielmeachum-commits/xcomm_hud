@@ -21,6 +21,12 @@ Rules (see the design conversation for the full ruleset):
                local service status. `unvalidated` is exempt (means "no info",
                not "worst case").
 
+A cell marked `same_device` (the gateway IS the device providing the service
+on that path — a 117G doing MUOS voice) is exempt from the LOCAL half of R10
+and from R11: the radio is its own local end, so the service's separate local
+status says nothing about it. A dead gateway still forces it down. How such
+cells are kept in step with their gateway lives in api/same_device.py.
+
 Rollup semantics for the top-level `service.effective_status` are
 preserved so the list and graph views keep working: it's the best cell
 effective status across the service's enabled PACE tiers, and rolls up
@@ -71,17 +77,23 @@ def clamp_by_local(cell_status: str, local_status: str) -> str:
 
 
 def effective_cell_status(
-    cell_status: str, local_service_status: str, gateway_status: str
+    cell_status: str,
+    local_service_status: str,
+    gateway_status: str,
+    same_device: bool = False,
 ) -> str:
     """Displayed status for a single (service × gateway) intersection.
 
     Applied in order:
       1. Gateway `down`/`offline` → returns the gateway status (R10).
-      2. Local `down`/`offline` → returns the local status (R10).
-      3. Otherwise clamp the stored cell state by the local status (R11).
+      2. Same-device cell → its own status; local doesn't constrain it.
+      3. Local `down`/`offline` → returns the local status (R10).
+      4. Otherwise clamp the stored cell state by the local status (R11).
     """
     if gateway_status in ("down", "offline"):
         return gateway_status
+    if same_device:
+        return cell_status
     if local_service_status in ("down", "offline"):
         return local_service_status
     return clamp_by_local(cell_status, local_service_status)
@@ -100,7 +112,7 @@ def relevant_gateways(
 
 
 def _cell_contribution_to_rollup(
-    cell_status: str, local_status: str, gateway_status: str
+    cell_status: str, local_status: str, gateway_status: str, same_device: bool = False
 ) -> Optional[str]:
     """What this cell contributes to `service.effective_status`.
 
@@ -113,6 +125,9 @@ def _cell_contribution_to_rollup(
     """
     if gateway_status in ("down", "offline"):
         return None
+    if same_device:
+        # The device is the whole path: its own status, unconstrained by local.
+        return None if cell_status in ("down", "offline") else cell_status
     if local_status in ("down", "offline"):
         return None
     if cell_status == "unvalidated":
@@ -172,7 +187,7 @@ def effective_service_status(
         cell = cells_by_gateway_id.get(gw.id)
         cell_status = cell.status if cell else "unvalidated"
         contribution = _cell_contribution_to_rollup(
-            cell_status, local, gw.status
+            cell_status, local, gw.status, bool(cell and cell.same_device)
         )
         if contribution is None or contribution == "unvalidated":
             continue
@@ -229,7 +244,12 @@ def reset_cells_for_gateway(
     changed: list[tuple[ServiceGatewayStatus, str, str]] = []
     cells = (
         db.query(ServiceGatewayStatus)
-        .filter(ServiceGatewayStatus.gateway_id == gateway_id)
+        .filter(
+            ServiceGatewayStatus.gateway_id == gateway_id,
+            # Same-device cells are synced to the gateway's status instead of
+            # being blanked — see same_device.sync_cells_for_gateway.
+            ServiceGatewayStatus.same_device.is_(False),
+        )
         .all()
     )
     for cell in cells:
@@ -267,6 +287,9 @@ def clamp_cells_for_service(
         .filter(ServiceGatewayStatus.service_delivery_id == service_id)
         .all()
     )
+    # Same-device cells are their own local end — the service's local status
+    # doesn't clamp them (see the module docstring).
+    cells = [c for c in cells if not c.same_device]
     if new_local_status in ("down", "offline"):
         for cell in cells:
             prev = cell.status

@@ -550,6 +550,14 @@ class ServiceGatewayStatus(Base):
         primary_key=True,
         index=True,
     )
+    # This gateway IS the device providing the service on this path (a 117G
+    # doing MUOS voice). Validating the gateway then sets this cell, the cell
+    # isn't capped by the service's local status, and a service whose every
+    # path is same-device has its local status follow these cells. See
+    # api/same_device.py.
+    same_device: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="unvalidated"
     )

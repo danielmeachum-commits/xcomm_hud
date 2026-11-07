@@ -124,7 +124,7 @@ def _service_out(
             continue
         entry = ServiceGatewayStatusOut.model_validate(cell)
         entry.effective_status = effective_cell_status(
-            cell.status, resolved, gw.status
+            cell.status, resolved, gw.status, cell.same_device
         )
         if cell.validated_by_user_id is not None:
             uid = cell.validated_by_user_id
@@ -135,6 +135,11 @@ def _service_out(
             entry.validated_by_username = user_cache.get(uid)
         cell_out.append(entry)
     out.gateway_statuses = cell_out
+    # Every enabled path is a same-device gateway → local follows them.
+    paths = [g for g in gateways if g.pace in (delivery.enabled_pace or [])]
+    out.local_follows_gateways = bool(paths) and all(
+        (c := cells_by_gw.get(g.id)) is not None and c.same_device for g in paths
+    )
     return out
 
 

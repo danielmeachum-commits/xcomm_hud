@@ -769,10 +769,19 @@ class ServiceGatewayStatusOut(_ORM):
 
     gateway_id: int
     status: CellStatusValue
+    # The gateway is the device providing the service on this path.
+    same_device: bool = False
     effective_status: CellStatusValue = "unvalidated"
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
+
+
+class SameDeviceIn(BaseModel):
+    """Mark (or unmark) a cell as "this gateway IS the device providing the
+    service on this path". See api/same_device.py."""
+
+    same_device: bool
 
 
 class ServiceGatewayStatusValidateIn(BaseModel):
@@ -830,6 +839,9 @@ class ServiceOut(_ORM):
     # Per-gateway matrix cells. One entry per gateway on this site whose PACE
     # tier the service enables — auto-materialized by the API on read.
     gateway_statuses: list[ServiceGatewayStatusOut] = Field(default_factory=list)
+    # Every enabled path is a same-device gateway, so the local status
+    # follows those cells rather than being validated by hand.
+    local_follows_gateways: bool = False
 
 
 # --- Gateway ---

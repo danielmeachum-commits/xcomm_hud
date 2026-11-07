@@ -13,6 +13,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Cpu,
+  Link2,
   MapPin,
   Plus,
   Waypoints,
@@ -1557,6 +1558,17 @@ function LocalTile({
               <Cpu className="size-2.5 shrink-0" />
               from equipment
             </button>
+          ) : service.local_follows_gateways ? (
+            // Every path is a same-device gateway: local is set by validating
+            // the gateway, so say so rather than inviting a hand validation
+            // the next gateway validation would replace.
+            <span
+              className="flex items-center gap-1 text-[10px] text-muted-foreground"
+              title="Every path is a same-device gateway, so this follows the gateway's validation"
+            >
+              <Link2 className="size-2.5 shrink-0" />
+              follows its gateway
+            </span>
           ) : service.validated_at ? (
             <ValidationDetailsPopover
               validatedAt={service.validated_at}
@@ -1795,6 +1807,7 @@ function PaceTile({
             allowedStatuses={service.allowed_statuses}
             className={MIN_PILL_CLASS}
             indicatorSize="xl"
+            sameDevice={best.cell.same_device}
           />
         </div>
       ) : (
@@ -1811,6 +1824,7 @@ function PaceTile({
             lastValidatedBy={best.cell.validated_by_username}
             allowedStatuses={service.allowed_statuses}
             className={CELL_PILL_CLASS}
+            sameDevice={best.cell.same_device}
           />
           {best.cell.validated_at ? (
             <ValidationDetailsPopover

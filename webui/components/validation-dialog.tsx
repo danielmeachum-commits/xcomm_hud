@@ -50,6 +50,9 @@ interface Props {
   lastValidatedBy: string | null
   /** Optional whitelist from the service template; if omitted, all are allowed. */
   allowedStatuses?: AnyStatus[] | null
+  /** Extra controls at the top of the Record tab — the matrix cell puts its
+   *  "same device" switch here. */
+  recordExtra?: React.ReactNode
 }
 
 type TabKey = "record" | "history"
@@ -75,6 +78,7 @@ export function ValidationDialog({
   lastValidatedAt,
   lastValidatedBy,
   allowedStatuses,
+  recordExtra,
 }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<TabKey>("record")
@@ -285,6 +289,7 @@ export function ValidationDialog({
         <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
           {tab === "record" ? (
             <div className="space-y-4">
+              {recordExtra}
               {/* When did this happen */}
               <div className="space-y-1.5">
                 <Label htmlFor="when">When (local time)</Label>
