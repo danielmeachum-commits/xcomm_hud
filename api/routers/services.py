@@ -32,6 +32,8 @@ from pubsub import notify
 from rules_engine import emit_trigger
 from schemas import (
     DeliveryGatewayDependencyOut,
+    ServiceCopyIn,
+    ServiceCopyOut,
     ServiceGatewayStatusOut,
     ServiceIn,
     ServiceOut,
@@ -269,6 +271,141 @@ def create_service(
     db.flush()
     notify(background_tasks)
     return _service_out(db, delivery, service)
+
+
+@router.post("/copy", response_model=ServiceCopyOut)
+def copy_services(
+    body: ServiceCopyIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    _=Depends(requires("operator")),
+):
+    """Copy services (and optionally gateways) from one site to another.
+
+    A copied service JOINS the same Service identity — one "NIPR Web", now
+    delivered at both sites — exactly as adding it by hand at the second site
+    would. It gets the source's PACE tiers, reach, criticality and notes, but
+    starts unvalidated: nobody has checked it at the new site yet. A service
+    the target already delivers is skipped, never duplicated.
+
+    Gateways are matched by name. With `include_gateways`, the source's
+    gateways are created at the target unless one of the same name is already
+    there (status starts at `ready`, the gateway "nothing said yet"). Gateway
+    dependencies of copied services are recreated against the same-named
+    gateway at the target, whether it was just copied or already existed.
+
+    Equipment bindings are deliberately not copied: gear is physically at one
+    site, and the far end of a shot binds to its own site's services.
+    """
+    if body.from_site_id == body.to_site_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick two different sites.")
+    sites = {
+        s.id: s
+        for s in db.query(Site).filter(
+            Site.id.in_([body.from_site_id, body.to_site_id]),
+            Site.workspace_id == workspace.id,
+        )
+    }
+    if len(sites) != 2:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
+
+    out = ServiceCopyOut()
+
+    # --- gateways ---
+    target_gateways = {
+        g.name: g for g in db.query(Gateway).filter(Gateway.site_id == body.to_site_id)
+    }
+    if body.include_gateways:
+        next_order = max((g.display_order for g in target_gateways.values()), default=-1) + 1
+        source_gateways = (
+            db.query(Gateway)
+            .filter(Gateway.site_id == body.from_site_id)
+            .order_by(Gateway.display_order, Gateway.id)
+            .all()
+        )
+        for g in source_gateways:
+            if g.name in target_gateways:
+                out.gateways_skipped += 1
+                continue
+            copy = Gateway(
+                site_id=body.to_site_id,
+                name=g.name,
+                kind=g.kind,
+                provider=g.provider,
+                pace=g.pace,
+                status="ready",
+                notes=g.notes,
+                display_order=next_order,
+            )
+            next_order += 1
+            db.add(copy)
+            target_gateways[g.name] = copy
+            out.gateways_created += 1
+        db.flush()
+
+    # --- services ---
+    query = db.query(ServiceDelivery).filter(ServiceDelivery.site_id == body.from_site_id)
+    if body.delivery_ids is not None:
+        query = query.filter(ServiceDelivery.id.in_(body.delivery_ids or [-1]))
+    sources = query.order_by(ServiceDelivery.display_order, ServiceDelivery.id).all()
+    if body.delivery_ids is not None and len(sources) != len(set(body.delivery_ids)):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Some of those services aren't at the source site.",
+        )
+    already = {
+        d.service_id
+        for d in db.query(ServiceDelivery).filter(ServiceDelivery.site_id == body.to_site_id)
+    }
+    max_order = (
+        db.query(ServiceDelivery.display_order)
+        .filter(ServiceDelivery.site_id == body.to_site_id)
+        .order_by(ServiceDelivery.display_order.desc())
+        .first()
+    )
+    next_order = (max_order[0] + 1) if max_order else 0
+    gateway_names = {
+        g.id: g.name for g in db.query(Gateway).filter(Gateway.site_id == body.from_site_id)
+    }
+    for src in sources:
+        if src.service_id in already:
+            out.services_skipped += 1
+            continue
+        delivery = ServiceDelivery(
+            service_id=src.service_id,
+            site_id=body.to_site_id,
+            source=src.source,
+            reach=src.reach,
+            category=src.category,
+            enabled_pace=list(src.enabled_pace or []),
+            notes=src.notes,
+            display_order=next_order,
+        )
+        next_order += 1
+        db.add(delivery)
+        db.flush()
+        already.add(src.service_id)
+        out.services_created += 1
+        for dep in db.query(DeliveryGatewayDependency).filter(
+            DeliveryGatewayDependency.service_delivery_id == src.id
+        ):
+            target = target_gateways.get(gateway_names.get(dep.gateway_id, ""))
+            if target is None:
+                continue
+            db.add(
+                DeliveryGatewayDependency(
+                    service_delivery_id=delivery.id,
+                    gateway_id=target.id,
+                    required=dep.required,
+                    group_key=dep.group_key,
+                )
+            )
+            out.dependencies_created += 1
+
+    db.flush()
+    notify(background_tasks)
+    return out
 
 
 @router.get("/{service_id}", response_model=ServiceOut)

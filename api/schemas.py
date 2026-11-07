@@ -681,6 +681,35 @@ class ServiceIn(BaseModel):
     enabled_pace: list[GatewayPace] = Field(default_factory=lambda: list(_DEFAULT_PACE))
 
 
+class ServiceCopyIn(BaseModel):
+    """Copy services (and optionally gateways) from one site to another.
+
+    Setting a site up from scratch meant adding every service and gateway by
+    hand. A copy brings the source site's choices across in one go: which
+    services, their PACE tiers, reach, criticality and notes. Status never
+    copies — a service at a new site hasn't been validated there.
+    """
+
+    from_site_id: int
+    to_site_id: int
+    # Source delivery ids to copy. Omitted (null) means every service at the
+    # source; an empty list means none — e.g. copying only the gateways.
+    delivery_ids: Optional[list[int]] = None
+    include_gateways: bool = False
+
+
+class ServiceCopyOut(BaseModel):
+    services_created: int = 0
+    # Already delivered at the target site — joined, not duplicated.
+    services_skipped: int = 0
+    gateways_created: int = 0
+    # A gateway of the same name already at the target.
+    gateways_skipped: int = 0
+    # Gateway dependencies carried over to the new deliveries, matched by
+    # gateway name at the target.
+    dependencies_created: int = 0
+
+
 class ServicePatch(BaseModel):
     name: Optional[str] = None
     site_id: Optional[int] = None
