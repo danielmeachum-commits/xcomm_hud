@@ -36,7 +36,8 @@ def summary_report(
         if known != set(body.site_ids):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Site not found")
     pdf = build_summary_pdf(
-        db, workspace, user, body.remark, body.site_remarks, body.site_ids
+        db, workspace, user, body.remark, body.site_remarks, body.site_ids,
+        body.events_log,
     )
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%MZ")
     slug = re.sub(r"[^a-z0-9]+", "-", workspace.name.lower()).strip("-") or "workspace"

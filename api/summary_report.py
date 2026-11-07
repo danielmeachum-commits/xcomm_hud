@@ -9,6 +9,11 @@ statuses resolve exactly as they do on screen. Nothing here recomputes a
 status.
 
 Remarks are not stored anywhere; they exist only in the PDF.
+
+Optionally followed, from a new page, by an events log: the event feed
+filtered by time, site, kind, severity, status and type, oldest first, read
+through the events router's own enrichment so names and sites match the
+Events page.
 """
 from __future__ import annotations
 
@@ -25,6 +30,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.platypus import (
     KeepTogether,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -33,7 +39,24 @@ from reportlab.platypus import (
 )
 from sqlalchemy.orm import Session
 
-from models import Gateway, Site, User, Workspace
+from models import Event, EventTypeDef, Gateway, Site, User, Workspace
+from schemas import SummaryEventsLogIn
+
+# The events log holds at most this many rows (the most recent ones). A PDF
+# longer than ~50 pages isn't read; narrow the filters instead.
+EVENTS_LOG_LIMIT = 2000
+
+# Same words as the web UI's SUBJECT_KIND_LABELS (lib/event-type-labels.ts).
+_SUBJECT_KIND_LABELS = {
+    "workspace": "Workspace", "site": "Site", "site_status": "Site status",
+    "site_fpcon": "FPCON", "site_emcon": "EMCON", "team": "Team", "unit": "Unit",
+    "work_center": "Work center", "system": "System", "mission": "Mission",
+    "exercise": "Exercise", "service": "Service", "gateway": "Gateway",
+    "service_gateway": "Cell", "personnel_location": "Personnel",
+    "document": "Document", "doc_page": "Doc page", "equipment": "Equipment",
+    "equipment_capability": "Capability", "equipment_link": "Equipment link",
+    "utc_instance": "UTC", "package_instance": "Package",
+}
 
 # Status words -> cell colour. Anything not listed (unvalidated, setup, ...)
 # reads as "not known", in grey.
@@ -105,6 +128,7 @@ def build_summary_pdf(
     remark: str,
     site_remarks: dict[int, str],
     site_ids: Optional[list[int]] = None,
+    events_log: Optional[SummaryEventsLogIn] = None,
 ) -> bytes:
     # Imported here: the routers import their own dependencies freely.
     from routers.gateways import _gateway_out
@@ -220,6 +244,10 @@ def build_summary_pdf(
     if not sites:
         story.append(Paragraph("No sites.", body))
 
+    if events_log is not None:
+        story.append(PageBreak())
+        story += _events_log_story(db, workspace, events_log, h1, body, small, cell)
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=letter,
@@ -270,3 +298,122 @@ def _table(rows: list, widths: list, fills: list) -> Table:
         style.append(("BACKGROUND", (col, row), (col, row), _FILL[tone]))
     t.setStyle(TableStyle(style))
     return t
+
+
+def _events_log_rows(db: Session, workspace: Workspace, f: SummaryEventsLogIn):
+    """(rows oldest-first, total matching) for the events log filters."""
+    from routers.events import _enrich
+
+    q = db.query(Event).filter(
+        (Event.workspace_id == workspace.id) | (Event.workspace_id.is_(None)),
+        Event.hidden_at.is_(None),
+    )
+    if f.since:
+        q = q.filter(Event.validated_at >= f.since)
+    if f.until:
+        q = q.filter(Event.validated_at <= f.until)
+    if f.event_types:
+        q = q.filter(Event.event_type.in_(f.event_types))
+    if f.subject_kinds:
+        q = q.filter(Event.subject_kind.in_(f.subject_kinds))
+    if f.severities:
+        q = q.filter(Event.severity.in_(f.severities))
+    if f.statuses:
+        q = q.filter(Event.status.in_(f.statuses))
+    if f.type_slugs:
+        q = q.filter(Event.type_slug.in_(f.type_slugs))
+    if f.events_only:
+        q = q.filter(Event.record_class == "event")
+    q = q.order_by(Event.validated_at.desc(), Event.id.desc())
+    if not f.site_ids:
+        total = q.count()
+        rows = [_enrich(db, e) for e in q.limit(EVENTS_LOG_LIMIT)]
+    else:
+        # The site lives on the subject (a service's site, a gateway's...), so
+        # it's known only after enrichment — the same as GET /events?site_id.
+        wanted = set(f.site_ids)
+        matching = [o for o in (_enrich(db, e) for e in q) if o.site_id in wanted]
+        total = len(matching)
+        rows = matching[:EVENTS_LOG_LIMIT]
+    rows.reverse()
+    return rows, total
+
+
+def _events_log_story(db, workspace, f, h1, body, small, cell) -> list:
+    rows, total = _events_log_rows(db, workspace, f)
+    type_labels = {
+        t.slug: t.label
+        for t in db.query(EventTypeDef).filter(
+            (EventTypeDef.workspace_id == workspace.id) | (EventTypeDef.workspace_id.is_(None))
+        )
+    }
+    site_names = {
+        s.id: s.name for s in db.query(Site).filter(Site.workspace_id == workspace.id)
+    }
+
+    filters = []
+    if f.since or f.until:
+        filters.append(f"{_zulu(f.since) if f.since else 'start'} to {_zulu(f.until) if f.until else 'now'}")
+    if f.site_ids:
+        filters.append("sites: " + ", ".join(site_names.get(i, f"#{i}") for i in f.site_ids))
+    if f.event_types:
+        filters.append("kinds: " + ", ".join(_label(t) for t in f.event_types))
+    if f.subject_kinds:
+        filters.append("subjects: " + ", ".join(_SUBJECT_KIND_LABELS.get(k, _label(k)) for k in f.subject_kinds))
+    if f.type_slugs:
+        filters.append("types: " + ", ".join(type_labels.get(t, t) for t in f.type_slugs))
+    if f.severities:
+        filters.append("severity: " + ", ".join(_label(x) for x in f.severities))
+    if f.statuses:
+        filters.append("status: " + ", ".join(_label(x) for x in f.statuses))
+    if f.events_only:
+        filters.append("significant events only")
+
+    story: list = [
+        Paragraph("Events log", h1),
+        Paragraph(escape("; ".join(filters)) if filters else "All events", small),
+    ]
+    shown = f"{len(rows)} event{'s' if len(rows) != 1 else ''}, oldest first"
+    if total > len(rows):
+        shown += f" (the most recent {len(rows)} of {total}; narrow the filters to see the rest)"
+    story += [Paragraph(shown, small), Spacer(1, 6)]
+    if not rows:
+        story.append(Paragraph("No events match these filters.", body))
+        return story
+
+    tiny = ParagraphStyle("tiny", parent=cell, fontSize=7.5, leading=9)
+    table = [["Time (Z)", "Site", "Event", "Status", "By", "Note"]]
+    fills = []
+    for i, e in enumerate(rows, start=1):
+        kind = type_labels.get(e.type_slug or "") or _SUBJECT_KIND_LABELS.get(e.subject_kind, _label(e.subject_kind))
+        what = f"<b>{escape(kind)}</b>"
+        if e.subject_name and e.subject_name != kind:
+            what += f"<br/>{escape(e.subject_name)}"
+        if e.status:
+            status_txt = _label(e.status)
+            if e.prev_status and e.prev_status != e.status:
+                status_txt = f"{_label(e.prev_status)} → {status_txt}"
+            fills.append((3, i, _tone(e.status)))
+        else:
+            status_txt = "-"
+        # Tag anything above routine, so a rule's notice reads differently
+        # from the log line of the same change.
+        sev_color = {"notice": "#1d4ed8", "warning": "#b45309", "critical": "#b42318"}.get(e.severity)
+        if sev_color:
+            what += f" <font color='{sev_color}'>({e.severity})</font>"
+        table.append([
+            Paragraph(_zulu(e.validated_at), tiny),
+            Paragraph(escape(e.site_name or "-"), tiny),
+            Paragraph(what, tiny),
+            Paragraph(escape(status_txt), tiny),
+            Paragraph(escape(e.validated_by_username or e.source), tiny),
+            Paragraph(_paragraphs(e.note) if e.note else "", tiny),
+        ])
+    widths = [1.12 * inch, 0.9 * inch, 1.63 * inch, 1.15 * inch, 0.7 * inch, 1.8 * inch]
+    t = _table(table, widths, fills)
+    t.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    story.append(t)
+    return story

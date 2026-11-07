@@ -970,6 +970,22 @@ class ServiceRollup(BaseModel):
     validated_at: Optional[datetime.datetime] = None
 
 
+class SummaryEventsLogIn(BaseModel):
+    """Which events go into the summary report's events log. Every list is
+    "any of these"; omitted or empty = no filter on that field."""
+
+    since: Optional[datetime.datetime] = None
+    until: Optional[datetime.datetime] = None
+    site_ids: Optional[list[int]] = None
+    event_types: Optional[list[EventType]] = None
+    subject_kinds: Optional[list[SubjectKind]] = None
+    severities: Optional[list[Severity]] = None
+    statuses: Optional[list[AnyStatusValue]] = None
+    type_slugs: Optional[list[str]] = None
+    # Only significant events ("event"), not routine log lines ("log").
+    events_only: bool = False
+
+
 class SummaryReportIn(BaseModel):
     """What goes into the summary PDF besides the live status: remarks typed
     at export (not stored anywhere), and optionally which sites."""
@@ -979,6 +995,8 @@ class SummaryReportIn(BaseModel):
     site_remarks: dict[int, str] = Field(default_factory=dict)
     # Omitted = every site.
     site_ids: Optional[list[int]] = None
+    # Omitted = no events log.
+    events_log: Optional[SummaryEventsLogIn] = None
 
 
 class StatusRollupOut(BaseModel):
