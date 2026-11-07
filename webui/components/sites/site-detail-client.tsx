@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useCallback, useState } from "react"
 
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
+import { CopyServicesDialog } from "@/components/services/copy-services-dialog"
 import { GatewayForm } from "@/components/sites/gateway-form"
 import { GatewayStatusPill } from "@/components/services/gateway-status-pill"
 import { ServiceForm } from "@/components/services/service-form"
@@ -343,6 +344,12 @@ function ServicesTab({
           ]}
         />
         <div className="flex flex-wrap gap-2">
+          <CopyServicesDialog
+            site={site}
+            sites={sites}
+            siteServices={services}
+            siteGateways={gateways}
+          />
           <GatewayForm siteId={site.id} />
           <ServiceForm
             sites={sites}

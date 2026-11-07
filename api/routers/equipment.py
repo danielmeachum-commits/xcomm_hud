@@ -507,6 +507,51 @@ def patch_equipment(
     return equipment_out(db, eq)
 
 
+def apply_equipment_status(
+    db: Session,
+    eq: Equipment,
+    *,
+    status: str,
+    when,
+    user_id: int | None,
+    username: str | None,
+    note: str | None,
+    workspace_id: int,
+    source_flow: str = "manual",
+) -> None:
+    """Set a piece of gear's status the one way it is done: emit the trigger
+    (which writes its feed/history row through the default rules), then
+    update the row. Shared by the status endpoint and the bulk rule action
+    (`equipment_set_status`), so a rule changes gear exactly as a person does.
+
+    `source_flow="rule"` marks a bulk change; its feed row is recorded as a
+    routine log (`feed_class`) so setting 40 radios offline at ENDEX doesn't
+    put 40 entries on the timeline — every radio still gets its history row.
+    """
+    eq_type = db.get(EquipmentType, eq.equipment_type_id)
+    site = db.get(Site, eq.site_id)
+    payload = {
+        "equipment_id": eq.id,
+        "equipment_code": eq.equipment_code,
+        "equipment_title": eq_type.title if eq_type else None,
+        "prev_status": eq.status,
+        "new_status": status,
+        "site_id": eq.site_id,
+        "site_name": site.name if site else None,
+        "note": note,
+        "user_id": user_id,
+        "username": username,
+        "occurred_at": when,
+        "source_flow": source_flow,
+    }
+    if source_flow == "rule":
+        payload["feed_class"] = "log"
+    emit_trigger(db, "equipment.status_changed", payload, workspace_id=workspace_id)
+    eq.status = status
+    eq.validated_at = when
+    eq.validated_by_user_id = user_id
+
+
 @router.post("/equipment/{equipment_id}/status", response_model=EquipmentOut)
 def set_equipment_status(
     equipment_id: int,
@@ -517,30 +562,16 @@ def set_equipment_status(
     current_user: User = Depends(requires("operator")),
 ):
     eq = _load_equipment(db, equipment_id, workspace)
-    when = body.validated_at or _now()
-    eq_type = db.get(EquipmentType, eq.equipment_type_id)
-    site = db.get(Site, eq.site_id)
-    emit_trigger(
+    apply_equipment_status(
         db,
-        "equipment.status_changed",
-        {
-            "equipment_id": eq.id,
-            "equipment_code": eq.equipment_code,
-            "equipment_title": eq_type.title if eq_type else None,
-            "prev_status": eq.status,
-            "new_status": body.status,
-            "site_id": eq.site_id,
-            "site_name": site.name if site else None,
-            "note": body.note,
-            "user_id": current_user.id,
-            "username": current_user.username,
-            "occurred_at": when,
-        },
+        eq,
+        status=body.status,
+        when=body.validated_at or _now(),
+        user_id=current_user.id,
+        username=current_user.username,
+        note=body.note,
         workspace_id=workspace.id,
     )
-    eq.status = body.status
-    eq.validated_at = when
-    eq.validated_by_user_id = current_user.id
     db.flush()
     db.refresh(eq)
     notify(background_tasks)

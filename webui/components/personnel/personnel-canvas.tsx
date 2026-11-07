@@ -34,6 +34,7 @@ import {
   branchColor,
   isFirstSergeantRank,
   isOfficerGrade,
+  personName,
   rankGrade,
   rankSeniority,
 } from "@/lib/personnel-data"
@@ -134,14 +135,14 @@ function PersonCanvasNode({ data }: NodeProps) {
         onClick={(e) => e.stopPropagation()}
         onPointerDownCapture={(e) => e.stopPropagation()}
         className="nodrag min-w-0 flex-1 truncate text-xs font-medium hover:underline"
-        title={`${rankLabel} ${person.last_name}, ${person.first_name}`.trim()}
+        title={`${rankLabel} ${personName(person)}`.trim()}
       >
         {rankLabel && (
           <span className="font-normal text-muted-foreground">
             {rankLabel}{" "}
           </span>
         )}
-        {person.last_name}, {person.first_name}
+        {personName(person)}
       </a>
       {person.is_commander && <CommanderStar size={12} />}
       {badge && (

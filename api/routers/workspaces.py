@@ -53,6 +53,7 @@ from models import (
     WorkCenter,
     Workspace,
 )
+from personnel_data import person_display_name
 from pubsub import notify
 from routers.people import IDENTITY_FIELDS
 from routers.work_centers import visible_to as work_centers_visible_to
@@ -1219,7 +1220,7 @@ def export_workspace(
     # Keyed by person: the roster's supervisor pointer names a person, and
     # only supervisors in this picture make it into the bundle.
     supervisor_key_by_person = {
-        p.person_id: f"{p.person.last_name}, {p.person.first_name}"
+        p.person_id: person_display_name(p.person)
         for p in people
     }
 
@@ -1660,7 +1661,7 @@ def import_workspace(
         ]
         db.add(new_p)
         db.flush()
-        key = f"{p.last_name}, {p.first_name}"
+        key = person_display_name(p)
         # First occurrence wins for supervisor lookup — duplicates are rare
         # in practice.
         person_by_key.setdefault(key, person)

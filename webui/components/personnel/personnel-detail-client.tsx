@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import {
   BRANCH_LABELS,
   branchColor,
+  personName,
   skillLevelLabel,
 } from "@/lib/personnel-data"
 import type {
@@ -99,8 +100,8 @@ export function PersonnelDetailClient({
   async function del() {
     // A roster person only leaves this workspace; a guest exists only here.
     const prompt = person.is_guest
-      ? `Delete ${person.last_name}, ${person.first_name}?`
-      : `Remove ${person.last_name}, ${person.first_name} from this workspace? They stay on the roster.`
+      ? `Delete ${personName(person)}?`
+      : `Remove ${personName(person)} from this workspace? They stay on the roster.`
     if (!confirm(prompt)) return
     setDeleting(true)
     const res = await fetch(`/api/be/personnel/${person.id}`, {
@@ -120,7 +121,7 @@ export function PersonnelDetailClient({
       <PageBreadcrumbs
         items={[
           parentCrumb,
-          { label: `${person.last_name}, ${person.first_name}` },
+          { label: `${personName(person)}` },
         ]}
       />
 
@@ -145,7 +146,7 @@ export function PersonnelDetailClient({
             <h1 className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
               <span>
                 {person.rank ? `${person.rank} ` : ""}
-                {person.last_name}, {person.first_name}
+                {personName(person)}
               </span>
               {person.is_commander && <CommanderStar size={16} />}
             </h1>

@@ -84,6 +84,19 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
             ? ` (${SEVERITY_LABELS[sev].toLowerCase()})`
             : ""
         parts.push(`create “${typeLabels.get(slug) ?? slug}”${sevPart}`)
+      } else if (step.action === "personnel_end_of_day") {
+        const to = String(step.params.status ?? "unknown").replace(/_/g, " ")
+        parts.push(`everyone → ${to}`)
+      } else if (step.action === "personnel_sign_in_assigned") {
+        parts.push("sign everyone in at their assigned site")
+      } else if (step.action === "equipment_set_status") {
+        parts.push(`all gear → ${String(step.params.status ?? "?")}`)
+      } else if (step.action === "validations_set_status") {
+        const gw = step.params.gateway_status as string | undefined
+        parts.push(
+          `services & paths → ${String(step.params.status ?? "?")}` +
+            (gw ? `, gateways → ${gw}` : ""),
+        )
       } else {
         parts.push(step.action)
       }

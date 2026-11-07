@@ -10,8 +10,15 @@ point they used to hand-write feed rows. The engine:
 
 Everything runs synchronously inside the caller's transaction, so a
 mutation and its rule effects commit or roll back together (the same
-atomicity the old inline dual-writes had). Actions never emit triggers
-themselves, so rule recursion is impossible by construction.
+atomicity the old inline dual-writes had).
+
+Recursion is impossible by construction, with one controlled exception.
+Actions marked `mutates` (bulk status changes: personnel end of day,
+equipment set status) change things through the same code a person would,
+so the triggers that code emits still fire — that is how every change made
+by a rule still gets its feed/history row. But a trigger emitted from INSIDE
+an action runs only non-mutating actions (create_event): a rule can never
+make a change that sets off another change. See `_ACTION_DEPTH`.
 
 Three code registries parameterize the engine; rules stored in the DB
 reference them by name:
@@ -30,6 +37,7 @@ Conditions are a jsonlogic subset stored as JSONB — see `evaluate_condition`.
 
 from __future__ import annotations
 
+import contextvars
 import datetime
 import logging
 import re
@@ -425,6 +433,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("service_name", "Service name"),
                 _f("prev_status", "Previous status", "enum", list(SERVICE_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(SERVICE_STATUS_VALUES)),
+                # Absent for a hand validation.
+                _f("source_flow", "Source flow", "enum", ["same_device", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("service_context",),
@@ -440,6 +450,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("gateway_name", "Gateway name"),
                 _f("prev_status", "Previous status", "enum", list(GATEWAY_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(GATEWAY_STATUS_VALUES)),
+                # Absent for a hand validation.
+                _f("source_flow", "Source flow", "enum", ["rule"]),
                 *_COMMON_FIELDS,
             ],
             ("gateway_context",),
@@ -456,7 +468,7 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("gateway_name", "Gateway name"),
                 _f("prev_status", "Previous status"),
                 _f("new_status", "New status"),
-                _f("source_flow", "Source flow", "enum", ["validate", "cascade"]),
+                _f("source_flow", "Source flow", "enum", ["validate", "cascade", "same_device", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("service_context", "gateway_context"),
@@ -519,7 +531,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("personnel_name", "Person"),
                 _f("prev_status", "Previous status", "enum", list(PERSONNEL_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(PERSONNEL_STATUS_VALUES)),
-                _f("source_flow", "Source flow", "enum", ["checkin", "bulk", "reset"]),
+                # "rule" = changed by a rule action (e.g. ENDEX end of day).
+                _f("source_flow", "Source flow", "enum", ["checkin", "bulk", "reset", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("personnel_context", "site_context"),
@@ -544,6 +557,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("equipment_title", "Equipment type"),
                 _f("prev_status", "Previous status", "enum", list(EQUIPMENT_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(EQUIPMENT_STATUS_VALUES)),
+                # "rule" = set by a rule action, e.g. everything offline at ENDEX.
+                _f("source_flow", "Source", "enum", ["manual", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("site_context",),
@@ -662,6 +677,28 @@ TRIGGERS: dict[str, TriggerDef] = {
             },
             event_type="general",
         ),
+        TriggerDef(
+            # A person logged a custom event (STARTEX, ENDEX, a safety brief…).
+            # This is what lets an event DO something: a rule matching
+            # type_slug "exercise.endex" can run end of day, set gear offline…
+            "event.logged",
+            "Custom event logged",
+            [
+                _f("type_slug", "Event type (slug, e.g. exercise.endex)"),
+                _f("severity", "Severity", "enum", list(SEVERITIES)),
+                _f("record_class", "Record class", "enum", ["log", "event"]),
+                _f("subject_kind", "Attached to (kind)"),
+                _f("subject_label", "Attached to"),
+                *_COMMON_FIELDS,
+            ],
+            (),
+            lambda ctx: {
+                "subject_kind": ctx.get("subject_kind") or SubjectKinds.WORKSPACE,
+                "subject_id": ctx.get("subject_id"),
+                "subject_label": ctx.get("subject_label"),
+            },
+            event_type="general",
+        ),
     ]
 }
 
@@ -733,6 +770,215 @@ class ActionDef:
     label: str
     fn: Callable[[Session, dict, dict], None]
     params: list
+    # Changes state (rather than only writing a feed row). Mutating actions
+    # run only from a top-level trigger — never from a trigger their own
+    # changes emit — which is what keeps rules from cascading.
+    mutates: bool = False
+
+
+# How deep inside a rule action the current emit_trigger is. 0 = a person (or
+# the API) caused the trigger; >0 = an action's own change emitted it.
+_ACTION_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "rule_action_depth", default=0
+)
+
+
+def _rule_summary(db: Session, ctx: dict, message: str) -> None:
+    """One feed line per bulk action, so the log says what a rule did as a
+    whole ("ENDEX shutdown: 37 equipment set offline") while the per-item
+    rows are recorded as routine logs rather than timeline events."""
+    record_action(
+        db,
+        action_slug="rule.bulk_change",
+        workspace_id=ctx.get("workspace_id"),
+        subject_kind=SubjectKinds.WORKSPACE,
+        subject_id=ctx.get("workspace_id"),
+        user_id=ctx.get("user_id"),
+        note=f"{ctx.get('_rule_name', 'Rule')}: {message}",
+        # Same as every other rule-written row. EventOut only allows
+        # "manual"/"ingest" — a new value here broke reading the whole feed.
+        source=ctx.get("source", "manual"),
+        validated_at=ctx.get("occurred_at"),
+    )
+
+
+def _action_personnel_end_of_day(db: Session, ctx: dict, params: dict) -> None:
+    """The End of day button, as an action: everyone in the workspace to one
+    status (default Unknown), clearing site and expected return."""
+    # Imported here: routers.personnel imports this module.
+    from models import Personnel as _Personnel
+    from routers.personnel import _apply_location_change
+
+    target = params.get("status") or "unknown"
+    if target not in PERSONNEL_STATUS_VALUES:
+        raise ValueError(f"Unknown personnel status '{target}'")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    people = (
+        db.query(_Personnel)
+        .filter(
+            _Personnel.workspace_id == ctx.get("workspace_id"),
+            _Personnel.current_status != target,
+        )
+        .all()
+    )
+    for p in people:
+        _apply_location_change(
+            db, p, stat=target, site_id=None, note=None, expected_return_at=None,
+            when=when, user_id=ctx.get("user_id"), source_flow="rule",
+        )
+    _rule_summary(db, ctx, f"{len(people)} people set to {target.replace('_', ' ')}")
+
+
+def _action_personnel_sign_in_assigned(db: Session, ctx: dict, params: dict) -> None:
+    """Start of day: everyone with an assigned site signed in there. People
+    without one, and people already on site there, are left as they are."""
+    from models import Personnel as _Personnel
+    from routers.personnel import _apply_location_change
+
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    people = (
+        db.query(_Personnel)
+        .filter(
+            _Personnel.workspace_id == ctx.get("workspace_id"),
+            _Personnel.assigned_site_id.is_not(None),
+        )
+        .all()
+    )
+    changed = 0
+    for p in people:
+        if p.current_status == "on_site" and p.current_site_id == p.assigned_site_id:
+            continue
+        _apply_location_change(
+            db, p, stat="on_site", site_id=p.assigned_site_id, note=None,
+            expected_return_at=None, when=when, user_id=ctx.get("user_id"),
+            source_flow="rule",
+        )
+        changed += 1
+    _rule_summary(db, ctx, f"{changed} people signed in at their assigned site")
+
+
+# Never touched by a bulk status change: "in maintenance" is a separate fact
+# about the gear, and ENDEX/STARTEX must not wipe it.
+_BULK_EQUIPMENT_KEEP = ("maintenance",)
+
+
+def _action_equipment_set_status(db: Session, ctx: dict, params: dict) -> None:
+    """Every piece of gear in the workspace to one status (e.g. offline at
+    ENDEX, unvalidated at STARTEX). Gear in maintenance is skipped."""
+    from models import Equipment as _Equipment
+    from routers.equipment import apply_equipment_status
+
+    target = params.get("status")
+    if target not in EQUIPMENT_STATUS_VALUES:
+        raise ValueError(f"Pick an equipment status (got '{target}')")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    rows = (
+        db.query(_Equipment)
+        .filter(
+            _Equipment.workspace_id == ctx.get("workspace_id"),
+            _Equipment.status != target,
+            _Equipment.status.not_in(_BULK_EQUIPMENT_KEEP),
+        )
+        .all()
+    )
+    for eq in rows:
+        apply_equipment_status(
+            db, eq, status=target, when=when, user_id=ctx.get("user_id"),
+            username=ctx.get("username"), note=None,
+            workspace_id=ctx.get("workspace_id"), source_flow="rule",
+        )
+    kept = (
+        db.query(_Equipment)
+        .filter(
+            _Equipment.workspace_id == ctx.get("workspace_id"),
+            _Equipment.status.in_(_BULK_EQUIPMENT_KEEP),
+        )
+        .count()
+    )
+    msg = f"{len(rows)} equipment set to {target}"
+    if kept:
+        msg += f" ({kept} in maintenance left as is)"
+    _rule_summary(db, ctx, msg)
+
+
+# What a bulk change may set hand-validated services/cells and gateways to.
+# Gateways have no "unvalidated": at STARTEX they stay offline (from the
+# pause) until someone validates them.
+_BULK_SERVICE_STATUSES = ("unvalidated", "offline", "down")
+_BULK_GATEWAY_STATUSES = ("offline", "down")
+
+
+def _action_validations_set_status(db: Session, ctx: dict, params: dict) -> None:
+    """Hand validations across the workspace to one status: every service's
+    local status and every matrix cell to `status`, every gateway to
+    `gateway_status` (omit to leave gateways alone). Services and gateways
+    whose status comes from equipment (derived mode) are skipped: they follow
+    the gear, which equipment_set_status handles. PAUSEEX/ENDEX take them
+    offline so the board shows no stale "up" through the pause; STARTEX puts
+    services and cells back to unvalidated."""
+    from models import Gateway as _Gateway
+    from models import Service as _Service
+    from models import ServiceDelivery as _Delivery
+    from models import ServiceGatewayStatus as _Cell
+    from models import Site as _Site
+
+    target = params.get("status")
+    gw_target = params.get("gateway_status") or None
+    if target not in _BULK_SERVICE_STATUSES:
+        raise ValueError(f"Pick a service status (got '{target}')")
+    if gw_target is not None and gw_target not in _BULK_GATEWAY_STATUSES:
+        raise ValueError(f"Pick a gateway status (got '{gw_target}')")
+    ws_id = ctx.get("workspace_id")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    user_id, username = ctx.get("user_id"), ctx.get("username")
+    common = {"source_flow": "rule", "user_id": user_id, "username": username, "occurred_at": when}
+
+    site_ids = [sid for (sid,) in db.query(_Site.id).filter(_Site.workspace_id == ws_id)]
+    gateways = db.query(_Gateway).filter(_Gateway.site_id.in_(site_ids)).all()
+    gw_by_id = {g.id: g for g in gateways}
+    n_gw = 0
+    if gw_target:
+        for gw in gateways:
+            if gw.status_mode != "reported" or gw.status == gw_target:
+                continue
+            emit_trigger(db, "gateway.status_changed", {
+                "gateway_id": gw.id, "gateway_name": gw.name,
+                "prev_status": gw.status, "new_status": gw_target, "note": None, **common,
+            }, workspace_id=ws_id)
+            gw.status, gw.validated_at, gw.validated_by_user_id = gw_target, when, user_id
+            n_gw += 1
+
+    rows = (
+        db.query(_Delivery, _Service)
+        .join(_Service, _Service.id == _Delivery.service_id)
+        .filter(_Delivery.site_id.in_(site_ids))
+        .all()
+    )
+    n_svc = n_cell = 0
+    for d, svc in rows:
+        if d.status_mode == "reported" and d.status != target:
+            emit_trigger(db, "service.status_changed", {
+                "service_id": d.id, "service_name": svc.name,
+                "prev_status": d.status, "new_status": target, "note": None, **common,
+            }, workspace_id=ws_id)
+            d.status, d.validated_at, d.validated_by_user_id = target, when, user_id
+            n_svc += 1
+        for cell in db.query(_Cell).filter(_Cell.service_delivery_id == d.id):
+            if cell.status == target:
+                continue
+            gw = gw_by_id.get(cell.gateway_id)
+            emit_trigger(db, "cell.status_changed", {
+                "service_id": d.id, "gateway_id": cell.gateway_id,
+                "service_name": svc.name, "gateway_name": gw.name if gw else None,
+                "prev_status": cell.status, "new_status": target, "note": None, **common,
+            }, workspace_id=ws_id)
+            cell.status, cell.validated_at, cell.validated_by_user_id = target, when, user_id
+            n_cell += 1
+
+    parts = [f"{n_svc} service{'s' if n_svc != 1 else ''} and {n_cell} path{'s' if n_cell != 1 else ''} set to {target}"]
+    if gw_target:
+        parts.append(f"{n_gw} gateway{'s' if n_gw != 1 else ''} set to {gw_target}")
+    _rule_summary(db, ctx, "; ".join(parts))
 
 
 ACTION_DEFS: dict[str, ActionDef] = {
@@ -752,6 +998,37 @@ ACTION_DEFS: dict[str, ActionDef] = {
                 _f("note_template", "Note template ({field} placeholders)"),
             ],
         ),
+        ActionDef(
+            "personnel_end_of_day",
+            "Personnel: end of day (everyone to one status)",
+            _action_personnel_end_of_day,
+            [_f("status", "Set everyone to", "enum", list(PERSONNEL_STATUS_VALUES))],
+            mutates=True,
+        ),
+        ActionDef(
+            "personnel_sign_in_assigned",
+            "Personnel: sign everyone in at their assigned site",
+            _action_personnel_sign_in_assigned,
+            [],
+            mutates=True,
+        ),
+        ActionDef(
+            "equipment_set_status",
+            "Equipment: set all gear to a status (skips maintenance)",
+            _action_equipment_set_status,
+            [_f("status", "Set all equipment to", "enum", list(EQUIPMENT_STATUS_VALUES))],
+            mutates=True,
+        ),
+        ActionDef(
+            "validations_set_status",
+            "Validations: set all services, paths and gateways to a status",
+            _action_validations_set_status,
+            [
+                _f("status", "Set services and paths to", "enum", list(_BULK_SERVICE_STATUSES)),
+                _f("gateway_status", "Set gateways to (blank = leave)", "enum", list(_BULK_GATEWAY_STATUSES)),
+            ],
+            mutates=True,
+        ),
     ]
 }
 
@@ -759,7 +1036,7 @@ ACTION_DEFS: dict[str, ActionDef] = {
 # --- The engine ---
 
 # Keys stripped from the RuleExecution context snapshot.
-_PRIVATE_KEYS = ("_trigger",)
+_PRIVATE_KEYS = ("_trigger", "_rule_name")
 
 
 def _snapshot(ctx: dict) -> dict:
@@ -836,12 +1113,23 @@ def emit_trigger(
             status="ok",
             context=_snapshot(rule_ctx),
         )
+        depth = _ACTION_DEPTH.get()
+        rule_ctx["_rule_name"] = rule.name
         try:
             for step in rule.actions or []:
                 action = ACTION_DEFS.get(step.get("action", ""))
                 if action is None:
                     raise ValueError(f"Unknown action '{step.get('action')}'")
-                action.fn(db, rule_ctx, step.get("params") or {})
+                if action.mutates and depth > 0:
+                    # Emitted by another rule's change — record-keeping only,
+                    # so a rule can never set off a chain of changes.
+                    log.info("Rule %s: skipped %s (nested trigger)", rule.id, action.key)
+                    continue
+                token = _ACTION_DEPTH.set(depth + 1)
+                try:
+                    action.fn(db, rule_ctx, step.get("params") or {})
+                finally:
+                    _ACTION_DEPTH.reset(token)
         except Exception as err:
             execution.status = "error"
             execution.error = str(err)[:2000]

@@ -16,15 +16,17 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  BRANCHES,
   BRANCH_LABELS,
+  BRANCHES,
   DEFAULT_BRANCH,
   defaultSkillLevel,
   groupedRanks,
   isOfficerGrade,
+  personLabel,
+  personName,
   rankOptionLabel,
-  SKILL_LEVELS,
   SKILL_LEVEL_LABELS,
+  SKILL_LEVELS,
   skillLevelApplies,
   skillLevelLabel,
 } from "@/lib/personnel-data"
@@ -406,7 +408,10 @@ export function PersonnelForm({
   const nameMatches = useMemo(() => {
     const last = draft.last_name.trim().toLowerCase()
     const first = draft.first_name.trim().toLowerCase()
-    if (!last || !first) return []
+    // First name is optional, so an empty one is compared like any other: a
+    // surname-only draft matches people whose first name is also unknown,
+    // not everyone who shares the surname.
+    if (!last) return []
     return supervisors.filter(
       (p) =>
         (!editing || p.id !== person!.id) &&
@@ -419,7 +424,7 @@ export function PersonnelForm({
     if (editing) return []
     const last = draft.last_name.trim().toLowerCase()
     const first = draft.first_name.trim().toLowerCase()
-    if (!last || !first) return []
+    if (!last) return []
     const here = new Set(supervisors.map((p) => p.person_id))
     return roster.filter(
       (p) =>
@@ -444,7 +449,7 @@ export function PersonnelForm({
         throw new Error(detail.detail ?? "Failed to add")
       }
       router.refresh()
-      setCreatedName(`${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`)
+      setCreatedName(`${personLabel(p)}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error")
     } finally {
@@ -458,9 +463,7 @@ export function PersonnelForm({
 
   const stepValid =
     step !== 0 ||
-    (draft.last_name.trim() !== "" &&
-      draft.first_name.trim() !== "" &&
-      !needsDupConfirm)
+    (draft.last_name.trim() !== "" && !needsDupConfirm)
 
   function toggleTeam(id: number, checked: boolean) {
     const next = new Set(draft.team_ids)
@@ -522,7 +525,11 @@ export function PersonnelForm({
         reset()
       } else {
         setCreatedName(
-          `${draft.rank ? `${draft.rank} ` : ""}${draft.last_name.trim()}, ${draft.first_name.trim()}`,
+          personLabel({
+            rank: draft.rank || null,
+            last_name: draft.last_name.trim(),
+            first_name: draft.first_name,
+          }),
         )
       }
     } catch (err) {
@@ -558,7 +565,7 @@ export function PersonnelForm({
   const supervisorName = (() => {
     if (!draft.supervisor_id) return null
     const s = supervisors.find((x) => x.id === Number(draft.supervisor_id))
-    return s ? `${s.rank ? `${s.rank} ` : ""}${s.last_name}, ${s.first_name}` : null
+    return s ? `${personLabel(s)}` : null
   })()
   const teamNames = allTeams
     .filter((t) => draft.team_ids.has(t.id))
@@ -575,7 +582,11 @@ export function PersonnelForm({
       rows: [
         {
           label: "Name",
-          value: `${draft.rank ? `${draft.rank} ` : ""}${draft.last_name.trim()}, ${draft.first_name.trim()}`,
+          value: personLabel({
+            rank: draft.rank || null,
+            last_name: draft.last_name.trim(),
+            first_name: draft.first_name,
+          }),
         },
         { label: "Unit", value: unitName },
         {
@@ -660,7 +671,7 @@ export function PersonnelForm({
         <DialogHeader>
           <DialogTitle>
             {editing
-              ? `Edit ${person!.last_name}, ${person!.first_name}`
+              ? `Edit ${personName(person!)}`
               : "New person"}
           </DialogTitle>
         </DialogHeader>
@@ -745,14 +756,18 @@ export function PersonnelForm({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="first_name">First name</Label>
+                      <Label htmlFor="first_name">
+                        First name{" "}
+                        <span className="font-normal text-muted-foreground">
+                          (optional)
+                        </span>
+                      </Label>
                       <Input
                         id="first_name"
                         value={draft.first_name}
                         onChange={(e) =>
                           setDraft({ ...draft, first_name: e.target.value })
                         }
-                        required
                         disabled={pending}
                       />
                     </div>
@@ -772,7 +787,7 @@ export function PersonnelForm({
                         {nameMatches.map((p) => (
                           <li key={p.id}>
                             {p.rank ? `${p.rank} ` : ""}
-                            {p.last_name}, {p.first_name}
+                            {personName(p)}
                             {p.unit_id
                               ? ` — ${allUnits.find((u) => u.id === p.unit_id)?.name ?? "unknown unit"}`
                               : ""}
@@ -816,7 +831,7 @@ export function PersonnelForm({
                           <li key={p.id} className="flex items-center gap-2">
                             <span>
                               {p.rank ? `${p.rank} ` : ""}
-                              {p.last_name}, {p.first_name}
+                              {personName(p)}
                               <span className="text-muted-foreground">
                                 {p.unit_id
                                   ? ` — ${allUnits.find((u) => u.id === p.unit_id)?.name ?? "unknown unit"}`

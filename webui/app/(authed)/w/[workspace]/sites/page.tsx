@@ -3,7 +3,8 @@ import { apiGet } from "@/lib/api"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { SiteForm } from "@/components/sites/site-form"
 import { SitesTabs } from "@/components/sites/sites-tabs"
-import type { MapBundle, Site } from "@/lib/types"
+import { SummaryReportDialog } from "@/components/sites/summary-report-dialog"
+import type { EventTypeDef, MapBundle, Site } from "@/lib/types"
 
 export default async function SitesPage() {
   await requireSession()
@@ -17,10 +18,12 @@ export default async function SitesPage() {
     annotations: [],
     links: [],
   }
+  let eventTypes: EventTypeDef[] = []
   try {
-    ;[sites, bundle] = await Promise.all([
+    ;[sites, bundle, eventTypes] = await Promise.all([
       apiGet<Site[]>("/sites"),
       apiGet<MapBundle>("/canvas/map"),
+      apiGet<EventTypeDef[]>("/event-types").catch(() => [] as EventTypeDef[]),
     ])
   } catch {
     // API unavailable — fall back to empty data
@@ -36,7 +39,10 @@ export default async function SitesPage() {
             Physical locations. Status rolls up from the services at each site.
           </p>
         </div>
-        <SiteForm />
+        <div className="flex flex-wrap gap-2">
+          <SummaryReportDialog sites={sites} eventTypes={eventTypes} />
+          <SiteForm />
+        </div>
       </div>
 
       <SitesTabs sites={sites} bundle={bundle} />

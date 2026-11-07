@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from db import get_db
 from deps import requires
 from models import Person, Personnel, Unit, User, Workspace
+from personnel_data import person_display_name
 from pubsub import notify
 from schemas import (
     PersonIn,
@@ -97,7 +98,7 @@ def person_from_csv_row(
         branch=branch,
         rank=row.get("rank") or None,
         last_name=row["last_name"],
-        first_name=row["first_name"],
+        first_name=row.get("first_name") or "",
         cellphone=row.get("cellphone") or None,
         dsn=row.get("dsn") or None,
         sipr_number=row.get("sipr_number") or None,
@@ -154,7 +155,7 @@ def ensure_commander_slot(
         unit = db.get(Unit, unit_id)
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"{existing.last_name}, {existing.first_name} is already the "
+            f"{person_display_name(existing)} is already the "
             f"commander of {unit.name if unit else 'that unit'} — unassign "
             "them first.",
         )
@@ -324,7 +325,7 @@ def import_roster_csv(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "CSV has no header row"
         )
     headers = {(h or "").strip().lower() for h in reader.fieldnames}
-    missing = {"first_name", "last_name"} - headers
+    missing = {"last_name"} - headers
     if missing:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -343,13 +344,13 @@ def import_roster_csv(
     errors: list[str] = []
     for idx, raw in enumerate(reader, start=2):  # header is line 1
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
-        if not (row.get("first_name") and row.get("last_name")):
+        if not row.get("last_name"):
             skipped += 1
-            errors.append(f"line {idx}: missing first_name or last_name")
+            errors.append(f"line {idx}: missing last_name")
             continue
         key = (
             row["last_name"].lower(),
-            row["first_name"].lower(),
+            (row.get("first_name") or "").lower(),
             (row.get("rank") or "").lower(),
         )
         if body.skip_existing and key in existing:

@@ -1,5 +1,6 @@
 "use client"
 
+import { personName } from "@/lib/personnel-data"
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -42,7 +43,7 @@ export function RosterAdmin({ people, units }: Props) {
   }, [people, query, unitName])
 
   async function del(p: Person) {
-    if (!confirm(`Delete ${p.last_name}, ${p.first_name} from the roster?`))
+    if (!confirm(`Delete ${personName(p)} from the roster?`))
       return
     const res = await fetch(`/api/be/people/${p.id}`, { method: "DELETE" })
     if (!res.ok) {
@@ -104,7 +105,7 @@ export function RosterAdmin({ people, units }: Props) {
                   <span className="inline-flex items-center gap-1.5">
                     {p.is_commander && <CommanderStar size={12} />}
                     {p.rank ? `${p.rank} ` : ""}
-                    {p.last_name}, {p.first_name}
+                    {personName(p)}
                   </span>
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">

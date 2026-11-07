@@ -13,6 +13,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Cpu,
+  Link2,
   MapPin,
   Plus,
   Waypoints,
@@ -541,6 +542,28 @@ function MatrixGridSection({
     }
     setCollapsed(auto)
   }, [storageKey])
+
+  // Reveal a tier when a gateway is added to it. Empty tiers auto-collapse on
+  // mount, so the first gateway added to one landed in a column that stayed
+  // collapsed — "it got added collapsed". Not a user layout change, so it
+  // doesn't touch hasUserModifiedRef or the saved preference.
+  const gatewayCountsRef = useRef<Record<GatewayPace, number> | null>(null)
+  useEffect(() => {
+    const counts = Object.fromEntries(
+      GATEWAY_PACE_VALUES.map((p) => [p, gwByPace[p].length]),
+    ) as Record<GatewayPace, number>
+    const previous = gatewayCountsRef.current
+    gatewayCountsRef.current = counts
+    if (!previous) return
+    const grown = GATEWAY_PACE_VALUES.filter((p) => counts[p] > previous[p])
+    if (grown.length === 0) return
+    setCollapsed((prev) => {
+      if (!grown.some((p) => prev[p])) return prev
+      const next = { ...prev }
+      for (const p of grown) next[p] = false
+      return next
+    })
+  }, [gwByPace])
 
   useEffect(() => {
     if (!hasUserModifiedRef.current) return
@@ -1535,6 +1558,17 @@ function LocalTile({
               <Cpu className="size-2.5 shrink-0" />
               from equipment
             </button>
+          ) : service.local_follows_gateways ? (
+            // Every path is a same-device gateway: local is set by validating
+            // the gateway, so say so rather than inviting a hand validation
+            // the next gateway validation would replace.
+            <span
+              className="flex items-center gap-1 text-[10px] text-muted-foreground"
+              title="Every path is a same-device gateway, so this follows the gateway's validation"
+            >
+              <Link2 className="size-2.5 shrink-0" />
+              follows its gateway
+            </span>
           ) : service.validated_at ? (
             <ValidationDetailsPopover
               validatedAt={service.validated_at}
@@ -1773,6 +1807,7 @@ function PaceTile({
             allowedStatuses={service.allowed_statuses}
             className={MIN_PILL_CLASS}
             indicatorSize="xl"
+            sameDevice={best.cell.same_device}
           />
         </div>
       ) : (
@@ -1789,6 +1824,7 @@ function PaceTile({
             lastValidatedBy={best.cell.validated_by_username}
             allowedStatuses={service.allowed_statuses}
             className={CELL_PILL_CLASS}
+            sameDevice={best.cell.same_device}
           />
           {best.cell.validated_at ? (
             <ValidationDetailsPopover
