@@ -166,6 +166,9 @@ Day to day (PowerShell):
   C:\xcomm\xcomm_hud\deploy\windows\xcomm.ps1 status | start | stop | logs
   C:\xcomm\xcomm_hud\deploy\windows\xcomm.ps1 admin-password
 
+To update later: build an update package (deploy/windows/build-update.sh)
+and double-click its update.cmd on this machine. Data is kept.
+
 Install log: C:\xcomm\install.log
 EOF
 sed -i 's/\r*$/\r/' "$OUT/README.txt"

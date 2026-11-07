@@ -17,7 +17,12 @@
     xcomm.ps1 status                 containers, health, URLs, version
     xcomm.ps1 logs [service]         follow logs (api, webui, postgres, minio)
     xcomm.ps1 load-images [file]     load a saved images file
+    xcomm.ps1 update <file>          update to a newer images file (backs up
+                                     the database first; -SkipBackup to not)
     xcomm.ps1 admin-password         print the initial admin login
+
+  To update from an update package, double-click its update.cmd instead: it
+  also brings this checkout (and this script) up to date, then runs update.
 
   Written for Windows PowerShell 5.1, which every supported Windows has.
 #>
@@ -25,7 +30,8 @@
 param(
   [Parameter(Position = 0)][string]$Command = 'help',
   [Parameter(Position = 1)][string]$Argument,
-  [switch]$OpenBrowser
+  [switch]$OpenBrowser,
+  [switch]$SkipBackup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +42,7 @@ $ImagesDir   = Join-Path $StateDir 'images'
 $EnvFile     = Join-Path $StateDir 'xcomm.env'
 $ComposeFile = Join-Path $RepoRoot 'deploy\bundle\compose.prod.yml'
 $ComposeLog  = Join-Path $StateDir 'compose.log'
+$BackupDir   = Join-Path $StateDir 'backups'
 $Project     = 'xcomm-hud'
 # xcomm's own Podman machine. Never the default one: a host may already have a
 # podman-machine-default from another Podman install, possibly a different
@@ -264,7 +271,9 @@ function Show-Urls {
 
 # ---------- commands ----------
 
-function Invoke-Start {
+# Start the stack and wait for it to answer. $false if it never does (after
+# printing the API's recent logs); stops the script on anything else.
+function Start-Stack {
   if (-not (Test-Path $EnvFile)) { Stop-WithError "Not set up yet ($EnvFile is missing). Run the kit's install.cmd." }
   Start-Machine
   $missing = @(Get-MissingImages)
@@ -284,9 +293,134 @@ function Invoke-Start {
   if (-not (Wait-Healthy)) {
     Write-Warn 'Still not answering after 3 minutes. Recent API logs:'
     (Invoke-Compose @('logs', '--tail', '30', 'api')).Output | ForEach-Object { Write-Host "    $_" }
+    return $false
+  }
+  return $true
+}
+
+function Invoke-Start {
+  if (-not (Start-Stack)) { exit 1 }
+  Write-Ok "xcomm_hud is up ($(Get-RunningRevision))."
+  Show-Urls
+  if ($OpenBrowser) { Start-Process 'http://localhost' }
+}
+
+# ---------- update ----------
+
+function Get-StackContainer([string]$Service) {
+  $r = Invoke-Native $Podman @('ps', '--filter', "label=com.docker.compose.project=$Project",
+    '--filter', "label=com.docker.compose.service=$Service", '--format', '{{.Names}}')
+  if ($r.Code -ne 0) { return $null }
+  return ($r.Output | Where-Object { $_.Trim() } | Select-Object -First 1)
+}
+
+# A full pg_dump (custom format) of the database into .bundle\backups, taken
+# before an update migrates it. A migration can't be undone by loading the
+# old images again, so this file is the way back. Restore it with:
+#   podman cp <file> <postgres container>:/tmp/restore.dump
+#   podman exec <postgres container> sh -c 'pg_restore --clean --if-exists -U $POSTGRES_USER -d $POSTGRES_DB /tmp/restore.dump'
+function Backup-Database([string]$Label) {
+  # Postgres alone is enough for a dump; this starts it if the stack is down.
+  $r = Invoke-Compose @('up', '-d', 'postgres')
+  if ($r.Code -ne 0) {
+    $r.Output | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" }
+    return $null
+  }
+  $container = $null
+  for ($i = 0; $i -lt 60; $i++) {
+    $container = Get-StackContainer 'postgres'
+    if ($container) {
+      $ready = Invoke-Native $Podman @('exec', $container, 'sh', '-c', 'pg_isready -q -U $POSTGRES_USER -d $POSTGRES_DB')
+      if ($ready.Code -eq 0) { break }
+    }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $container) { return $null }
+  New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+  $dest = Join-Path $BackupDir "xcomm-$Label-$(Get-Date -Format 'yyyyMMdd-HHmmss').dump"
+  $inside = '/tmp/xcomm-update-backup.dump'
+  # No double quotes inside: Windows PowerShell 5.1 mangles them in arguments
+  # to native programs. The user and database names never contain spaces.
+  $r = Invoke-Native $Podman @('exec', $container, 'sh', '-c',
+    ('pg_dump -U $POSTGRES_USER -d $POSTGRES_DB -Fc -f ' + $inside))
+  if ($r.Code -ne 0) {
+    $r.Output | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" }
+    return $null
+  }
+  $r = Invoke-Native $Podman @('cp', "${container}:$inside", $dest)
+  Invoke-Native $Podman @('exec', $container, 'rm', '-f', $inside) | Out-Null
+  if ($r.Code -ne 0 -or -not (Test-Path $dest) -or (Get-Item $dest).Length -eq 0) {
+    $r.Output | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" }
+    return $null
+  }
+  return $dest
+}
+
+# Remove app images other than the running revision: each revision is ~2 GB
+# inside the Podman machine. Only after the new one is up, so a failed update
+# still has the old images to go back to.
+function Remove-OldImages([string]$Keep) {
+  $r = Invoke-Native $Podman @('images', '--format', '{{.Repository}}:{{.Tag}}',
+    '--filter', 'reference=localhost/xcomm-hud-*')
+  if ($r.Code -ne 0) { return }
+  foreach ($ref in $r.Output) {
+    $tag = ($ref.Trim() -split ':')[-1]
+    if ($tag -and $tag -ne 'current' -and $tag -ne $Keep -and $tag -ne '<none>') {
+      Invoke-Native $Podman @('rmi', $ref.Trim()) | Out-Null
+    }
+  }
+  Invoke-Native $Podman @('image', 'prune', '-f') | Out-Null
+}
+
+# Keep a copy of the images file in .bundle\images (the newest two), so a
+# fresh Podman machine starts from this version, not the one installed first.
+function Save-ImagesCopy([string]$File) {
+  New-Item -ItemType Directory -Force -Path $ImagesDir | Out-Null
+  $dest = Join-Path $ImagesDir (Split-Path $File -Leaf)
+  if ((Resolve-Path $File).Path -ne $dest -and -not (Test-Path $dest)) {
+    Write-Info "Keeping a copy in $ImagesDir..."
+    Copy-Item $File $dest
+  }
+  Get-ChildItem -Path $ImagesDir -Filter 'xcomm-*.tar' | Sort-Object LastWriteTime -Descending |
+    Select-Object -Skip 2 | Remove-Item -Force
+}
+
+function Invoke-Update {
+  if (-not (Test-Path $EnvFile)) { Stop-WithError "Not set up yet ($EnvFile is missing). Run the kit's install.cmd." }
+  $file = $Argument
+  if (-not $file) { Stop-WithError 'Which images file? xcomm.ps1 update <path to xcomm-<version>.tar>' }
+  if (-not (Test-Path $file)) { Stop-WithError "No such file: $file" }
+  $file = (Resolve-Path $file).Path
+  Start-Machine
+  $old = Get-RunningRevision
+  $new = if ((Split-Path $file -Leaf) -match '^xcomm-([0-9a-f]+)\.tar$') { $Matches[1] } else { 'new' }
+  Write-Info "Updating xcomm_hud from $old to $new."
+
+  if ($SkipBackup) {
+    Write-Warn 'Skipping the database backup (-SkipBackup).'
+  } else {
+    Write-Info 'Backing up the database...'
+    $backup = Backup-Database "before-$new-from-$old"
+    if (-not $backup) {
+      Stop-WithError 'The database backup failed, so nothing was changed. Run again with -SkipBackup to update without one.'
+    }
+    Write-Ok "Database backed up to $backup"
+  }
+
+  # While the old version keeps running: loading only moves the :current tags,
+  # and running containers keep the images they started from. A failed load
+  # leaves everything as it was.
+  Import-Images $file
+  $loaded = Get-RunningRevision
+  Invoke-Stop
+  if (-not (Start-Stack)) {
+    Write-Warn "The new version ($loaded) didn't come up. The old images are still here and the"
+    Write-Warn 'database backup is above. Send the logs (xcomm.ps1 logs api) to whoever supports xcomm.'
     exit 1
   }
-  Write-Ok "xcomm_hud is up ($(Get-RunningRevision))."
+  Write-Ok "Updated: $old -> $loaded."
+  Remove-OldImages $loaded
+  Save-ImagesCopy $file
   Show-Urls
   if ($OpenBrowser) { Start-Process 'http://localhost' }
 }
@@ -341,6 +475,7 @@ switch ($Command) {
   'status'         { Invoke-Status }
   'logs'           { Invoke-Logs }
   'load-images'    { Start-Machine; Import-Images $Argument }
+  'update'         { Invoke-Update }
   'admin-password' { Invoke-AdminPassword }
   default          { Get-Help $PSCommandPath -Detailed | Out-Host }
 }
