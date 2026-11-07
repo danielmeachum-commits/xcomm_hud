@@ -28,7 +28,8 @@ from models import (
     Workspace,
 )
 from pubsub import notify
-from schemas import ServiceGatewayStatusOut, ServiceGatewayStatusValidateIn
+from same_device import gateway_status_to_cell, refresh_linked_local
+from schemas import SameDeviceIn, ServiceGatewayStatusOut, ServiceGatewayStatusValidateIn
 
 router = APIRouter(prefix="/services", tags=["service-gateway-status"])
 
@@ -42,7 +43,7 @@ def _cell_out(
 ) -> ServiceGatewayStatusOut:
     out = ServiceGatewayStatusOut.model_validate(cell)
     out.effective_status = effective_cell_status(
-        cell.status, service.status, gateway.status
+        cell.status, service.status, gateway.status, cell.same_device
     )
     if cell.validated_by_user_id is not None:
         u = db.get(User, cell.validated_by_user_id)
@@ -77,7 +78,7 @@ def _resolve_pair(
 
 
 def _reject_invalid_write(
-    new_status: str, service: ServiceDelivery, gateway: Gateway
+    new_status: str, service: ServiceDelivery, gateway: Gateway, same_device: bool = False
 ) -> None:
     """Hard invariants — reject writes that would violate R10 or R11.
 
@@ -98,6 +99,10 @@ def _reject_invalid_write(
                     f"{gateway.status} or unvalidated."
                 ),
             )
+        return
+    # A same-device cell is its own local end: the service's local status
+    # doesn't constrain it (api/same_device.py).
+    if same_device:
         return
     if service.status in ("down", "offline"):
         if new_status not in ("unvalidated", service.status):
@@ -139,7 +144,15 @@ def validate_cell(
     current_user: User = Depends(requires("operator")),
 ):
     service, gw = _resolve_pair(db, service_id, gateway_id, workspace)
-    _reject_invalid_write(body.status, service, gw)
+    existing = (
+        db.query(ServiceGatewayStatus)
+        .filter(
+            ServiceGatewayStatus.service_delivery_id == service_id,
+            ServiceGatewayStatus.gateway_id == gateway_id,
+        )
+        .one_or_none()
+    )
+    _reject_invalid_write(body.status, service, gw, bool(existing and existing.same_device))
     # `service` is a DELIVERY — the per-site row. Its display name lives on the
     # identity it belongs to, because 0054 moved `name` there. Reading
     # `service.name` here raised AttributeError and 500'd every cell
@@ -191,6 +204,81 @@ def validate_cell(
         cell.validated_at = when
         cell.validated_by_user_id = current_user.id
 
+    db.flush()
+    # A hand override of a same-device cell ("radio's up, voice isn't") moves
+    # the local status of a service that follows its same-device paths.
+    if cell.same_device:
+        refresh_linked_local(
+            db, [service.id], when, current_user.id, current_user.username, workspace.id
+        )
+        db.flush()
+    db.refresh(cell)
+    notify(background_tasks)
+    return _cell_out(db, cell, service, gw)
+
+
+@router.put(
+    "/{service_id}/gateways/{gateway_id}/same-device",
+    response_model=ServiceGatewayStatusOut,
+)
+def set_same_device(
+    service_id: int,
+    gateway_id: int,
+    body: SameDeviceIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(requires("operator")),
+):
+    """Mark (or unmark) this gateway as the device providing the service on
+    this path. Marking it syncs the cell from the gateway's current status at
+    once, so the matrix is right immediately rather than after the next
+    validation; unmarking leaves the cell as it is. See api/same_device.py."""
+    service, gw = _resolve_pair(db, service_id, gateway_id, workspace)
+    identity = db.get(Service, service.service_id)
+    cell = (
+        db.query(ServiceGatewayStatus)
+        .filter(
+            ServiceGatewayStatus.service_delivery_id == service_id,
+            ServiceGatewayStatus.gateway_id == gateway_id,
+        )
+        .one_or_none()
+    )
+    if cell is None:
+        cell = ServiceGatewayStatus(
+            service_delivery_id=service.id, gateway_id=gw.id, status="unvalidated"
+        )
+        db.add(cell)
+    cell.same_device = body.same_device
+    when = _now()
+    if body.same_device:
+        target = gateway_status_to_cell(gw.status)
+        if target is not None and target != cell.status:
+            emit_trigger(
+                db,
+                "cell.status_changed",
+                {
+                    "service_id": service.id,
+                    "gateway_id": gw.id,
+                    "service_name": identity.name if identity else None,
+                    "gateway_name": gw.name,
+                    "prev_status": cell.status,
+                    "new_status": target,
+                    "source_flow": "same_device",
+                    "note": f"Marked as the same device as gateway {gw.name}",
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "occurred_at": when,
+                },
+                workspace_id=workspace.id,
+            )
+            cell.status = target
+            cell.validated_at = when
+            cell.validated_by_user_id = current_user.id
+    db.flush()
+    refresh_linked_local(
+        db, [service.id], when, current_user.id, current_user.username, workspace.id
+    )
     db.flush()
     db.refresh(cell)
     notify(background_tasks)

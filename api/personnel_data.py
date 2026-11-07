@@ -11,6 +11,12 @@ from __future__ import annotations
 from typing import TypedDict
 
 
+def person_display_name(person) -> str:
+    """"Doe, Jane" — or "Doe" when the first name isn't known (stored as "")."""
+    first = (person.first_name or "").strip()
+    return f"{person.last_name}, {first}" if first else person.last_name
+
+
 class RankEntry(TypedDict):
     grade: str  # E-1, O-3, W-2, GS-13, etc.
     short: str  # abbreviation shown on the pill

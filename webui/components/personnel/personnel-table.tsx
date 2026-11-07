@@ -14,7 +14,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { PERSONNEL_STATUS_LABELS, rankSeniority } from "@/lib/personnel-data"
+import {
+  personName,
+  PERSONNEL_STATUS_LABELS,
+  rankSeniority,
+} from "@/lib/personnel-data"
 import { formatPhone } from "@/lib/phone"
 import type { Personnel, Site, Unit, WorkCenter } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -186,7 +190,7 @@ export function PersonnelTable({
                 <span className="text-muted-foreground">{p.rank} </span>
               ) : null}
               <span className="font-medium text-foreground">
-                {p.last_name}, {p.first_name}
+                {personName(p)}
               </span>
               {p.is_commander && (
                 <CommanderStar size={13} className="ml-1 align-[-2px]" />
@@ -354,7 +358,7 @@ export function PersonnelTable({
                     <Checkbox
                       checked={selected.has(p.id)}
                       onCheckedChange={() => toggleOne(p.id)}
-                      aria-label={`Select ${p.last_name}, ${p.first_name}`}
+                      aria-label={`Select ${personName(p)}`}
                     />
                   </td>
                 )}

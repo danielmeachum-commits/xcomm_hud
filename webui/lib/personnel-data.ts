@@ -562,13 +562,22 @@ export const TEAM_COLOR_PRESETS: Array<{ value: string; label: string }> = [
   { value: "#eb6834", label: "Orange" },
 ]
 
+/** "Doe, Jane" — or just "Doe" when the first name isn't known, which is
+ *  allowed: in the field a surname is often all anyone has. Every place that
+ *  shows a full name goes through this, so an empty first name never leaves a
+ *  dangling comma. */
+export function personName(p: { last_name: string; first_name: string | null }): string {
+  const first = (p.first_name ?? "").trim()
+  return first ? `${p.last_name}, ${first}` : p.last_name
+}
+
 /** "TSgt Doe, Jane" — compact person label for selects and badges. */
 export function personLabel(p: {
   rank: string | null
   last_name: string
-  first_name: string
+  first_name: string | null
 }): string {
-  return `${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`
+  return `${p.rank ? `${p.rank} ` : ""}${personName(p)}`
 }
 
 export const PERSONNEL_STATUS_LABELS: Record<PersonnelStatus, string> = {

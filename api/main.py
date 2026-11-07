@@ -43,6 +43,7 @@ from routers import (
     site_properties,
     site_property_templates,
     sites,
+    reports,
     status as status_router,
     teams,
     units,
@@ -151,6 +152,7 @@ app.include_router(service_templates.router)
 app.include_router(gateways.router)
 app.include_router(canvas.router)
 app.include_router(status_router.router)
+app.include_router(reports.router)
 app.include_router(events.router)
 app.include_router(event_types.router)
 app.include_router(folders.router)

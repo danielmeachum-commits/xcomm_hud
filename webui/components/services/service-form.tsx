@@ -145,7 +145,20 @@ export function ServiceForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // A fresh form every time it opens. `initial` is rebuilt each render
+        // from the current props, but useState only read it at mount - so
+        // after moving to another site's page, "Add service" still defaulted
+        // to the first site, and saved the service there.
+        if (next) {
+          setDraft(initial)
+          setError(null)
+        }
+        setOpen(next)
+      }}
+    >
       <DialogTrigger render={<Button size="sm">Add service</Button>} />
       <DialogContent>
         <DialogHeader>

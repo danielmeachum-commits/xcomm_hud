@@ -1,5 +1,6 @@
 "use client"
 
+import { personLabel } from "@/lib/personnel-data"
 import { useMemo, useState } from "react"
 import { ChevronsUpDown } from "lucide-react"
 
@@ -19,9 +20,6 @@ import {
 import type { Personnel } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-function personLabel(p: Personnel): string {
-  return `${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`
-}
 
 interface Props {
   value: string

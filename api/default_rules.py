@@ -128,14 +128,16 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     {
         **_COMMON,
         "key": "record-personnel-signins",
-        "version": 1,
+        "version": 2,
         "name": "Record personnel sign-ins",
         "description": (
-            "Append a feed record for check-ins/outs — except end-of-day roster "
-            "resets, which would flood the feed with one row per person."
+            "Append a feed record for check-ins/outs — except bulk roster "
+            "changes (end-of-day resets, and rule actions such as the STARTEX "
+            "sign-in), which would flood the feed with one row per person. "
+            "Their per-person history is still kept."
         ),
         "trigger": "personnel.location_changed",
-        "conditions": {"!=": [{"var": "source_flow"}, "reset"]},
+        "conditions": {"!": {"in": [{"var": "source_flow"}, ["reset", "rule"]]}},
         "actions": _create_event("personnel.checkin", "personnel", "log", "info"),
     },
     # --- Severity-bearing alerts (promoted from garrison workspace rules) ---
@@ -271,12 +273,29 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     {
         **_COMMON,
         "key": "record-equipment-status",
-        "version": 1,
+        "version": 2,
         "name": "Record equipment status changes",
-        "description": "Append a feed record whenever a piece of gear changes status.",
+        "description": (
+            "Append a feed record whenever a piece of gear changes status. A "
+            "bulk change by a rule (e.g. everything offline at ENDEX) is "
+            "recorded as a routine log rather than a timeline event, so one "
+            "ENDEX doesn't put a row per radio on the timeline."
+        ),
         "trigger": "equipment.status_changed",
         "conditions": None,
-        "actions": _create_event("equipment.status", "validation", "event", "notice"),
+        "actions": [
+            {
+                "action": "create_event",
+                "params": {
+                    "type_slug": "equipment.status",
+                    "event_type": "validation",
+                    "record_class": "event",
+                    # Set to "log" by bulk rule changes.
+                    "record_class_from": "feed_class",
+                    "severity": "notice",
+                },
+            }
+        ],
     },
     {
         **_COMMON,
@@ -360,6 +379,66 @@ DEFAULT_RULES: list[dict[str, Any]] = [
                     "record_class": "event",
                 },
             }
+        ],
+    },
+    # ---------- Exercise control: events that DO something ----------
+    # Logging STARTEX / PAUSEEX / ENDEX runs these. on_error="skip": a failed
+    # action never un-logs the event that triggered it.
+    {
+        **_ALERT,
+        "key": "exercise-endex-stand-down",
+        "version": 1,
+        "name": "ENDEX: end of day and gear offline",
+        "description": (
+            "When ENDEX is logged: everyone's accountability to Unknown (the "
+            "End of day button) and all equipment offline, except gear in "
+            "maintenance."
+        ),
+        "trigger": "event.logged",
+        "conditions": {"==": [{"var": "type_slug"}, "exercise.endex"]},
+        "computed": [],
+        "enrichers": [],
+        "actions": [
+            {"action": "personnel_end_of_day", "params": {"status": "unknown"}},
+            {"action": "equipment_set_status", "params": {"status": "offline"}},
+        ],
+    },
+    {
+        **_ALERT,
+        "key": "exercise-pauseex-stand-down",
+        "version": 1,
+        "name": "PAUSEEX: end of day and gear offline",
+        "description": (
+            "When PAUSEEX is logged: everyone's accountability to Unknown and "
+            "all equipment offline, except gear in maintenance."
+        ),
+        "trigger": "event.logged",
+        "conditions": {"==": [{"var": "type_slug"}, "exercise.pauseex"]},
+        "computed": [],
+        "enrichers": [],
+        "actions": [
+            {"action": "personnel_end_of_day", "params": {"status": "unknown"}},
+            {"action": "equipment_set_status", "params": {"status": "offline"}},
+        ],
+    },
+    {
+        **_ALERT,
+        "key": "exercise-startex-stand-up",
+        "version": 1,
+        "name": "STARTEX: sign in and re-validate gear",
+        "description": (
+            "When STARTEX is logged: everyone with an assigned site signed in "
+            "there, and all equipment back to unvalidated so nothing shows up "
+            "that hasn't been checked since the pause (gear in maintenance is "
+            "left as it is)."
+        ),
+        "trigger": "event.logged",
+        "conditions": {"==": [{"var": "type_slug"}, "exercise.startex"]},
+        "computed": [],
+        "enrichers": [],
+        "actions": [
+            {"action": "personnel_sign_in_assigned", "params": {}},
+            {"action": "equipment_set_status", "params": {"status": "unvalidated"}},
         ],
     },
 ]

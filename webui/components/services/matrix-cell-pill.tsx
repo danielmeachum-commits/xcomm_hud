@@ -1,5 +1,7 @@
 "use client"
 
+import { Link2 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import StatusIndicator from "@/components/8starlabs-ui/status-indicator"
@@ -31,6 +33,8 @@ interface Props {
   className?: string
   /** Size of the inline StatusIndicator dot. */
   indicatorSize?: "sm" | "md" | "lg" | "xl"
+  /** The gateway IS the device providing the service on this path. */
+  sameDevice?: boolean
 }
 
 /** Matrix cell pill for a single (service × gateway) intersection. Same
@@ -49,6 +53,7 @@ export function MatrixCellPill({
   allowedStatuses = null,
   className,
   indicatorSize = "sm",
+  sameDevice = false,
 }: Props) {
   const [open, setOpen] = useState(false)
   const shown = effectiveStatus ?? status
@@ -66,7 +71,9 @@ export function MatrixCellPill({
         title={
           cascaded
             ? `Stored: ${statusLabel(status)} — overridden by R10/R11 cascade`
-            : `Tap to validate ${serviceName} via ${gatewayName}`
+            : sameDevice
+              ? `${gatewayName} is the device providing ${serviceName} here — validating the gateway sets this path`
+              : `Tap to validate ${serviceName} via ${gatewayName}`
         }
         className={cn(
           "nodrag nowheel inline-flex items-center gap-2 rounded-full border bg-background/60 px-2 py-1 text-xs uppercase tracking-wider transition-colors hover:bg-accent",
@@ -79,6 +86,9 @@ export function MatrixCellPill({
           size={indicatorSize}
         />
         <span>{statusLabel(shown)}</span>
+        {sameDevice && (
+          <Link2 className="size-3 shrink-0 text-muted-foreground" aria-label="same device as the gateway" />
+        )}
         {cascaded && (
           <span className="text-[10px] text-muted-foreground">(cascade)</span>
         )}
@@ -96,7 +106,85 @@ export function MatrixCellPill({
         lastValidatedAt={lastValidatedAt}
         lastValidatedBy={lastValidatedBy}
         allowedStatuses={allowedStatuses}
+        recordExtra={
+          <SameDeviceToggle
+            serviceId={serviceId}
+            serviceName={serviceName}
+            gatewayId={gatewayId}
+            gatewayName={gatewayName}
+            sameDevice={sameDevice}
+          />
+        }
       />
     </>
+  )
+}
+
+/**
+ * "This gateway is the device providing the service on this path" — a 117G
+ * doing MUOS voice. Saved immediately (it's a property of the path, not part
+ * of a validation): validating the gateway then sets this cell, the service's
+ * local status doesn't cap it, and a service whose every path is like this
+ * has its local status follow. See api/same_device.py.
+ */
+function SameDeviceToggle({
+  serviceId,
+  serviceName,
+  gatewayId,
+  gatewayName,
+  sameDevice,
+}: {
+  serviceId: number
+  serviceName: string
+  gatewayId: number
+  gatewayName: string
+  sameDevice: boolean
+}) {
+  const router = useRouter()
+  const [on, setOn] = useState(sameDevice)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function toggle(next: boolean) {
+    setPending(true)
+    setError(null)
+    setOn(next)
+    try {
+      const res = await fetch(`/api/be/services/${serviceId}/gateways/${gatewayId}/same-device`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ same_device: next }),
+      })
+      if (!res.ok) throw new Error("Couldn't save")
+      router.refresh()
+    } catch {
+      setOn(!next)
+      setError("Couldn't save that — try again.")
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <label className="flex items-start gap-2 rounded-md border bg-muted/20 p-2.5 text-xs">
+      <input
+        type="checkbox"
+        className="mt-0.5 size-4"
+        checked={on}
+        disabled={pending}
+        onChange={(e) => toggle(e.target.checked)}
+      />
+      <span>
+        <span className="font-medium">
+          {gatewayName} is the device providing {serviceName} here
+        </span>
+        <span className="mt-0.5 block text-[11px] text-muted-foreground">
+          Validating the gateway also sets this path, and the service&apos;s
+          local status doesn&apos;t cap it. If every path is like this, local
+          status follows too.
+        </span>
+        {error && <span className="mt-1 block text-destructive">{error}</span>}
+      </span>
+    </label>
   )
 }

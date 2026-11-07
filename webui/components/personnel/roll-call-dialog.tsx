@@ -16,8 +16,9 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import {
-  PERSONNEL_STATUSES,
+  personName,
   PERSONNEL_STATUS_LABELS,
+  PERSONNEL_STATUSES,
   type PersonnelStatus,
 } from "@/lib/personnel-data"
 import type { Personnel, Site } from "@/lib/types"
@@ -245,13 +246,13 @@ export function RollCallDialog({ site, personnel }: Props) {
                         checked={row.verified}
                         onCheckedChange={() => toggleVerified(p.id)}
                         disabled={pending}
-                        aria-label={`Accurate — ${p.last_name}, ${p.first_name}`}
+                        aria-label={`Accurate — ${personName(p)}`}
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 truncate text-sm">
                           <span className="truncate">
                             {p.rank ? `${p.rank} ` : ""}
-                            {p.last_name}, {p.first_name}
+                            {personName(p)}
                           </span>
                           {p.is_guest && (
                             <Badge

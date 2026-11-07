@@ -17,15 +17,16 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  BRANCHES,
   BRANCH_LABELS,
+  BRANCHES,
   DEFAULT_BRANCH,
   defaultSkillLevel,
   groupedRanks,
   isOfficerGrade,
+  personName,
   rankOptionLabel,
-  SKILL_LEVELS,
   SKILL_LEVEL_LABELS,
+  SKILL_LEVELS,
   skillLevelApplies,
 } from "@/lib/personnel-data"
 import type { Branch, Person, PersonnelType, Unit } from "@/lib/types"
@@ -195,7 +196,6 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
 
   const canSave =
     draft.last_name.trim() !== "" &&
-    draft.first_name.trim() !== "" &&
     (!duplicate || dupAck)
 
   return (
@@ -221,7 +221,7 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
         <DialogHeader>
           <DialogTitle>
             {editing
-              ? `Edit ${person!.last_name}, ${person!.first_name}`
+              ? `Edit ${personName(person!)}`
               : "Add to roster"}
           </DialogTitle>
         </DialogHeader>
@@ -244,7 +244,10 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="r-first">First name</Label>
+              <Label htmlFor="r-first">
+                First name{" "}
+                <span className="font-normal text-muted-foreground">(optional)</span>
+              </Label>
               <Input
                 id="r-first"
                 value={draft.first_name}
@@ -261,7 +264,7 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
             >
               <p className="font-medium">
                 {duplicate.rank ? `${duplicate.rank} ` : ""}
-                {duplicate.last_name}, {duplicate.first_name} is already on the
+                {personName(duplicate)} is already on the
                 roster.
               </p>
               <label className="flex items-center gap-2 text-xs">
@@ -415,7 +418,7 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <CommanderStar size={12} />
               {existingCommander.rank ? `${existingCommander.rank} ` : ""}
-              {existingCommander.last_name}, {existingCommander.first_name}{" "}
+              {personName(existingCommander)}{" "}
               commands this unit.
             </p>
           )}

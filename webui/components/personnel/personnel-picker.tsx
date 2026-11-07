@@ -1,5 +1,6 @@
 "use client"
 
+import { personLabel } from "@/lib/personnel-data"
 import { useMemo, useState } from "react"
 import { ChevronsUpDown } from "lucide-react"
 
@@ -23,9 +24,6 @@ import { cn } from "@/lib/utils"
  *  a workspace's personnel. */
 type Pickable = Pick<Personnel, "id" | "rank" | "last_name" | "first_name">
 
-function personLabel(p: Pickable): string {
-  return `${p.rank ? `${p.rank} ` : ""}${p.last_name}, ${p.first_name}`
-}
 
 interface Props {
   /** Selected person id as a string ("" = none), matching the form drafts. */

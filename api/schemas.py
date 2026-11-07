@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # `unvalidated` is the seed state: nobody has said anything about this yet.
 # It was called `unknown`, which read as an assessment ("we looked and can't
@@ -681,6 +681,35 @@ class ServiceIn(BaseModel):
     enabled_pace: list[GatewayPace] = Field(default_factory=lambda: list(_DEFAULT_PACE))
 
 
+class ServiceCopyIn(BaseModel):
+    """Copy services (and optionally gateways) from one site to another.
+
+    Setting a site up from scratch meant adding every service and gateway by
+    hand. A copy brings the source site's choices across in one go: which
+    services, their PACE tiers, reach, criticality and notes. Status never
+    copies — a service at a new site hasn't been validated there.
+    """
+
+    from_site_id: int
+    to_site_id: int
+    # Source delivery ids to copy. Omitted (null) means every service at the
+    # source; an empty list means none — e.g. copying only the gateways.
+    delivery_ids: Optional[list[int]] = None
+    include_gateways: bool = False
+
+
+class ServiceCopyOut(BaseModel):
+    services_created: int = 0
+    # Already delivered at the target site — joined, not duplicated.
+    services_skipped: int = 0
+    gateways_created: int = 0
+    # A gateway of the same name already at the target.
+    gateways_skipped: int = 0
+    # Gateway dependencies carried over to the new deliveries, matched by
+    # gateway name at the target.
+    dependencies_created: int = 0
+
+
 class ServicePatch(BaseModel):
     name: Optional[str] = None
     site_id: Optional[int] = None
@@ -740,10 +769,19 @@ class ServiceGatewayStatusOut(_ORM):
 
     gateway_id: int
     status: CellStatusValue
+    # The gateway is the device providing the service on this path.
+    same_device: bool = False
     effective_status: CellStatusValue = "unvalidated"
     validated_at: Optional[datetime.datetime] = None
     validated_by_user_id: Optional[int] = None
     validated_by_username: Optional[str] = None
+
+
+class SameDeviceIn(BaseModel):
+    """Mark (or unmark) a cell as "this gateway IS the device providing the
+    service on this path". See api/same_device.py."""
+
+    same_device: bool
 
 
 class ServiceGatewayStatusValidateIn(BaseModel):
@@ -801,6 +839,9 @@ class ServiceOut(_ORM):
     # Per-gateway matrix cells. One entry per gateway on this site whose PACE
     # tier the service enables — auto-materialized by the API on read.
     gateway_statuses: list[ServiceGatewayStatusOut] = Field(default_factory=list)
+    # Every enabled path is a same-device gateway, so the local status
+    # follows those cells rather than being validated by hand.
+    local_follows_gateways: bool = False
 
 
 # --- Gateway ---
@@ -927,6 +968,17 @@ class ServiceRollup(BaseModel):
     site_id: int
     site_name: str
     validated_at: Optional[datetime.datetime] = None
+
+
+class SummaryReportIn(BaseModel):
+    """What goes into the summary PDF besides the live status: remarks typed
+    at export (not stored anywhere), and optionally which sites."""
+
+    remark: str = Field(default="", max_length=4000)
+    # Per-site remarks, keyed by site id.
+    site_remarks: dict[int, str] = Field(default_factory=dict)
+    # Omitted = every site.
+    site_ids: Optional[list[int]] = None
 
 
 class StatusRollupOut(BaseModel):
@@ -1491,6 +1543,15 @@ class TeamOut(_ORM):
     updated_at: datetime.datetime
 
 
+def _first_name_or_empty(value):
+    """An unknown first name is stored as "" — the column is NOT NULL, and in
+    the field a surname is often all anyone has. Turns an explicit null into
+    "" and trims; runs only on values a caller actually sent."""
+    if value is None:
+        return ""
+    return value.strip() if isinstance(value, str) else value
+
+
 class PersonIn(BaseModel):
     """A new person on the global roster (identity only)."""
 
@@ -1500,13 +1561,15 @@ class PersonIn(BaseModel):
     rank: Optional[str] = None
     skill_level: Optional[SkillLevel] = None
     last_name: str
-    first_name: str
+    first_name: str = ""
     cellphone: Optional[str] = None
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None  # a person id
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
 
 
 class PersonPatch(BaseModel):
@@ -1523,6 +1586,8 @@ class PersonPatch(BaseModel):
     email: Optional[str] = None
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
 
 
 class PersonWorkspaceRef(BaseModel):
@@ -1585,6 +1650,8 @@ class PersonnelIn(BaseModel):
     room_number: Optional[str] = None
     team_ids: list[int] = Field(default_factory=list)
 
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+
 
 class PersonnelPatch(BaseModel):
     personnel_type: Optional[PersonnelType] = None
@@ -1608,6 +1675,8 @@ class PersonnelPatch(BaseModel):
     assigned_site_id: Optional[int] = None
     room_number: Optional[str] = None
     team_ids: Optional[list[int]] = None
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
 
 
 class PersonnelOut(_ORM):
@@ -1914,7 +1983,7 @@ class ExportedPersonnel(BaseModel):
     rank: Optional[str] = None
     skill_level: Optional[int] = None
     last_name: str
-    first_name: str
+    first_name: str = ""
     cellphone: Optional[str] = None
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None

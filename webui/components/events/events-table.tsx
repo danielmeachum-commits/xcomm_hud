@@ -720,6 +720,7 @@ export function EventsTable({
           )}
         >
           <RowMenu
+            isGeneral={v.event_type === "general"}
             isOperator={isOperator}
             isAdmin={isAdmin}
             isAuthor={
@@ -999,6 +1000,7 @@ function RowMenu({
   isAdmin,
   isAuthor,
   isHidden,
+  isGeneral,
   onEdit,
   onHide,
   onUnhide,
@@ -1007,6 +1009,8 @@ function RowMenu({
   isAdmin: boolean
   isAuthor: boolean
   isHidden: boolean
+  /** Custom events can have their time corrected, not just their note. */
+  isGeneral: boolean
   onEdit: () => void
   onHide: () => void
   onUnhide: () => void
@@ -1028,7 +1032,9 @@ function RowMenu({
       />
       <DropdownMenuContent align="end">
         {canEdit && (
-          <DropdownMenuItem onClick={onEdit}>Edit note</DropdownMenuItem>
+          <DropdownMenuItem onClick={onEdit}>
+            {isGeneral ? "Edit time & note" : "Edit note"}
+          </DropdownMenuItem>
         )}
         {isAdmin &&
           (isHidden ? (

@@ -775,7 +775,7 @@ function TimelineRow({
               <DropdownMenuContent align="end">
                 {canEdit && (
                   <DropdownMenuItem onClick={onEdit}>
-                    Edit note
+                    {v.event_type === "general" ? "Edit time & note" : "Edit note"}
                   </DropdownMenuItem>
                 )}
                 {isAdmin &&

@@ -13,9 +13,18 @@ from db import get_db
 from deps import get_current_workspace, requires
 from effective import reset_cells_for_gateway
 from equipment_status import refresh_derived, resolve_status
-from models import Gateway, Service, ServiceDelivery, Site, User, Workspace
+from models import (
+    Gateway,
+    Service,
+    ServiceDelivery,
+    ServiceGatewayStatus,
+    Site,
+    User,
+    Workspace,
+)
 from pubsub import notify
 from rules_engine import emit_trigger
+from same_device import refresh_linked_local, sync_cells_for_gateway
 from schemas import (
     GatewayIn,
     GatewayOut,
@@ -227,6 +236,49 @@ def validate_gateway(
                 },
                 workspace_id=workspace.id,
             )
+    # Same-device cells (the gateway IS the device providing the service on
+    # that path) follow the gateway on every validation, cascade box or not:
+    # it is the same fact. Then any service whose every path is such a cell
+    # has its local status follow. See api/same_device.py.
+    synced = sync_cells_for_gateway(db, gw, when, current_user.id)
+    if synced:
+        synced_names = {
+            d.id: svc.name
+            for d, svc in db.query(ServiceDelivery, Service)
+            .join(Service, Service.id == ServiceDelivery.service_id)
+            .filter(ServiceDelivery.id.in_({c.service_delivery_id for c, _, _ in synced}))
+        }
+        for cell, prev, new in synced:
+            emit_trigger(
+                db,
+                "cell.status_changed",
+                {
+                    "service_id": cell.service_delivery_id,
+                    "gateway_id": gw.id,
+                    "service_name": synced_names.get(cell.service_delivery_id),
+                    "gateway_name": gw.name,
+                    "prev_status": prev,
+                    "new_status": new,
+                    "source_flow": "same_device",
+                    "note": f"Same device as gateway {gw.name} ({body.status})",
+                    "user_id": current_user.id,
+                    "username": current_user.username,
+                    "occurred_at": when,
+                },
+                workspace_id=workspace.id,
+            )
+    linked_deliveries = {
+        sid
+        for (sid,) in db.query(ServiceGatewayStatus.service_delivery_id).filter(
+            ServiceGatewayStatus.gateway_id == gw.id,
+            ServiceGatewayStatus.same_device.is_(True),
+        )
+    }
+    if linked_deliveries:
+        db.flush()
+        refresh_linked_local(
+            db, linked_deliveries, when, current_user.id, current_user.username, workspace.id
+        )
     db.flush()
     db.refresh(gw)
     notify(background_tasks)
