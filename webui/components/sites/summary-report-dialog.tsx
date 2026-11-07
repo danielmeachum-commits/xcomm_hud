@@ -44,10 +44,11 @@ const STATUSES: AnyStatus[] = [
 ]
 
 const PRESETS: { label: string; hours: number | null }[] = [
-  { label: "Last 24 h", hours: 24 },
-  { label: "Last 72 h", hours: 72 },
-  { label: "Last 7 days", hours: 24 * 7 },
-  { label: "All time", hours: null },
+  { label: "1 h", hours: 1 },
+  { label: "2 h", hours: 2 },
+  { label: "4 h", hours: 4 },
+  { label: "8 h", hours: 8 },
+  { label: "All", hours: null },
 ]
 
 function toggled<T>(list: T[], value: T): T[] {
