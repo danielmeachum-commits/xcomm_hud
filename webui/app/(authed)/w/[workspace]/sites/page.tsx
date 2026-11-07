@@ -3,6 +3,7 @@ import { apiGet } from "@/lib/api"
 import { PageBreadcrumbs } from "@/components/breadcrumbs"
 import { SiteForm } from "@/components/sites/site-form"
 import { SitesTabs } from "@/components/sites/sites-tabs"
+import { SummaryReportDialog } from "@/components/sites/summary-report-dialog"
 import type { MapBundle, Site } from "@/lib/types"
 
 export default async function SitesPage() {
@@ -36,7 +37,10 @@ export default async function SitesPage() {
             Physical locations. Status rolls up from the services at each site.
           </p>
         </div>
-        <SiteForm />
+        <div className="flex flex-wrap gap-2">
+          <SummaryReportDialog sites={sites} />
+          <SiteForm />
+        </div>
       </div>
 
       <SitesTabs sites={sites} bundle={bundle} />

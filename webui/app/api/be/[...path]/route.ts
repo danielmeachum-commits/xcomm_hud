@@ -55,6 +55,20 @@ async function proxy(req: NextRequest, path: string): Promise<NextResponse> {
     return new NextResponse(null, { status: 204 })
   }
 
+  // Files (the summary report PDF, ...) pass through as bytes with their own
+  // type and filename. Reading them as text and labelling them JSON — the
+  // path below — would corrupt anything binary.
+  const contentType = upstream.headers.get("content-type") ?? ""
+  if (contentType && !contentType.includes("application/json")) {
+    const passthrough: Record<string, string> = { "Content-Type": contentType }
+    const disposition = upstream.headers.get("content-disposition")
+    if (disposition) passthrough["Content-Disposition"] = disposition
+    return new NextResponse(await upstream.arrayBuffer(), {
+      status: upstream.status,
+      headers: passthrough,
+    })
+  }
+
   const data = await upstream.text()
   return new NextResponse(data, {
     status: upstream.status,

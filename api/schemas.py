@@ -958,6 +958,17 @@ class ServiceRollup(BaseModel):
     validated_at: Optional[datetime.datetime] = None
 
 
+class SummaryReportIn(BaseModel):
+    """What goes into the summary PDF besides the live status: remarks typed
+    at export (not stored anywhere), and optionally which sites."""
+
+    remark: str = Field(default="", max_length=4000)
+    # Per-site remarks, keyed by site id.
+    site_remarks: dict[int, str] = Field(default_factory=dict)
+    # Omitted = every site.
+    site_ids: Optional[list[int]] = None
+
+
 class StatusRollupOut(BaseModel):
     sites: list[SiteRollup]
     services: list[ServiceRollup]
