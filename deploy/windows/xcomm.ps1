@@ -17,8 +17,11 @@
     xcomm.ps1 status                 containers, health, URLs, version
     xcomm.ps1 logs [service]         follow logs (api, webui, postgres, minio)
     xcomm.ps1 load-images [file]     load a saved images file
-    xcomm.ps1 update <file>          update to a newer images file (backs up
-                                     the database first; -SkipBackup to not)
+    xcomm.ps1 update                 with internet: pull the latest code from
+                                     GitHub, build it here, and switch to it
+    xcomm.ps1 update <file>          update to a newer images file instead
+                                     (both back up the database first;
+                                     -SkipBackup to not)
     xcomm.ps1 admin-password         print the initial admin login
 
   To update from an update package, double-click its update.cmd instead: it
@@ -43,6 +46,11 @@ $EnvFile     = Join-Path $StateDir 'xcomm.env'
 $ComposeFile = Join-Path $RepoRoot 'deploy\bundle\compose.prod.yml'
 $ComposeLog  = Join-Path $StateDir 'compose.log'
 $BackupDir   = Join-Path $StateDir 'backups'
+$GitExe      = Join-Path $env:ProgramFiles 'Git\cmd\git.exe'
+# The app images (deploy/bundle/xcomm uses the same names).
+$ApiImage    = 'localhost/xcomm-hud-api'
+$WebuiImage  = 'localhost/xcomm-hud-webui'
+$MinioImage  = 'localhost/xcomm-hud-minio'
 $Project     = 'xcomm-hud'
 # xcomm's own Podman machine. Never the default one: a host may already have a
 # podman-machine-default from another Podman install, possibly a different
@@ -385,44 +393,149 @@ function Save-ImagesCopy([string]$File) {
     Select-Object -Skip 2 | Remove-Item -Force
 }
 
+# The backup every update takes before it changes anything. Stops the script
+# (having changed nothing) if it fails.
+function Invoke-PreUpdateBackup([string]$Label) {
+  if ($SkipBackup) {
+    Write-Warn 'Skipping the database backup (-SkipBackup).'
+    return
+  }
+  Write-Info 'Backing up the database...'
+  $backup = Backup-Database $Label
+  if (-not $backup) {
+    Stop-WithError 'The database backup failed, so nothing was changed. Run again with -SkipBackup to update without one.'
+  }
+  Write-Ok "Database backed up to $backup"
+}
+
+# Once the new images carry the :current tags: restart onto them, check they
+# answer, then clear out the old ones.
+function Complete-Update([string]$Old) {
+  $new = Get-RunningRevision
+  Invoke-Stop
+  if (-not (Start-Stack)) {
+    Write-Warn "The new version ($new) didn't come up. The old images are still here and the"
+    Write-Warn 'database backup is above. Send the logs (xcomm.ps1 logs api) to whoever supports xcomm.'
+    exit 1
+  }
+  Write-Ok "Updated: $Old -> $new."
+  Remove-OldImages $new
+  Show-Urls
+  if ($OpenBrowser) { Start-Process 'http://localhost' }
+}
+
+function Invoke-Git([string[]]$ArgumentList) {
+  return Invoke-Native $GitExe (@('-C', $RepoRoot) + $ArgumentList)
+}
+
+# Build the app images from this checkout - what deploy/bundle/xcomm build
+# does on Linux. Needs internet (base images, npm, PyPI). Each image is tagged
+# with the revision first; the :current tags the stack runs move only once
+# everything built, so a failed build leaves the running version as it was.
+function Build-Images([string]$Rev) {
+  $pinLine = Select-String -Path (Join-Path $RepoRoot 'deploy\bundle\xcomm') -Pattern '^MINIO_PIN=(\S+)'
+  if (-not $pinLine) { Stop-WithError 'No MINIO_PIN in deploy\bundle\xcomm.' }
+  $minioPin = $pinLine.Matches[0].Groups[1].Value
+  $upstream = @(Get-StackImages | Where-Object { $_ -notlike 'localhost/*' }) + $minioPin
+  foreach ($image in $upstream) {
+    Write-Info "Pulling $image..."
+    $r = Invoke-Native $Podman @('pull', '-q', $image)
+    if ($r.Code -ne 0) {
+      $r.Output | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" }
+      Stop-WithError "Couldn't pull $image. Nothing was changed."
+    }
+  }
+  foreach ($part in @(@{ Dir = 'api'; Repo = $ApiImage }, @{ Dir = 'webui'; Repo = $WebuiImage })) {
+    Write-Info "Building $($part.Dir) ($Rev) - several minutes..."
+    $r = Invoke-Native $Podman @('build', '--target', 'prod',
+      '--label', "org.opencontainers.image.revision=$Rev",
+      '-t', "$($part.Repo):$Rev", (Join-Path $RepoRoot $part.Dir))
+    if ($r.Code -ne 0) {
+      $r.Output | Select-Object -Last 25 | ForEach-Object { Write-Host "    $_" }
+      Stop-WithError "Building $($part.Dir) failed. Nothing was changed; xcomm is still on the old version."
+    }
+  }
+  foreach ($pair in @(@($minioPin, "${MinioImage}:current"),
+                      @("${ApiImage}:$Rev", "${ApiImage}:current"),
+                      @("${WebuiImage}:$Rev", "${WebuiImage}:current"))) {
+    $r = Invoke-Native $Podman @('tag', $pair[0], $pair[1])
+    if ($r.Code -ne 0) { Stop-WithError "Couldn't tag $($pair[1])." }
+  }
+  Write-Ok "Built $Rev."
+}
+
+# `update` with no file, step 1: bring the checkout up to date from GitHub,
+# then hand over to the NEW xcomm.ps1 for the rest, so a fix to the update
+# itself takes effect in the same run.
+function Invoke-OnlineUpdate {
+  if (-not (Test-Path $GitExe)) { Stop-WithError "Git isn't installed ($GitExe)." }
+  $r = Invoke-Git @('status', '--porcelain', '--untracked-files=no')
+  if ($r.Code -ne 0) { Stop-WithError "$RepoRoot isn't a git checkout." }
+  if (($r.Output -join '').Trim()) {
+    $r.Output | ForEach-Object { Write-Host "    $_" }
+    Stop-WithError "$RepoRoot has local changes (above), so nothing was updated."
+  }
+  $branch = ((Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD')).Output | Select-Object -Last 1).Trim()
+  if ($branch -eq 'HEAD') { Stop-WithError "$RepoRoot isn't on a branch, so there's nothing to update from." }
+  Write-Info "Fetching $branch from GitHub..."
+  $r = Invoke-Git @('fetch', '-q', 'origin', $branch)
+  if ($r.Code -ne 0) {
+    $r.Output | Select-Object -Last 5 | ForEach-Object { Write-Host "    $_" }
+    Stop-WithError "Couldn't reach GitHub. Without internet, use an update package (update.cmd) instead."
+  }
+  $r = Invoke-Git @('merge', '-q', '--ff-only', "origin/$branch")
+  if ($r.Code -ne 0) {
+    $r.Output | Select-Object -Last 5 | ForEach-Object { Write-Host "    $_" }
+    Stop-WithError "Couldn't fast-forward $branch to GitHub's (it has commits GitHub doesn't)."
+  }
+  Write-Ok "Code at $(Get-CheckoutRevision) ($branch)."
+  $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, 'update-build')
+  if ($SkipBackup) { $childArgs += '-SkipBackup' }
+  if ($OpenBrowser) { $childArgs += '-OpenBrowser' }
+  & powershell.exe @childArgs
+  exit $LASTEXITCODE
+}
+
+function Get-CheckoutRevision {
+  return ((Invoke-Git @('rev-parse', '--short', 'HEAD')).Output | Select-Object -Last 1).Trim()
+}
+
+# `update` with no file, step 2 (run by the freshly pulled xcomm.ps1).
+function Invoke-UpdateBuild {
+  Start-Machine
+  $old = Get-RunningRevision
+  $rev = Get-CheckoutRevision
+  if ($old -eq $rev) {
+    Write-Ok "Already up to date ($rev)."
+    return
+  }
+  Write-Info "Updating xcomm_hud from $old to $rev (building here takes 10-20 minutes)."
+  Invoke-PreUpdateBackup "before-$rev-from-$old"
+  # Building doesn't touch the running containers; only the restart does.
+  Build-Images $rev
+  Complete-Update $old
+}
+
 function Invoke-Update {
   if (-not (Test-Path $EnvFile)) { Stop-WithError "Not set up yet ($EnvFile is missing). Run the kit's install.cmd." }
+  if (-not $Argument) {
+    Invoke-OnlineUpdate
+    return
+  }
   $file = $Argument
-  if (-not $file) { Stop-WithError 'Which images file? xcomm.ps1 update <path to xcomm-<version>.tar>' }
   if (-not (Test-Path $file)) { Stop-WithError "No such file: $file" }
   $file = (Resolve-Path $file).Path
   Start-Machine
   $old = Get-RunningRevision
   $new = if ((Split-Path $file -Leaf) -match '^xcomm-([0-9a-f]+)\.tar$') { $Matches[1] } else { 'new' }
   Write-Info "Updating xcomm_hud from $old to $new."
-
-  if ($SkipBackup) {
-    Write-Warn 'Skipping the database backup (-SkipBackup).'
-  } else {
-    Write-Info 'Backing up the database...'
-    $backup = Backup-Database "before-$new-from-$old"
-    if (-not $backup) {
-      Stop-WithError 'The database backup failed, so nothing was changed. Run again with -SkipBackup to update without one.'
-    }
-    Write-Ok "Database backed up to $backup"
-  }
-
+  Invoke-PreUpdateBackup "before-$new-from-$old"
   # While the old version keeps running: loading only moves the :current tags,
   # and running containers keep the images they started from. A failed load
   # leaves everything as it was.
   Import-Images $file
-  $loaded = Get-RunningRevision
-  Invoke-Stop
-  if (-not (Start-Stack)) {
-    Write-Warn "The new version ($loaded) didn't come up. The old images are still here and the"
-    Write-Warn 'database backup is above. Send the logs (xcomm.ps1 logs api) to whoever supports xcomm.'
-    exit 1
-  }
-  Write-Ok "Updated: $old -> $loaded."
-  Remove-OldImages $loaded
   Save-ImagesCopy $file
-  Show-Urls
-  if ($OpenBrowser) { Start-Process 'http://localhost' }
+  Complete-Update $old
 }
 
 function Invoke-Stop {
@@ -476,6 +589,7 @@ switch ($Command) {
   'logs'           { Invoke-Logs }
   'load-images'    { Start-Machine; Import-Images $Argument }
   'update'         { Invoke-Update }
+  'update-build'   { if (-not (Test-Path $EnvFile)) { Stop-WithError 'Not set up yet.' }; Invoke-UpdateBuild }
   'admin-password' { Invoke-AdminPassword }
   default          { Get-Help $PSCommandPath -Detailed | Out-Host }
 }
