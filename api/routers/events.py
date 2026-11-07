@@ -46,6 +46,7 @@ from models import (
 )
 from personnel_data import person_display_name
 from pubsub import broadcaster, notify
+from rules_engine import emit_trigger
 from schemas import (
     EventBulkIds,
     EventCreateIn,
@@ -407,6 +408,7 @@ _MANUAL_ACTION_SLUGS = {
 @router.post("", response_model=EventOut, status_code=status.HTTP_201_CREATED)
 def create_event(
     body: EventCreateIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     workspace: Workspace = Depends(get_current_workspace),
     current_user: User = Depends(requires("operator")),
@@ -511,6 +513,33 @@ def create_event(
         event_type=body.event_type,
         severity=body.severity,
     )
+    if row.event_type == "general":
+        # Lets a logged event DO something: a rule on this trigger matching
+        # type_slug "exercise.endex" can run end of day, set gear offline, ...
+        # (see default_rules.py). Fired after the event is written, so the
+        # event itself is in the log even if a rule action fails.
+        emit_trigger(
+            db,
+            "event.logged",
+            {
+                "event_id": row.id,
+                "type_slug": row.type_slug,
+                "severity": row.severity,
+                "record_class": row.record_class,
+                "subject_kind": row.subject_kind,
+                "subject_id": row.subject_id,
+                "subject_label": row.subject_label,
+                "note": row.note,
+                "user_id": current_user.id,
+                "username": current_user.username,
+                "occurred_at": row.validated_at,
+            },
+            workspace_id=workspace.id,
+        )
+        db.refresh(row)
+    # Live update for everyone watching: the event itself, and anything a
+    # rule just changed (personnel board, equipment) because of it.
+    notify(background_tasks)
     return _enrich(db, row)
 
 

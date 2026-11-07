@@ -39,6 +39,13 @@ class Action:
 # Default classification for system action slugs. Rules may override any
 # of these per-row via record_action's keyword overrides.
 ACTIONS: dict[str, Action] = {
+    # The one-line summary a bulk rule action writes ("ENDEX shutdown: 37
+    # equipment set offline"). A log, not a timeline event: the custom event
+    # that triggered it is the event.
+    "rule.bulk_change": Action(
+        record_class="log", severity="info", event_type="general",
+        kinds=(SubjectKinds.WORKSPACE,),
+    ),
     "service.validate": Action(
         record_class="log", severity="info", kinds=(SubjectKinds.SERVICE,)
     ),

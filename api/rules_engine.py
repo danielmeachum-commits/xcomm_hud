@@ -10,8 +10,15 @@ point they used to hand-write feed rows. The engine:
 
 Everything runs synchronously inside the caller's transaction, so a
 mutation and its rule effects commit or roll back together (the same
-atomicity the old inline dual-writes had). Actions never emit triggers
-themselves, so rule recursion is impossible by construction.
+atomicity the old inline dual-writes had).
+
+Recursion is impossible by construction, with one controlled exception.
+Actions marked `mutates` (bulk status changes: personnel end of day,
+equipment set status) change things through the same code a person would,
+so the triggers that code emits still fire — that is how every change made
+by a rule still gets its feed/history row. But a trigger emitted from INSIDE
+an action runs only non-mutating actions (create_event): a rule can never
+make a change that sets off another change. See `_ACTION_DEPTH`.
 
 Three code registries parameterize the engine; rules stored in the DB
 reference them by name:
@@ -30,6 +37,7 @@ Conditions are a jsonlogic subset stored as JSONB — see `evaluate_condition`.
 
 from __future__ import annotations
 
+import contextvars
 import datetime
 import logging
 import re
@@ -519,7 +527,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("personnel_name", "Person"),
                 _f("prev_status", "Previous status", "enum", list(PERSONNEL_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(PERSONNEL_STATUS_VALUES)),
-                _f("source_flow", "Source flow", "enum", ["checkin", "bulk", "reset"]),
+                # "rule" = changed by a rule action (e.g. ENDEX end of day).
+                _f("source_flow", "Source flow", "enum", ["checkin", "bulk", "reset", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("personnel_context", "site_context"),
@@ -544,6 +553,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("equipment_title", "Equipment type"),
                 _f("prev_status", "Previous status", "enum", list(EQUIPMENT_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(EQUIPMENT_STATUS_VALUES)),
+                # "rule" = set by a rule action, e.g. everything offline at ENDEX.
+                _f("source_flow", "Source", "enum", ["manual", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("site_context",),
@@ -662,6 +673,28 @@ TRIGGERS: dict[str, TriggerDef] = {
             },
             event_type="general",
         ),
+        TriggerDef(
+            # A person logged a custom event (STARTEX, ENDEX, a safety brief…).
+            # This is what lets an event DO something: a rule matching
+            # type_slug "exercise.endex" can run end of day, set gear offline…
+            "event.logged",
+            "Custom event logged",
+            [
+                _f("type_slug", "Event type (slug, e.g. exercise.endex)"),
+                _f("severity", "Severity", "enum", list(SEVERITIES)),
+                _f("record_class", "Record class", "enum", ["log", "event"]),
+                _f("subject_kind", "Attached to (kind)"),
+                _f("subject_label", "Attached to"),
+                *_COMMON_FIELDS,
+            ],
+            (),
+            lambda ctx: {
+                "subject_kind": ctx.get("subject_kind") or SubjectKinds.WORKSPACE,
+                "subject_id": ctx.get("subject_id"),
+                "subject_label": ctx.get("subject_label"),
+            },
+            event_type="general",
+        ),
     ]
 }
 
@@ -733,6 +766,135 @@ class ActionDef:
     label: str
     fn: Callable[[Session, dict, dict], None]
     params: list
+    # Changes state (rather than only writing a feed row). Mutating actions
+    # run only from a top-level trigger — never from a trigger their own
+    # changes emit — which is what keeps rules from cascading.
+    mutates: bool = False
+
+
+# How deep inside a rule action the current emit_trigger is. 0 = a person (or
+# the API) caused the trigger; >0 = an action's own change emitted it.
+_ACTION_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "rule_action_depth", default=0
+)
+
+
+def _rule_summary(db: Session, ctx: dict, message: str) -> None:
+    """One feed line per bulk action, so the log says what a rule did as a
+    whole ("ENDEX shutdown: 37 equipment set offline") while the per-item
+    rows are recorded as routine logs rather than timeline events."""
+    record_action(
+        db,
+        action_slug="rule.bulk_change",
+        workspace_id=ctx.get("workspace_id"),
+        subject_kind=SubjectKinds.WORKSPACE,
+        subject_id=ctx.get("workspace_id"),
+        user_id=ctx.get("user_id"),
+        note=f"{ctx.get('_rule_name', 'Rule')}: {message}",
+        # Same as every other rule-written row. EventOut only allows
+        # "manual"/"ingest" — a new value here broke reading the whole feed.
+        source=ctx.get("source", "manual"),
+        validated_at=ctx.get("occurred_at"),
+    )
+
+
+def _action_personnel_end_of_day(db: Session, ctx: dict, params: dict) -> None:
+    """The End of day button, as an action: everyone in the workspace to one
+    status (default Unknown), clearing site and expected return."""
+    # Imported here: routers.personnel imports this module.
+    from models import Personnel as _Personnel
+    from routers.personnel import _apply_location_change
+
+    target = params.get("status") or "unknown"
+    if target not in PERSONNEL_STATUS_VALUES:
+        raise ValueError(f"Unknown personnel status '{target}'")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    people = (
+        db.query(_Personnel)
+        .filter(
+            _Personnel.workspace_id == ctx.get("workspace_id"),
+            _Personnel.current_status != target,
+        )
+        .all()
+    )
+    for p in people:
+        _apply_location_change(
+            db, p, stat=target, site_id=None, note=None, expected_return_at=None,
+            when=when, user_id=ctx.get("user_id"), source_flow="rule",
+        )
+    _rule_summary(db, ctx, f"{len(people)} people set to {target.replace('_', ' ')}")
+
+
+def _action_personnel_sign_in_assigned(db: Session, ctx: dict, params: dict) -> None:
+    """Start of day: everyone with an assigned site signed in there. People
+    without one, and people already on site there, are left as they are."""
+    from models import Personnel as _Personnel
+    from routers.personnel import _apply_location_change
+
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    people = (
+        db.query(_Personnel)
+        .filter(
+            _Personnel.workspace_id == ctx.get("workspace_id"),
+            _Personnel.assigned_site_id.is_not(None),
+        )
+        .all()
+    )
+    changed = 0
+    for p in people:
+        if p.current_status == "on_site" and p.current_site_id == p.assigned_site_id:
+            continue
+        _apply_location_change(
+            db, p, stat="on_site", site_id=p.assigned_site_id, note=None,
+            expected_return_at=None, when=when, user_id=ctx.get("user_id"),
+            source_flow="rule",
+        )
+        changed += 1
+    _rule_summary(db, ctx, f"{changed} people signed in at their assigned site")
+
+
+# Never touched by a bulk status change: "in maintenance" is a separate fact
+# about the gear, and ENDEX/STARTEX must not wipe it.
+_BULK_EQUIPMENT_KEEP = ("maintenance",)
+
+
+def _action_equipment_set_status(db: Session, ctx: dict, params: dict) -> None:
+    """Every piece of gear in the workspace to one status (e.g. offline at
+    ENDEX, unvalidated at STARTEX). Gear in maintenance is skipped."""
+    from models import Equipment as _Equipment
+    from routers.equipment import apply_equipment_status
+
+    target = params.get("status")
+    if target not in EQUIPMENT_STATUS_VALUES:
+        raise ValueError(f"Pick an equipment status (got '{target}')")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    rows = (
+        db.query(_Equipment)
+        .filter(
+            _Equipment.workspace_id == ctx.get("workspace_id"),
+            _Equipment.status != target,
+            _Equipment.status.not_in(_BULK_EQUIPMENT_KEEP),
+        )
+        .all()
+    )
+    for eq in rows:
+        apply_equipment_status(
+            db, eq, status=target, when=when, user_id=ctx.get("user_id"),
+            username=ctx.get("username"), note=None,
+            workspace_id=ctx.get("workspace_id"), source_flow="rule",
+        )
+    kept = (
+        db.query(_Equipment)
+        .filter(
+            _Equipment.workspace_id == ctx.get("workspace_id"),
+            _Equipment.status.in_(_BULK_EQUIPMENT_KEEP),
+        )
+        .count()
+    )
+    msg = f"{len(rows)} equipment set to {target}"
+    if kept:
+        msg += f" ({kept} in maintenance left as is)"
+    _rule_summary(db, ctx, msg)
 
 
 ACTION_DEFS: dict[str, ActionDef] = {
@@ -752,6 +914,27 @@ ACTION_DEFS: dict[str, ActionDef] = {
                 _f("note_template", "Note template ({field} placeholders)"),
             ],
         ),
+        ActionDef(
+            "personnel_end_of_day",
+            "Personnel: end of day (everyone to one status)",
+            _action_personnel_end_of_day,
+            [_f("status", "Set everyone to", "enum", list(PERSONNEL_STATUS_VALUES))],
+            mutates=True,
+        ),
+        ActionDef(
+            "personnel_sign_in_assigned",
+            "Personnel: sign everyone in at their assigned site",
+            _action_personnel_sign_in_assigned,
+            [],
+            mutates=True,
+        ),
+        ActionDef(
+            "equipment_set_status",
+            "Equipment: set all gear to a status (skips maintenance)",
+            _action_equipment_set_status,
+            [_f("status", "Set all equipment to", "enum", list(EQUIPMENT_STATUS_VALUES))],
+            mutates=True,
+        ),
     ]
 }
 
@@ -759,7 +942,7 @@ ACTION_DEFS: dict[str, ActionDef] = {
 # --- The engine ---
 
 # Keys stripped from the RuleExecution context snapshot.
-_PRIVATE_KEYS = ("_trigger",)
+_PRIVATE_KEYS = ("_trigger", "_rule_name")
 
 
 def _snapshot(ctx: dict) -> dict:
@@ -836,12 +1019,23 @@ def emit_trigger(
             status="ok",
             context=_snapshot(rule_ctx),
         )
+        depth = _ACTION_DEPTH.get()
+        rule_ctx["_rule_name"] = rule.name
         try:
             for step in rule.actions or []:
                 action = ACTION_DEFS.get(step.get("action", ""))
                 if action is None:
                     raise ValueError(f"Unknown action '{step.get('action')}'")
-                action.fn(db, rule_ctx, step.get("params") or {})
+                if action.mutates and depth > 0:
+                    # Emitted by another rule's change — record-keeping only,
+                    # so a rule can never set off a chain of changes.
+                    log.info("Rule %s: skipped %s (nested trigger)", rule.id, action.key)
+                    continue
+                token = _ACTION_DEPTH.set(depth + 1)
+                try:
+                    action.fn(db, rule_ctx, step.get("params") or {})
+                finally:
+                    _ACTION_DEPTH.reset(token)
         except Exception as err:
             execution.status = "error"
             execution.error = str(err)[:2000]
