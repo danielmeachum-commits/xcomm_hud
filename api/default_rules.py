@@ -144,7 +144,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     {
         **_ALERT,
         "key": "service-outage-alarm",
-        "version": 1,
+        "version": 2,
         "name": "Service outage alarm",
         "description": "Raise a critical timeline event when a service drops from up straight to down/offline.",
         "trigger": "service.status_changed",
@@ -152,6 +152,9 @@ DEFAULT_RULES: list[dict[str, Any]] = [
             "and": [
                 {"in": [{"var": "new_status"}, ["down", "offline"]]},
                 {"==": [{"var": "prev_status"}, "up"]},
+                # Not a rule's bulk change (PAUSEEX/ENDEX taking the board
+                # offline is planned, not an outage).
+                {"!=": [{"var": "source_flow"}, "rule"]},
             ]
         },
         "enrichers": ["service_context"],
@@ -387,12 +390,13 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     {
         **_ALERT,
         "key": "exercise-endex-stand-down",
-        "version": 1,
-        "name": "ENDEX: end of day and gear offline",
+        "version": 2,
+        "name": "ENDEX: end of day, everything offline",
         "description": (
             "When ENDEX is logged: everyone's accountability to Unknown (the "
-            "End of day button) and all equipment offline, except gear in "
-            "maintenance."
+            "End of day button); all equipment offline, except gear in "
+            "maintenance; and every hand-validated service, path and gateway "
+            "offline."
         ),
         "trigger": "event.logged",
         "conditions": {"==": [{"var": "type_slug"}, "exercise.endex"]},
@@ -401,16 +405,18 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "actions": [
             {"action": "personnel_end_of_day", "params": {"status": "unknown"}},
             {"action": "equipment_set_status", "params": {"status": "offline"}},
+            {"action": "validations_set_status", "params": {"status": "offline", "gateway_status": "offline"}},
         ],
     },
     {
         **_ALERT,
         "key": "exercise-pauseex-stand-down",
-        "version": 1,
-        "name": "PAUSEEX: end of day and gear offline",
+        "version": 2,
+        "name": "PAUSEEX: end of day, everything offline",
         "description": (
-            "When PAUSEEX is logged: everyone's accountability to Unknown and "
-            "all equipment offline, except gear in maintenance."
+            "When PAUSEEX is logged: everyone's accountability to Unknown; all "
+            "equipment offline, except gear in maintenance; and every "
+            "hand-validated service, path and gateway offline."
         ),
         "trigger": "event.logged",
         "conditions": {"==": [{"var": "type_slug"}, "exercise.pauseex"]},
@@ -419,18 +425,21 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "actions": [
             {"action": "personnel_end_of_day", "params": {"status": "unknown"}},
             {"action": "equipment_set_status", "params": {"status": "offline"}},
+            {"action": "validations_set_status", "params": {"status": "offline", "gateway_status": "offline"}},
         ],
     },
     {
         **_ALERT,
         "key": "exercise-startex-stand-up",
-        "version": 1,
-        "name": "STARTEX: sign in and re-validate gear",
+        "version": 2,
+        "name": "STARTEX: sign in and re-validate everything",
         "description": (
             "When STARTEX is logged: everyone with an assigned site signed in "
-            "there, and all equipment back to unvalidated so nothing shows up "
-            "that hasn't been checked since the pause (gear in maintenance is "
-            "left as it is)."
+            "there, and all equipment, services and paths back to unvalidated "
+            "so nothing shows up that hasn't been checked since the pause "
+            "(gear in maintenance is left as it is). Gateways have no "
+            "unvalidated status, so they stay as they are (offline after a "
+            "PAUSEEX) until validated."
         ),
         "trigger": "event.logged",
         "conditions": {"==": [{"var": "type_slug"}, "exercise.startex"]},
@@ -439,6 +448,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "actions": [
             {"action": "personnel_sign_in_assigned", "params": {}},
             {"action": "equipment_set_status", "params": {"status": "unvalidated"}},
+            {"action": "validations_set_status", "params": {"status": "unvalidated"}},
         ],
     },
 ]

@@ -433,6 +433,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("service_name", "Service name"),
                 _f("prev_status", "Previous status", "enum", list(SERVICE_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(SERVICE_STATUS_VALUES)),
+                # Absent for a hand validation.
+                _f("source_flow", "Source flow", "enum", ["same_device", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("service_context",),
@@ -448,6 +450,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("gateway_name", "Gateway name"),
                 _f("prev_status", "Previous status", "enum", list(GATEWAY_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(GATEWAY_STATUS_VALUES)),
+                # Absent for a hand validation.
+                _f("source_flow", "Source flow", "enum", ["rule"]),
                 *_COMMON_FIELDS,
             ],
             ("gateway_context",),
@@ -464,7 +468,7 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("gateway_name", "Gateway name"),
                 _f("prev_status", "Previous status"),
                 _f("new_status", "New status"),
-                _f("source_flow", "Source flow", "enum", ["validate", "cascade"]),
+                _f("source_flow", "Source flow", "enum", ["validate", "cascade", "same_device", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("service_context", "gateway_context"),
@@ -897,6 +901,86 @@ def _action_equipment_set_status(db: Session, ctx: dict, params: dict) -> None:
     _rule_summary(db, ctx, msg)
 
 
+# What a bulk change may set hand-validated services/cells and gateways to.
+# Gateways have no "unvalidated": at STARTEX they stay offline (from the
+# pause) until someone validates them.
+_BULK_SERVICE_STATUSES = ("unvalidated", "offline", "down")
+_BULK_GATEWAY_STATUSES = ("offline", "down")
+
+
+def _action_validations_set_status(db: Session, ctx: dict, params: dict) -> None:
+    """Hand validations across the workspace to one status: every service's
+    local status and every matrix cell to `status`, every gateway to
+    `gateway_status` (omit to leave gateways alone). Services and gateways
+    whose status comes from equipment (derived mode) are skipped: they follow
+    the gear, which equipment_set_status handles. PAUSEEX/ENDEX take them
+    offline so the board shows no stale "up" through the pause; STARTEX puts
+    services and cells back to unvalidated."""
+    from models import Gateway as _Gateway
+    from models import Service as _Service
+    from models import ServiceDelivery as _Delivery
+    from models import ServiceGatewayStatus as _Cell
+    from models import Site as _Site
+
+    target = params.get("status")
+    gw_target = params.get("gateway_status") or None
+    if target not in _BULK_SERVICE_STATUSES:
+        raise ValueError(f"Pick a service status (got '{target}')")
+    if gw_target is not None and gw_target not in _BULK_GATEWAY_STATUSES:
+        raise ValueError(f"Pick a gateway status (got '{gw_target}')")
+    ws_id = ctx.get("workspace_id")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    user_id, username = ctx.get("user_id"), ctx.get("username")
+    common = {"source_flow": "rule", "user_id": user_id, "username": username, "occurred_at": when}
+
+    site_ids = [sid for (sid,) in db.query(_Site.id).filter(_Site.workspace_id == ws_id)]
+    gateways = db.query(_Gateway).filter(_Gateway.site_id.in_(site_ids)).all()
+    gw_by_id = {g.id: g for g in gateways}
+    n_gw = 0
+    if gw_target:
+        for gw in gateways:
+            if gw.status_mode != "reported" or gw.status == gw_target:
+                continue
+            emit_trigger(db, "gateway.status_changed", {
+                "gateway_id": gw.id, "gateway_name": gw.name,
+                "prev_status": gw.status, "new_status": gw_target, "note": None, **common,
+            }, workspace_id=ws_id)
+            gw.status, gw.validated_at, gw.validated_by_user_id = gw_target, when, user_id
+            n_gw += 1
+
+    rows = (
+        db.query(_Delivery, _Service)
+        .join(_Service, _Service.id == _Delivery.service_id)
+        .filter(_Delivery.site_id.in_(site_ids))
+        .all()
+    )
+    n_svc = n_cell = 0
+    for d, svc in rows:
+        if d.status_mode == "reported" and d.status != target:
+            emit_trigger(db, "service.status_changed", {
+                "service_id": d.id, "service_name": svc.name,
+                "prev_status": d.status, "new_status": target, "note": None, **common,
+            }, workspace_id=ws_id)
+            d.status, d.validated_at, d.validated_by_user_id = target, when, user_id
+            n_svc += 1
+        for cell in db.query(_Cell).filter(_Cell.service_delivery_id == d.id):
+            if cell.status == target:
+                continue
+            gw = gw_by_id.get(cell.gateway_id)
+            emit_trigger(db, "cell.status_changed", {
+                "service_id": d.id, "gateway_id": cell.gateway_id,
+                "service_name": svc.name, "gateway_name": gw.name if gw else None,
+                "prev_status": cell.status, "new_status": target, "note": None, **common,
+            }, workspace_id=ws_id)
+            cell.status, cell.validated_at, cell.validated_by_user_id = target, when, user_id
+            n_cell += 1
+
+    parts = [f"{n_svc} service{'s' if n_svc != 1 else ''} and {n_cell} path{'s' if n_cell != 1 else ''} set to {target}"]
+    if gw_target:
+        parts.append(f"{n_gw} gateway{'s' if n_gw != 1 else ''} set to {gw_target}")
+    _rule_summary(db, ctx, "; ".join(parts))
+
+
 ACTION_DEFS: dict[str, ActionDef] = {
     a.key: a
     for a in [
@@ -933,6 +1017,16 @@ ACTION_DEFS: dict[str, ActionDef] = {
             "Equipment: set all gear to a status (skips maintenance)",
             _action_equipment_set_status,
             [_f("status", "Set all equipment to", "enum", list(EQUIPMENT_STATUS_VALUES))],
+            mutates=True,
+        ),
+        ActionDef(
+            "validations_set_status",
+            "Validations: set all services, paths and gateways to a status",
+            _action_validations_set_status,
+            [
+                _f("status", "Set services and paths to", "enum", list(_BULK_SERVICE_STATUSES)),
+                _f("gateway_status", "Set gateways to (blank = leave)", "enum", list(_BULK_GATEWAY_STATUSES)),
+            ],
             mutates=True,
         ),
     ]

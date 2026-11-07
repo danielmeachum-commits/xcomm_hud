@@ -91,6 +91,12 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
         parts.push("sign everyone in at their assigned site")
       } else if (step.action === "equipment_set_status") {
         parts.push(`all gear → ${String(step.params.status ?? "?")}`)
+      } else if (step.action === "validations_set_status") {
+        const gw = step.params.gateway_status as string | undefined
+        parts.push(
+          `services & paths → ${String(step.params.status ?? "?")}` +
+            (gw ? `, gateways → ${gw}` : ""),
+        )
       } else {
         parts.push(step.action)
       }
