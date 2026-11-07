@@ -346,3 +346,42 @@ and rebuild in `~/xcomm_hud`) survive reboots.
   past 40 GiB is unused until we add a grow step.
 - A real boot: auto-login, Wi-Fi firmware on the target laptops, first-boot
   timing.
+
+### First hardware boot (2026-11-06) — what it found
+
+On an ASUS ProArt P16 (AMD iGPU + RTX 50-series), the stick **ran everything
+but showed nothing**: xcomm was up 2.5 minutes after power-on, XFCE logged in,
+and Firefox opened — all on the NVIDIA GPU, which has no panel attached. The
+laptop's screen is wired to the AMD iGPU, so it stayed on the boot text.
+
+Fixes in the image:
+
+- **nouveau is blocked** (`usr/lib/bootc/kargs.d/10-xcomm-hud.toml` and
+  `usr/lib/modprobe.d/xcomm-hud.conf`). X can then only take a GPU that drives
+  a real display: the iGPU on hybrid laptops, the firmware framebuffer on
+  NVIDIA-only ones.
+- **No screen lock or blanking:** `xfce4-screensaver` is removed, DPMS and
+  blanking are off. In a VM the screen locked after 10 idle minutes.
+- **Closing the lid on AC doesn't suspend** the host
+  (`usr/lib/systemd/logind.conf.d/xcomm-hud.conf`).
+- **LightDM's cache directory** is created by tmpfiles; an over-broad `/var`
+  cleanup in the Containerfile had deleted it.
+- The `dnfdragora` update notifier is removed (pointless offline).
+
+Debugging aids that worked without sudo, worth reusing:
+
+- Mount the stick read-only with `udisksctl mount -b /dev/sdX4 -o ro` and read
+  its journal with `journalctl -D <root>/ostree/deploy/default/var/log/journal`;
+  X's log is `var/log/Xorg.0.log` beside it.
+- Boot `disk.raw` in QEMU from a Fedora container (`/dev/kvm` is usable by the
+  logged-in user) through a qcow2 overlay, screenshots via QMP `screendump`,
+  and read the guest disk with `guestfish --ro`. A VM has one GPU, so it can't
+  reproduce hybrid-graphics problems — but it showed the rest of the boot path
+  (auto-login → xcomm → Firefox on the login page) works.
+
+**Status (2026-11-06): the stick boots and runs xcomm on the target HP
+laptop.** Built with the console fix (errors show on the screen) and the
+display fixes above. If a stick ever fails early in boot again, build it with
+`deploy/usb/build.sh --debug`: it stops on the error instead of rebooting, and
+opens a root shell on Ctrl+Alt+F9 to copy `/run/initramfs/rdsosreport.txt`
+onto the stick's EFI partition.

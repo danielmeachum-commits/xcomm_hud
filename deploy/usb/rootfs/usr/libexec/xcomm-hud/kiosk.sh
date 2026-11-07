@@ -13,6 +13,10 @@ HEALTH=$URL/api/be/healthz
 
 healthy() { curl -fs -o /dev/null --max-time 3 "$HEALTH"; }
 
+# This screen is the host's status display: never blank it. (The screensaver
+# package is removed from the image; this covers X's own blanking and DPMS.)
+xset s off s noblank -dpms 2>/dev/null || true
+
 if ! healthy; then
   (
     # Pulsing progress dialog; closes itself when the loop below ends.
