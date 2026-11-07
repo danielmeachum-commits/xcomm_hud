@@ -385,3 +385,104 @@ display fixes above. If a stick ever fails early in boot again, build it with
 `deploy/usb/build.sh --debug`: it stops on the error instead of rebooting, and
 opens a root shell on Ctrl+Alt+F9 to copy `/run/initramfs/rdsosreport.txt`
 onto the stick's EFI partition.
+
+## 12. Windows kit — `deploy/windows/`
+
+The same stack on a Windows host, installed offline from a kit folder. One
+host runs it; other machines use a browser.
+
+### Building and installing
+
+```
+deploy/windows/build-kit.sh            # connected Linux machine, ~6 GB free
+deploy/windows/build-kit.sh --zip      # also one .zip of the kit
+```
+
+Copy `deploy/windows/output/xcomm-windows-kit/` to the Windows machine, log in
+as the account that will run xcomm, double-click `install.cmd`. Needs 64-bit
+Windows 10 2004+ or 11, an administrator account and hardware virtualization.
+
+### Decisions
+
+| Question | Decision |
+|---|---|
+| Engine | **Podman** (free for any organization; same engine as the stick). WSL2 provider. |
+| Starting | **At login**, by scheduled task. WSL runs per user, so this is the reliable trigger; turn on Windows auto-login for unattended hosts. |
+| Compose | `podman compose` with the kit's **docker-compose.exe** (`PODMAN_COMPOSE_PROVIDER`). |
+| Port 80 | Podman on Windows binds published ports to **127.0.0.1 only**. The stack publishes on 127.0.0.1:18080; a Windows **port proxy** forwards 0.0.0.0:80 to it, plus a firewall rule. The machine stays rootless, and 80 and 18080 never collide. |
+
+### What's in the kit
+
+| File | Source |
+|---|---|
+| `installers/wsl.3.0.3.0.x64.msi` | microsoft/WSL release |
+| `installers/podman-installer-windows-amd64.msi` | containers/podman v6.1.4 |
+| `installers/Git-2.56.0.4-64-bit.exe` | git-for-windows v2.56.0.windows.4 |
+| `installers/docker-compose-windows-x86_64.exe` | docker/compose v5.7.0 |
+| `installers/podman-machine.x86_64.wsl.tar.zst` | `quay.io/podman/machine-os:6.1`, the x86_64 `disktype: wsl` entry, by digest |
+| `seed/` | `deploy/bundle/make-seed.sh` — same as the stick |
+| `install.cmd`, `install.ps1` | from the branch, like the code |
+| `MANIFEST.txt` | versions and SHA-256 of every file |
+
+Every GitHub download is checked against the SHA-256 GitHub publishes for the
+release asset; the machine image against its layer digest. Podman's machine
+image tag must match Podman's major.minor — `podman machine init --image`
+takes the local `.tar.zst` and decompresses it itself.
+
+### install.ps1
+
+Idempotent, so it resumes after the WSL reboot and can be rerun:
+
+1. Copy the kit to `C:\xcomm\kit` (the USB drive may change letters across the
+   reboot; HKLM `RunOnce` resumes from the copy).
+2. Turn on `VirtualMachinePlatform` and `Microsoft-Windows-Subsystem-Linux`.
+3. Install WSL (MSI), reboot if needed; then Podman (MSI, `ALLUSERS=1
+   MACHINE_PROVIDER=wsl`) and Git for Windows, silently. **WSL must be 2.7.5
+   or later**, and an older one already on the machine is upgraded from the
+   kit: Podman 6's networking (netavark + nftables) needs kernel modules WSL
+   kernels before 6.18 lack. On the first real install the host had WSL 2.6.1
+   (from Docker Desktop) and every container failed with `nftables error: "nft"
+   did not return successfully while applying ruleset` (netavark#1539,
+   podman#25201). `wsl --version` is read with `WSL_UTF8=1`, NULs stripped
+   (UTF-16 under PowerShell 5.1) and the first version number taken (labels
+   are translated). `xcomm.ps1 start` checks it too.
+4. `podman machine init --image <kit image> xcomm` — xcomm's **own machine**,
+   never `podman-machine-default`. The first real install ran on a host that
+   already had a default machine from an older Podman; the kit skipped
+   creating one, and Podman 6.1.4 then failed to start it (its newer start
+   writes into `/usr/share/containers/containers.conf.d/`, which that older
+   image lacks). `xcomm.ps1` sets `CONTAINER_CONNECTION=xcomm`, so it never
+   depends on, or touches, the user's own machines. WSL machines can run side
+   by side.
+5. Clone the bundle to `C:\xcomm\xcomm_hud` with `core.autocrlf=false`, rename
+   the branch, point `origin` at GitHub.
+6. Secrets, same shapes as `scripts/gen-env.sh --prod`, written UTF-8 **without
+   a BOM** (PowerShell 5.1's `Set-Content -Encoding UTF8` adds one, which would
+   corrupt the first variable name), readable by the account and SYSTEM only.
+7. Port proxy 0.0.0.0:80 → 127.0.0.1:18080 and a firewall rule. Refuses if
+   something else already listens on 80.
+8. Scheduled task `xcomm` at logon → `xcomm.ps1 start -OpenBrowser`; desktop
+   shortcuts "xcomm" and "xcomm status".
+9. Start, and print the first admin login.
+
+### Things that are easy to get wrong on Windows
+
+- **Windows PowerShell 5.1** is the target (it's on every machine). Scripts
+  are **ASCII only**: 5.1 reads BOM-less files as Windows-1252, where the
+  last byte of a UTF-8 em dash is a curly quote, which PowerShell treats as a
+  real quote. `build-kit.sh` refuses non-ASCII.
+- Native programs that write to stderr become terminating errors in 5.1 under
+  `$ErrorActionPreference = 'Stop'` — both scripts run them through
+  `Invoke-Native`.
+- `.cmd` files need CRLF (`.gitattributes`).
+
+### Verified so far (2026-11-06)
+
+- Both scripts parse; PSScriptAnalyzer with the 5.1 syntax-compatibility rule
+  finds nothing (style-only rules for interactive scripts excluded).
+- The compose file under **docker-compose 5.7.0** against Podman: healthy
+  through the web UI, login page served, backend still has no route out, and
+  the API health check passes.
+- `make-seed.sh` produces the seed and leaves no branch or worktree behind.
+
+**Not yet run on Windows.** First real install is the next test.
