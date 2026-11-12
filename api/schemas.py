@@ -7,6 +7,8 @@ from typing import Any, Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from cac import normalize_edipi
+
 # `unvalidated` is the seed state: nobody has said anything about this yet.
 # It was called `unknown`, which read as an assessment ("we looked and can't
 # tell") and never was one — every rank table and clamp in effective.py has a
@@ -24,7 +26,8 @@ CellStatusValue = Literal[
     "up", "degraded", "down", "unvalidated", "offline", "setup", "ready"
 ]
 SiteStatusValue = Literal[
-    "operational", "limited", "degraded", "maintenance", "standby", "offline", "setup"
+    "operational", "limited", "degraded", "maintenance", "standby", "offline", "setup",
+    "unvalidated",
 ]
 # Event rows for FPCON/EMCON/site-status changes reuse the `status` column to
 # record the new level — keep this union in sync with FPCON_LEVELS,
@@ -1570,6 +1573,12 @@ def _first_name_or_empty(value):
     return value.strip() if isinstance(value, str) else value
 
 
+def _edipi_or_none(value):
+    """DoD ID: a 10-digit number, or a whole scanned CAC barcode (a scanner
+    clicked into the field types the barcode), reduced to the 10 digits."""
+    return normalize_edipi(value)
+
+
 class PersonIn(BaseModel):
     """A new person on the global roster (identity only)."""
 
@@ -1584,10 +1593,12 @@ class PersonIn(BaseModel):
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
+    edipi: Optional[str] = None
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None  # a person id
 
     _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+    _edipi = field_validator("edipi", mode="before")(_edipi_or_none)
 
 
 class PersonPatch(BaseModel):
@@ -1602,10 +1613,12 @@ class PersonPatch(BaseModel):
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
+    edipi: Optional[str] = None
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None
 
     _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+    _edipi = field_validator("edipi", mode="before")(_edipi_or_none)
 
 
 class PersonWorkspaceRef(BaseModel):
@@ -1630,6 +1643,8 @@ class PersonOut(_ORM):
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
+    # Whether a CAC is enrolled. The DoD ID itself is never returned.
+    has_cac: bool = False
     unit_id: Optional[int] = None
     supervisor_id: Optional[int] = None
     workspaces: list[PersonWorkspaceRef] = Field(default_factory=list)
@@ -1660,6 +1675,7 @@ class PersonnelIn(BaseModel):
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
+    edipi: Optional[str] = None
     notes: Optional[str] = None
     work_center_id: Optional[int] = None
     unit_id: Optional[int] = None
@@ -1669,6 +1685,7 @@ class PersonnelIn(BaseModel):
     team_ids: list[int] = Field(default_factory=list)
 
     _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+    _edipi = field_validator("edipi", mode="before")(_edipi_or_none)
 
 
 class PersonnelPatch(BaseModel):
@@ -1686,6 +1703,7 @@ class PersonnelPatch(BaseModel):
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
+    edipi: Optional[str] = None
     notes: Optional[str] = None
     work_center_id: Optional[int] = None
     unit_id: Optional[int] = None
@@ -1695,6 +1713,7 @@ class PersonnelPatch(BaseModel):
     team_ids: Optional[list[int]] = None
 
     _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+    _edipi = field_validator("edipi", mode="before")(_edipi_or_none)
 
 
 class PersonnelOut(_ORM):
@@ -1721,6 +1740,8 @@ class PersonnelOut(_ORM):
     dsn: Optional[str] = None
     sipr_number: Optional[str] = None
     email: Optional[str] = None
+    # Whether a CAC is enrolled. The DoD ID itself is never returned.
+    has_cac: bool = False
     notes: Optional[str] = None
     work_center_id: Optional[int] = None
     unit_id: Optional[int] = None
@@ -1789,6 +1810,7 @@ class PersonnelLocationEventOut(_ORM):
     expected_return_at: Optional[datetime.datetime] = None
     changed_at: datetime.datetime
     changed_by_user_id: Optional[int] = None
+    station_id: Optional[int] = None
 
 
 class PersonnelCsvImportIn(BaseModel):
@@ -1833,6 +1855,196 @@ class PersonnelCsvImportOut(BaseModel):
     created_work_centers: list[str] = Field(default_factory=list)
     created_units: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+
+
+# ===================== Check-in stations (CAC kiosk) =====================
+
+StationMode = Literal["toggle", "in", "out"]
+
+
+class CheckinStationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    site_id: int
+    mode: StationMode = "toggle"
+
+
+class CheckinStationPatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    site_id: Optional[int] = None
+    mode: Optional[StationMode] = None
+    disabled: Optional[bool] = None
+
+
+class CheckinStationOut(_ORM):
+    id: int
+    workspace_id: int
+    site_id: int
+    site_name: str
+    name: str
+    mode: StationMode
+    token_hint: str
+    disabled: bool
+    last_seen_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+
+
+class CheckinStationTokenOut(CheckinStationOut):
+    """Create / rotate response — the only time the token is returned."""
+
+    token: str
+
+
+class KioskStationOut(BaseModel):
+    """What a kiosk shows in its header."""
+
+    name: str
+    mode: StationMode
+    site_id: int
+    site_name: str
+    workspace_name: str
+
+
+class KioskScanIn(BaseModel):
+    # The raw barcode as the scanner typed it, or a typed 10-digit DoD ID.
+    code: str = Field(max_length=512)
+    # When a kiosk queued the scan while the API was unreachable; omitted
+    # for live scans (the server clock is used).
+    scanned_at: Optional[datetime.datetime] = None
+    # Kiosk-side notes on the keystrokes behind `code` (keys it skipped,
+    # e.g. "Control:2") — diagnostics for an unreadable scan, never content.
+    diag: Optional[str] = Field(default=None, max_length=200)
+
+
+KioskResult = Literal[
+    "checked_in",  # now on site here
+    "moved",  # was on site elsewhere; now here (both changed at once)
+    "checked_out",  # left this site
+    "already",  # a repeat scan, or already in/out for an in-/out-only door
+    "stale",  # a queued scan older than the person's latest change; ignored
+    "guest_request",  # Guest button — queued for an operator
+    "unknown_card",  # no one has this DoD ID — queued for an operator
+    "not_in_workspace",  # on the roster, not in this picture — queued too
+    "unreadable",  # not a CAC barcode or a 10-digit DoD ID
+]
+
+
+class KioskScanOut(BaseModel):
+    result: KioskResult
+    message: str
+    # Who — the enrolled person, or the name off the card when unknown.
+    name: Optional[str] = None
+    rank: Optional[str] = None
+    personnel_id: Optional[int] = None
+    status: Optional[str] = None
+    site_name: Optional[str] = None
+    from_site_name: Optional[str] = None
+    card_expired: bool = False
+    # Unreadable scans: the shape of what arrived (see cac.describe_shape).
+    scan_shape: Optional[str] = None
+    at: Optional[datetime.datetime] = None
+
+
+class KioskSuggestion(BaseModel):
+    """A roster person without a DoD ID whose surname matches the card —
+    a hint for linking; an operator always confirms."""
+
+    person_id: int
+    name: str
+    rank: Optional[str] = None
+    branch: Optional[Branch] = None
+    unit_id: Optional[int] = None
+    in_workspace: bool
+
+
+class KioskPendingOut(BaseModel):
+    id: int
+    kind: Literal["unknown_card", "not_in_workspace", "guest_request"]
+    # not_in_workspace: the roster person the card already belongs to.
+    person_id: Optional[int] = None
+    person_name: Optional[str] = None
+    station_name: Optional[str] = None
+    site_id: Optional[int] = None
+    site_name: Optional[str] = None
+    # False when the station is exit-only or its site is gone: resolving
+    # then enrolls without signing in.
+    can_sign_in: bool
+    # As read off the card (PDF417 only; a Code 39 scan has none of these).
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    middle_initial: Optional[str] = None
+    rank: Optional[str] = None
+    pay_grade: Optional[str] = None
+    branch: Optional[Branch] = None
+    is_civilian: Optional[bool] = None
+    # Guest requests: as typed at the kiosk.
+    affiliation: Optional[str] = None
+    escort: Optional[str] = None
+    card_expired: bool = False
+    scan_count: int
+    first_scanned_at: datetime.datetime
+    last_scanned_at: datetime.datetime
+    suggestions: list[KioskSuggestion] = Field(default_factory=list)
+
+
+class KioskGuestIn(BaseModel):
+    """A visitor without a CAC asking the desk to sign them in."""
+
+    last_name: str = Field(min_length=1, max_length=64)
+    first_name: str = Field(default="", max_length=64)
+    affiliation: Optional[str] = Field(default=None, max_length=128)
+    # Who they're here to see.
+    visiting: Optional[str] = Field(default=None, max_length=128)
+
+
+class CheckinActivityOut(BaseModel):
+    """One kiosk check-in / check-out, for the activity log."""
+
+    id: int
+    at: datetime.datetime
+    personnel_id: int
+    name: str
+    is_guest: bool
+    action: Literal["in", "out", "moved"]
+    site_name: Optional[str] = None
+    from_site_name: Optional[str] = None
+    station_id: Optional[int] = None
+    station_name: Optional[str] = None
+    # Set when an operator enrolled the card and signed them in from the queue.
+    enrolled_at_desk: bool = False
+
+
+class KioskLinkIn(BaseModel):
+    """Give the card to an existing roster person (adding them to this
+    picture if they aren't in it)."""
+
+    person_id: int
+    sign_in: bool = True
+
+
+class KioskNewPersonIn(BaseModel):
+    """Add the card holder — to the roster, or as a guest of this picture."""
+
+    personnel_type: PersonnelType = "military"
+    branch: Optional[Branch] = None
+    rank: Optional[str] = None
+    skill_level: Optional[SkillLevel] = None
+    last_name: str = Field(min_length=1)
+    first_name: str = ""
+    unit_id: Optional[int] = None
+    work_center_id: Optional[int] = None
+    # Guests only.
+    affiliation: Optional[str] = None
+    escort: Optional[str] = None
+    sign_in: bool = True
+
+    _first_name = field_validator("first_name", mode="before")(_first_name_or_empty)
+
+
+class KioskResolveOut(BaseModel):
+    personnel_id: int
+    name: str
+    signed_in: bool
+    site_name: Optional[str] = None
 
 
 # --- Documents / folders ---

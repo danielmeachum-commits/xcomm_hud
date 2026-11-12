@@ -6,12 +6,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from auth import get_current_user, hash_password
+from cac import IdKeyMissing
 from db import SessionLocal, get_db
 from default_rules import DEFAULT_RULES
 from deps import get_current_workspace
@@ -33,6 +37,7 @@ from routers import (
     folders,
     gateways,
     ingest,
+    kiosk,
     people,
     personnel,
     rules,
@@ -132,6 +137,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="xcomm_hud-api", lifespan=lifespan)
 
+# FastAPI's default 422 body echoes each failing field's input. For a DoD ID
+# field or a kiosk scan that input is a raw CAC barcode (name, DOB, an
+# SSN-derived number), so it's stripped before the error goes back.
+_CARD_FIELDS = {"edipi", "code"}
+
+
+@app.exception_handler(IdKeyMissing)
+async def _id_key_missing(request: Request, exc: IdKeyMissing):
+    log.error("%s", exc)
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    from_kiosk = request.url.path.startswith("/kiosk")
+    errors = []
+    for err in exc.errors():
+        err = dict(err)
+        loc = err.get("loc") or ()
+        if from_kiosk or (loc and loc[-1] in _CARD_FIELDS):
+            err.pop("input", None)
+            err.pop("ctx", None)
+        errors.append(err)
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3001"],
@@ -168,6 +199,10 @@ app.include_router(work_centers.router)
 app.include_router(teams.router)
 app.include_router(people.router)
 app.include_router(personnel.router)
+app.include_router(kiosk.stations_router)
+app.include_router(kiosk.kiosk_router)
+app.include_router(kiosk.pending_router)
+app.include_router(kiosk.activity_router)
 # Enclaves are referenced by the equipment catalog and by services, so they
 # read first in the docs.
 app.include_router(enclaves.router)

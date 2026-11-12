@@ -15,6 +15,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  DodIdInput,
+  cacPayload,
+  type CacChange,
+} from "@/components/personnel/dod-id-input"
 import { Label } from "@/components/ui/label"
 import {
   BRANCH_LABELS,
@@ -48,6 +53,7 @@ interface Draft {
   dsn: string
   sipr_number: string
   email: string
+  edipi: CacChange
 }
 
 function makeDraft(p: Person | undefined, defaultUnit: Unit | null): Draft {
@@ -65,6 +71,7 @@ function makeDraft(p: Person | undefined, defaultUnit: Unit | null): Draft {
     dsn: p?.dsn ?? "",
     sipr_number: p?.sipr_number ?? "",
     email: p?.email ?? "",
+    edipi: "",
   }
 }
 
@@ -172,6 +179,7 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
         dsn: draft.dsn || null,
         sipr_number: draft.sipr_number || null,
         email: draft.email || null,
+        ...cacPayload(draft.edipi),
       }
       const res = await fetch(
         editing ? `/api/be/people/${person!.id}` : "/api/be/people",
@@ -424,6 +432,16 @@ export function RosterPersonDialog({ person, roster, units }: Props) {
           )}
 
           <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor="r-edipi">DoD ID (CAC)</Label>
+              <DodIdInput
+                id="r-edipi"
+                enrolled={!!person?.has_cac}
+                value={draft.edipi}
+                onChange={(v) => setDraft((d) => ({ ...d, edipi: v }))}
+                disabled={pending}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="r-email">Email</Label>
               <Input

@@ -795,7 +795,10 @@ async def _event_stream(request: Request) -> AsyncIterator[bytes]:
             try:
                 topic = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
             except asyncio.TimeoutError:
-                yield b": keepalive\n\n"
+                # A named event, not an SSE comment: the browser can see it,
+                # so a client can tell a quiet stream from a dead one (and
+                # `onmessage` ignores named events, so it causes no refresh).
+                yield b"event: ping\ndata: \n\n"
                 continue
             yield f"data: {topic}\n\n".encode("utf-8")
     finally:

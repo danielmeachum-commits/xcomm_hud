@@ -19,6 +19,7 @@ import io
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from cac import edipi_hash, normalize_edipi
 from db import get_db
 from deps import requires
 from models import Person, Personnel, Unit, User, Workspace
@@ -49,9 +50,13 @@ IDENTITY_FIELDS = (
     "dsn",
     "sipr_number",
     "email",
+    "edipi",
     "unit_id",
 )
 CONTACT_FIELDS = {"cellphone", "dsn", "sipr_number", "email"}
+# What an operator may change on a roster person: contact details, and the
+# DoD ID — enrolling a card at the door is an operator's job.
+OPERATOR_FIELDS = CONTACT_FIELDS | {"edipi"}
 
 _BRANCHES = {"air_force", "army", "navy", "marines", "space_force", "coast_guard"}
 
@@ -103,8 +108,31 @@ def person_from_csv_row(
         dsn=row.get("dsn") or None,
         sipr_number=row.get("sipr_number") or None,
         email=row.get("email") or None,
+        edipi=_csv_edipi(db, row),
         unit_id=unit_row.id if unit_row else None,
     )
+
+
+def _csv_edipi(db: Session, row: dict[str, str]) -> str | None:
+    """`edipi` or `dod_id` column. A malformed value, or one already taken
+    (on the roster, or earlier in this same file), is dropped rather than
+    failing the import."""
+    raw = row.get("edipi") or row.get("dod_id") or ""
+    try:
+        edipi = normalize_edipi(raw)
+    except ValueError:
+        return None
+    if edipi is None:
+        return None
+    hashed = edipi_hash(edipi)
+    pending = any(isinstance(o, Person) and o.edipi_hash == hashed for o in db.new)
+    if pending or (
+        db.query(Person.id)
+        .filter(Person.edipi_hash == hashed, Person.workspace_id.is_(None))
+        .first()
+    ):
+        return None
+    return edipi
 
 
 def changed_fields(person: Person, data: dict) -> dict:
@@ -118,12 +146,49 @@ def require_identity_write(person: Person, changes: dict, user: User) -> None:
     person belongs to one picture and follows its operator rules."""
     if person.workspace_id is not None or user.role == "admin":
         return
-    locked = sorted(set(changes) - CONTACT_FIELDS)
+    locked = sorted(set(changes) - OPERATOR_FIELDS)
     if locked:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Only an admin can change a roster person's "
             + ", ".join(f.replace("_", " ") for f in locked),
+        )
+
+
+def hash_or_none(edipi: str | None) -> str | None:
+    return edipi_hash(edipi) if edipi else None
+
+
+def ensure_edipi_free(
+    db: Session,
+    hashed: str | None,
+    *,
+    workspace_id: int | None,
+    keep_person_id: int | None,
+) -> None:
+    """A DoD ID names one roster person, and one guest per workspace; and a
+    guest can't take a roster person's ID (add them from the roster instead).
+    Takes the hash (cac.edipi_hash) — callers never hold more than that for
+    long. Backstopped by partial unique indexes; this makes the clash
+    readable."""
+    if hashed is None:
+        return
+    q = db.query(Person).filter(Person.edipi_hash == hashed)
+    if workspace_id is None:
+        q = q.filter(Person.workspace_id.is_(None))
+    else:
+        q = q.filter(
+            (Person.workspace_id.is_(None)) | (Person.workspace_id == workspace_id)
+        )
+    if keep_person_id is not None:
+        q = q.filter(Person.id != keep_person_id)
+    existing = q.first()
+    if existing is not None:
+        where = "on the roster" if existing.workspace_id is None else "a guest here"
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"That DoD ID already belongs to {person_display_name(existing)} "
+            f"({where}).",
         )
 
 
@@ -249,6 +314,9 @@ def create_person(
     _validate_supervisor(db, body.supervisor_id, self_id=None)
     if body.is_commander:
         ensure_commander_slot(db, body.unit_id, keep_person_id=None)
+    ensure_edipi_free(
+        db, hash_or_none(body.edipi), workspace_id=None, keep_person_id=None
+    )
     person = Person(workspace_id=None, **body.model_dump())
     db.add(person)
     db.flush()
@@ -271,6 +339,13 @@ def patch_person(
     if "supervisor_id" in changes:
         _validate_supervisor(db, changes["supervisor_id"], self_id=person.id)
     check_commander(db, person, changes)
+    if "edipi" in changes:
+        ensure_edipi_free(
+            db,
+            hash_or_none(changes["edipi"]),
+            workspace_id=None,
+            keep_person_id=person.id,
+        )
     for k, v in changes.items():
         setattr(person, k, v)
     db.flush()
