@@ -34,6 +34,7 @@ export const SITE_STATUS_VALUES: SiteStatus[] = [
   "standby",
   "offline",
   "setup",
+  "unvalidated",
 ]
 
 export type StatusCategory =

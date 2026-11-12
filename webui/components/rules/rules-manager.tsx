@@ -93,10 +93,13 @@ export function RulesManager({ me, initialRules, meta, eventTypes }: Props) {
         parts.push(`all gear → ${String(step.params.status ?? "?")}`)
       } else if (step.action === "validations_set_status") {
         const gw = step.params.gateway_status as string | undefined
+        const here = step.params.scope === "site" ? "this site's " : ""
         parts.push(
-          `services & paths → ${String(step.params.status ?? "?")}` +
+          `${here}services & paths → ${String(step.params.status ?? "?")}` +
             (gw ? `, gateways → ${gw}` : ""),
         )
+      } else if (step.action === "sites_set_status") {
+        parts.push(`all sites → ${String(step.params.status ?? "?")}`)
       } else {
         parts.push(step.action)
       }

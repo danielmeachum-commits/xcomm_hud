@@ -384,19 +384,50 @@ DEFAULT_RULES: list[dict[str, Any]] = [
             }
         ],
     },
+    # ---------- Site offline: the site's services go with it ----------
+    {
+        **_ALERT,
+        "key": "site-offline-shutdown",
+        "version": 1,
+        "name": "Site offline: shut down its services",
+        "description": (
+            "When a site goes offline (by hand or at ENDEX): every "
+            "hand-validated service and path at that site offline, and its "
+            "gateways offline. Services and gateways that follow equipment "
+            "are left to the gear."
+        ),
+        "trigger": "site.status_changed",
+        "conditions": {
+            "and": [
+                {"==": [{"var": "new_status"}, "offline"]},
+                {"!=": [{"var": "prev_status"}, "offline"]},
+            ]
+        },
+        "computed": [],
+        "enrichers": [],
+        "actions": [
+            {
+                "action": "validations_set_status",
+                "params": {"status": "offline", "gateway_status": "offline", "scope": "site"},
+            },
+        ],
+    },
     # ---------- Exercise control: events that DO something ----------
     # Logging STARTEX / PAUSEEX / ENDEX runs these. on_error="skip": a failed
     # action never un-logs the event that triggered it.
     {
         **_ALERT,
         "key": "exercise-endex-stand-down",
-        "version": 2,
-        "name": "ENDEX: end of day, everything offline",
+        "version": 5,
+        "name": "ENDEX: end of day, sites shut down",
         "description": (
             "When ENDEX is logged: everyone's accountability to Unknown (the "
             "End of day button); all equipment offline, except gear in "
-            "maintenance; and every hand-validated service, path and gateway "
-            "offline."
+            "maintenance; every site offline (except sites in maintenance); "
+            "and every hand-validated "
+            "service, path and gateway offline. (Rules don't set off other "
+            "rules' changes, so the offline-site rule doesn't run here: "
+            "ENDEX shuts the services down itself.)"
         ),
         "trigger": "event.logged",
         "conditions": {"==": [{"var": "type_slug"}, "exercise.endex"]},
@@ -405,18 +436,19 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "actions": [
             {"action": "personnel_end_of_day", "params": {"status": "unknown"}},
             {"action": "equipment_set_status", "params": {"status": "offline"}},
+            {"action": "sites_set_status", "params": {"status": "offline"}},
             {"action": "validations_set_status", "params": {"status": "offline", "gateway_status": "offline"}},
         ],
     },
     {
         **_ALERT,
         "key": "exercise-pauseex-stand-down",
-        "version": 2,
-        "name": "PAUSEEX: end of day, everything offline",
+        "version": 3,
+        "name": "PAUSEEX: end of day for personnel",
         "description": (
-            "When PAUSEEX is logged: everyone's accountability to Unknown; all "
-            "equipment offline, except gear in maintenance; and every "
-            "hand-validated service, path and gateway offline."
+            "When PAUSEEX is logged: everyone's accountability to Unknown. "
+            "Equipment, services, paths, gateways and sites are left as they "
+            "are through the pause."
         ),
         "trigger": "event.logged",
         "conditions": {"==": [{"var": "type_slug"}, "exercise.pauseex"]},
@@ -424,22 +456,21 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "enrichers": [],
         "actions": [
             {"action": "personnel_end_of_day", "params": {"status": "unknown"}},
-            {"action": "equipment_set_status", "params": {"status": "offline"}},
-            {"action": "validations_set_status", "params": {"status": "offline", "gateway_status": "offline"}},
         ],
     },
     {
         **_ALERT,
         "key": "exercise-startex-stand-up",
-        "version": 2,
+        "version": 3,
         "name": "STARTEX: sign in and re-validate everything",
         "description": (
             "When STARTEX is logged: everyone with an assigned site signed in "
-            "there, and all equipment, services and paths back to unvalidated "
-            "so nothing shows up that hasn't been checked since the pause "
-            "(gear in maintenance is left as it is). Gateways have no "
-            "unvalidated status, so they stay as they are (offline after a "
-            "PAUSEEX) until validated."
+            "there, and all sites, equipment, services and paths back to "
+            "unvalidated so nothing shows up that hasn't been checked since "
+            "the pause (sites and gear in maintenance are left as they are). "
+            "Gateways have no "
+            "unvalidated status, so they stay as they are (offline after an "
+            "ENDEX) until validated."
         ),
         "trigger": "event.logged",
         "conditions": {"==": [{"var": "type_slug"}, "exercise.startex"]},
@@ -447,6 +478,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "enrichers": [],
         "actions": [
             {"action": "personnel_sign_in_assigned", "params": {}},
+            {"action": "sites_set_status", "params": {"status": "unvalidated"}},
             {"action": "equipment_set_status", "params": {"status": "unvalidated"}},
             {"action": "validations_set_status", "params": {"status": "unvalidated"}},
         ],

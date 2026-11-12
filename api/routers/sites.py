@@ -111,6 +111,30 @@ def set_site_status(
 ):
     """Change a site's posture status; rules react (record event, ...)."""
     site = _load_site_in_workspace(db, site_id, workspace)
+    apply_site_status(
+        db, site, status=body.status, note=body.note,
+        when=body.validated_at or _now(), user_id=current_user.id,
+        username=current_user.username, workspace_id=workspace.id,
+    )
+    db.flush()
+    notify(background_tasks)
+    return site
+
+
+def apply_site_status(
+    db: Session,
+    site: Site,
+    *,
+    status: str,
+    note: str | None,
+    when,
+    user_id: int | None,
+    username: str | None,
+    workspace_id: int,
+) -> None:
+    """Set a site's status the way a person does: fire site.status_changed
+    (so the record rule and the offline-site shutdown rule run), then set it.
+    Shared with the sites_set_status rule action (ENDEX)."""
     emit_trigger(
         db,
         "site.status_changed",
@@ -118,18 +142,15 @@ def set_site_status(
             "site_id": site.id,
             "site_name": site.name,
             "prev_status": site.status,
-            "new_status": body.status,
-            "note": body.note,
-            "user_id": current_user.id,
-            "username": current_user.username,
-            "occurred_at": body.validated_at or _now(),
+            "new_status": status,
+            "note": note,
+            "user_id": user_id,
+            "username": username,
+            "occurred_at": when,
         },
-        workspace_id=workspace.id,
+        workspace_id=workspace_id,
     )
-    site.status = body.status
-    db.flush()
-    notify(background_tasks)
-    return site
+    site.status = status
 
 
 @router.post("/{site_id}/fpcon", response_model=SiteOut)

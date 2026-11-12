@@ -907,6 +907,7 @@ def _action_equipment_set_status(db: Session, ctx: dict, params: dict) -> None:
 # pause) until someone validates them.
 _BULK_SERVICE_STATUSES = ("unvalidated", "offline", "down")
 _BULK_GATEWAY_STATUSES = ("offline", "down")
+_BULK_SCOPES = ("workspace", "site")
 
 
 def _action_validations_set_status(db: Session, ctx: dict, params: dict) -> None:
@@ -916,7 +917,11 @@ def _action_validations_set_status(db: Session, ctx: dict, params: dict) -> None
     whose status comes from equipment (derived mode) are skipped: they follow
     the gear, which equipment_set_status handles. PAUSEEX/ENDEX take them
     offline so the board shows no stale "up" through the pause; STARTEX puts
-    services and cells back to unvalidated."""
+    services and cells back to unvalidated.
+
+    scope="site" limits it to the site that fired the trigger (ctx site_id):
+    the offline-site rule uses it so a site going offline takes its own
+    services, paths and gateways down with it."""
     from models import Gateway as _Gateway
     from models import Service as _Service
     from models import ServiceDelivery as _Delivery
@@ -929,12 +934,20 @@ def _action_validations_set_status(db: Session, ctx: dict, params: dict) -> None
         raise ValueError(f"Pick a service status (got '{target}')")
     if gw_target is not None and gw_target not in _BULK_GATEWAY_STATUSES:
         raise ValueError(f"Pick a gateway status (got '{gw_target}')")
+    scope = params.get("scope") or "workspace"
+    if scope not in _BULK_SCOPES:
+        raise ValueError(f"Pick a scope (got '{scope}')")
     ws_id = ctx.get("workspace_id")
     when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
     user_id, username = ctx.get("user_id"), ctx.get("username")
     common = {"source_flow": "rule", "user_id": user_id, "username": username, "occurred_at": when}
 
-    site_ids = [sid for (sid,) in db.query(_Site.id).filter(_Site.workspace_id == ws_id)]
+    site_q = db.query(_Site.id).filter(_Site.workspace_id == ws_id)
+    if scope == "site":
+        if not ctx.get("site_id"):
+            raise ValueError("scope 'site' needs a trigger that names a site")
+        site_q = site_q.filter(_Site.id == ctx.get("site_id"))
+    site_ids = [sid for (sid,) in site_q]
     gateways = db.query(_Gateway).filter(_Gateway.site_id.in_(site_ids)).all()
     gw_by_id = {g.id: g for g in gateways}
     n_gw = 0
@@ -979,7 +992,46 @@ def _action_validations_set_status(db: Session, ctx: dict, params: dict) -> None
     parts = [f"{n_svc} service{'s' if n_svc != 1 else ''} and {n_cell} path{'s' if n_cell != 1 else ''} set to {target}"]
     if gw_target:
         parts.append(f"{n_gw} gateway{'s' if n_gw != 1 else ''} set to {gw_target}")
+    if scope == "site":
+        parts[0] = f"{ctx.get('site_name') or 'site'}: {parts[0]}"
     _rule_summary(db, ctx, "; ".join(parts))
+
+
+# Like gear: a site in maintenance stays that way through ENDEX/STARTEX.
+_BULK_SITE_KEEP = ("maintenance",)
+
+
+def _action_sites_set_status(db: Session, ctx: dict, params: dict) -> None:
+    """Every site in the workspace to one status (offline at ENDEX,
+    unvalidated at STARTEX); sites in maintenance are skipped. Each
+    change fires site.status_changed like a person's would, so it's
+    recorded on the timeline. Mutating rules don't chain, so the offline-site
+    shutdown rule does NOT run from here: pair this with
+    validations_set_status (as ENDEX does) to take services down too."""
+    from models import Site as _Site
+    from routers.sites import apply_site_status
+
+    target = params.get("status")
+    if target not in SITE_STATUS_VALUES:
+        raise ValueError(f"Pick a site status (got '{target}')")
+    when = ctx.get("occurred_at") or datetime.datetime.now(datetime.timezone.utc)
+    rows = (
+        db.query(_Site)
+        .filter(
+            _Site.workspace_id == ctx.get("workspace_id"),
+            _Site.status != target,
+            _Site.status.not_in(_BULK_SITE_KEEP),
+        )
+        .order_by(_Site.name)
+        .all()
+    )
+    for site in rows:
+        apply_site_status(
+            db, site, status=target, note=None, when=when,
+            user_id=ctx.get("user_id"), username=ctx.get("username"),
+            workspace_id=ctx.get("workspace_id"),
+        )
+    _rule_summary(db, ctx, f"{len(rows)} site{'s' if len(rows) != 1 else ''} set to {target}")
 
 
 ACTION_DEFS: dict[str, ActionDef] = {
@@ -1027,7 +1079,15 @@ ACTION_DEFS: dict[str, ActionDef] = {
             [
                 _f("status", "Set services and paths to", "enum", list(_BULK_SERVICE_STATUSES)),
                 _f("gateway_status", "Set gateways to (blank = leave)", "enum", list(_BULK_GATEWAY_STATUSES)),
+                _f("scope", "Where (blank = whole workspace; site = the triggering site)", "enum", list(_BULK_SCOPES)),
             ],
+            mutates=True,
+        ),
+        ActionDef(
+            "sites_set_status",
+            "Sites: set every site to a status (skips maintenance)",
+            _action_sites_set_status,
+            [_f("status", "Set all sites to", "enum", list(SITE_STATUS_VALUES))],
             mutates=True,
         ),
     ]
