@@ -38,6 +38,10 @@ async function proxy(req: NextRequest, path: string): Promise<NextResponse> {
   const inferredSlug = workspaceSlugFromReferer(req.headers.get("referer"))
   const slug = explicitSlug ?? inferredSlug
   if (slug) headers["X-Workspace-Slug"] = slug
+  // Check-in kiosks (public/kiosk.html) authenticate with a station token
+  // instead of a session; the API resolves workspace and site from it.
+  const stationToken = req.headers.get("x-station-token")
+  if (stationToken) headers["X-Station-Token"] = stationToken
 
   let body: string | undefined
   if (req.method !== "GET" && req.method !== "DELETE") {

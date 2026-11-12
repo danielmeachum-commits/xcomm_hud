@@ -532,7 +532,8 @@ TRIGGERS: dict[str, TriggerDef] = {
                 _f("prev_status", "Previous status", "enum", list(PERSONNEL_STATUS_VALUES)),
                 _f("new_status", "New status", "enum", list(PERSONNEL_STATUS_VALUES)),
                 # "rule" = changed by a rule action (e.g. ENDEX end of day).
-                _f("source_flow", "Source flow", "enum", ["checkin", "bulk", "reset", "rule"]),
+                # "kiosk" = a CAC scan at a check-in station.
+                _f("source_flow", "Source flow", "enum", ["checkin", "bulk", "reset", "kiosk", "rule"]),
                 *_COMMON_FIELDS,
             ],
             ("personnel_context", "site_context"),

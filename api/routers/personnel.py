@@ -41,6 +41,8 @@ from routers.people import (
     changed_fields,
     check_commander,
     ensure_commander_slot,
+    ensure_edipi_free,
+    hash_or_none,
     person_from_csv_row,
     require_identity_write,
     validate_unit,
@@ -118,6 +120,7 @@ def _to_out(p: Personnel, supervisor_id: int | None) -> dict:
         "dsn": person.dsn,
         "sipr_number": person.sipr_number,
         "email": person.email,
+        "has_cac": person.has_cac,
         "notes": p.notes,
         "work_center_id": p.work_center_id,
         "unit_id": person.unit_id,
@@ -175,6 +178,7 @@ def _apply_location_change(
     when,
     user_id: int | None,
     source_flow: str = "checkin",
+    station_id: int | None = None,
 ) -> None:
     """Append a PersonnelLocationEvent (append-only history), update the
     denormalized current_* fields, and emit the location-changed trigger.
@@ -183,6 +187,7 @@ def _apply_location_change(
     "reset" to avoid flooding the Events page with one row per person.
     """
     prev_status = p.current_status
+    prev_site_id = p.current_site_id
     db.add(
         PersonnelLocationEvent(
             personnel_id=p.id,
@@ -192,6 +197,7 @@ def _apply_location_change(
             expected_return_at=expected_return_at,
             changed_at=when,
             changed_by_user_id=user_id,
+            station_id=station_id,
         )
     )
     emit_trigger(
@@ -202,6 +208,7 @@ def _apply_location_change(
             "personnel_name": person_display_name(p.person),
             "prev_status": prev_status,
             "new_status": stat,
+            "prev_site_id": prev_site_id,
             "site_id": site_id,
             "source_flow": source_flow,
             "note": note,
@@ -362,6 +369,12 @@ def create_personnel(
         validate_unit(db, body.unit_id)
         if body.is_commander:
             ensure_commander_slot(db, body.unit_id, keep_person_id=None)
+        ensure_edipi_free(
+            db,
+            hash_or_none(body.edipi),
+            workspace_id=workspace.id if body.is_guest else None,
+            keep_person_id=None,
+        )
         person = Person(
             # A guest is local to this picture; everyone else joins the roster.
             workspace_id=workspace.id if body.is_guest else None,
@@ -426,6 +439,14 @@ def patch_personnel(
         work_center_id=picture.get("work_center_id", p.work_center_id),
         assigned_site_id=picture.get("assigned_site_id", p.assigned_site_id),
     )
+    guest_after = picture.get("is_guest", p.is_guest)
+    if "edipi" in changes or guest_after != p.is_guest:
+        ensure_edipi_free(
+            db,
+            hash_or_none(changes["edipi"]) if "edipi" in changes else person.edipi_hash,
+            workspace_id=workspace.id if guest_after else None,
+            keep_person_id=person.id,
+        )
     if "is_guest" in picture and picture["is_guest"] != p.is_guest:
         # Guest-ness decides whether the person is on the roster at all.
         if picture["is_guest"]:

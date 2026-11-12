@@ -13,6 +13,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import {
+  DodIdInput,
+  cacPayload,
+  type CacChange,
+} from "@/components/personnel/dod-id-input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -58,6 +63,7 @@ interface Draft {
   dsn: string
   sipr_number: string
   email: string
+  edipi: CacChange
   notes: string
   work_center_id: string
   unit_id: string
@@ -90,6 +96,7 @@ function makeDraft(
     dsn: person?.dsn ?? "",
     sipr_number: person?.sipr_number ?? "",
     email: person?.email ?? "",
+    edipi: "",
     notes: person?.notes ?? "",
     work_center_id: person?.work_center_id?.toString() ?? "",
     unit_id: person?.unit_id?.toString() ?? seedUnit?.id.toString() ?? "",
@@ -491,6 +498,7 @@ export function PersonnelForm({
         dsn: draft.dsn || null,
         sipr_number: draft.sipr_number || null,
         email: draft.email || null,
+        ...cacPayload(draft.edipi),
         notes: draft.notes || null,
         work_center_id: draft.work_center_id
           ? Number(draft.work_center_id)
@@ -633,6 +641,17 @@ export function PersonnelForm({
         { label: "Cellphone", value: draft.cellphone || null },
         { label: "DSN", value: draft.dsn || null },
         { label: "SIPR number", value: draft.sipr_number || null },
+        {
+          label: "CAC",
+          value:
+            draft.edipi === null
+              ? "Will be removed"
+              : draft.edipi
+                ? "New card read"
+                : person?.has_cac
+                  ? "Enrolled"
+                  : null,
+        },
       ],
     },
     {
@@ -1141,6 +1160,20 @@ export function PersonnelForm({
                       person is in.
                     </p>
                   )}
+                  <div className="col-span-2 space-y-1.5">
+                    <Label htmlFor="edipi">DoD ID (CAC)</Label>
+                    <DodIdInput
+                      id="edipi"
+                      enrolled={!!person?.has_cac}
+                      value={draft.edipi}
+                      onChange={(v) => setDraft((d) => ({ ...d, edipi: v }))}
+                      disabled={pending}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Lets them check in and out by scanning their card at a
+                      check-in station.
+                    </p>
+                  </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="email">Email</Label>
                     <Input

@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
@@ -11,8 +12,10 @@ import { PersonnelTable } from "@/components/personnel/personnel-table"
 import { RosterAddDialog } from "@/components/personnel/roster-add-dialog"
 import { usePersonnelFilters } from "@/components/personnel/use-personnel-filters"
 import { FilterBar, FilterChips } from "@/components/multi-select-filter"
+import { buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ViewTabs } from "@/components/ui/view-tabs"
+import { useWorkspace } from "@/lib/workspace"
 import {
   buildPersonnelGroups,
   type PersonnelGroupBy,
@@ -23,6 +26,7 @@ import {
   Flag,
   LayoutGrid,
   Network,
+  ScanLine,
   Users,
   UsersRound,
 } from "lucide-react"
@@ -63,6 +67,7 @@ export function PersonnelListClient({
   sites,
   userRole,
 }: Props) {
+  const { w } = useWorkspace()
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -170,6 +175,15 @@ export function PersonnelListClient({
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
+            {userRole === "admin" && (
+              <Link
+                href={w("/admin/checkin-stations")}
+                className={buttonVariants({ size: "sm", variant: "outline" })}
+                title="CAC card readers that check people in and out"
+              >
+                <ScanLine className="size-4" /> Check-in stations
+              </Link>
+            )}
             <EndOfDayButton />
             <PersonnelCsvImport />
             {/* New people normally go on the roster first (Global → Roster);

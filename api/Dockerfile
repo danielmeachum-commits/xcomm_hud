@@ -15,7 +15,7 @@ EXPOSE 8000
 
 FROM base AS dev
 
-CMD ["sh", "-c", "uv sync && uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"]
+CMD ["sh", "-c", "uv sync && uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 3"]
 
 
 FROM base AS prod

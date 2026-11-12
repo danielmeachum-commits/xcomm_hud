@@ -281,8 +281,25 @@ function Show-Urls {
 
 # Start the stack and wait for it to answer. $false if it never does (after
 # printing the API's recent logs); stops the script on anything else.
+function Add-MissingSecrets {
+  # An env file written before a key existed doesn't have it; add it rather
+  # than make the user regenerate (which would lose the others). Only appends.
+  $text = [IO.File]::ReadAllText($EnvFile)
+  if ($text -notmatch '(?m)^XCOMM_HUD_ID_KEY=\S') {
+    $b = New-Object byte[] 32
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+    $key = ([Convert]::ToBase64String($b)).Replace('+', '-').Replace('/', '_')
+    $text = [regex]::Replace($text, '(?m)^XCOMM_HUD_ID_KEY=\r?\n', '')
+    if (-not $text.EndsWith("`n")) { $text += "`n" }
+    $text += "`n# DoD ID hashing key (CAC check-in). Back it up with this file.`nXCOMM_HUD_ID_KEY=$key`n"
+    [IO.File]::WriteAllText($EnvFile, $text, (New-Object Text.UTF8Encoding($false)))
+    Write-Ok 'Added the DoD ID hashing key to the settings file.'
+  }
+}
+
 function Start-Stack {
   if (-not (Test-Path $EnvFile)) { Stop-WithError "Not set up yet ($EnvFile is missing). Run the kit's install.cmd." }
+  Add-MissingSecrets
   Start-Machine
   $missing = @(Get-MissingImages)
   if ($missing.Count -gt 0) {

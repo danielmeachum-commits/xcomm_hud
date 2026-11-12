@@ -49,6 +49,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       XCOMM_HUD_SECRET_KEY: ${XCOMM_HUD_SECRET_KEY}
+      XCOMM_HUD_ID_KEY: ${XCOMM_HUD_ID_KEY}
       XCOMM_HUD_INITIAL_ADMIN_USER: ${XCOMM_HUD_INITIAL_ADMIN_USER:-admin}
       XCOMM_HUD_INITIAL_ADMIN_PASSWORD: ${XCOMM_HUD_INITIAL_ADMIN_PASSWORD:-changeme}
       # Object storage for the document library. The API creates the bucket
@@ -68,7 +69,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    command: sh -c "uv sync && uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "uv sync && uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 3"
 
   # The webui normally runs on the host (`npm run dev:host` in ./webui) so that
   # Domscribe works: its relay, the bundler plugin, the MCP server, and the

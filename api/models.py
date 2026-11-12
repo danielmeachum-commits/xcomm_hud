@@ -42,6 +42,9 @@ SITE_STATUS_VALUES = (
     "standby",
     "offline",
     "setup",
+    # Not checked since the last STARTEX: set by the STARTEX rule until a
+    # person validates the site, same as services and equipment.
+    "unvalidated",
 )
 STATUS_VALUES = SERVICE_STATUS_VALUES  # legacy alias
 SERVICE_KINDS = ("voice", "data", "other")
@@ -1140,6 +1143,25 @@ class Person(Base):
             unique=True,
             postgresql_where=text("is_commander AND unit_id IS NOT NULL"),
         ),
+        # A DoD ID names one roster person; a guest's (local person) is
+        # unique within its own workspace. See api/cac.py.
+        Index(
+            "uq_person_roster_edipi",
+            "edipi_hash",
+            unique=True,
+            postgresql_where=text(
+                "edipi_hash IS NOT NULL AND workspace_id IS NULL"
+            ),
+        ),
+        Index(
+            "uq_person_local_edipi",
+            "workspace_id",
+            "edipi_hash",
+            unique=True,
+            postgresql_where=text(
+                "edipi_hash IS NOT NULL AND workspace_id IS NOT NULL"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -1164,6 +1186,9 @@ class Person(Base):
     dsn: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     sipr_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # The DoD ID (EDIPI) a CAC scan matches on — stored only as a keyed hash
+    # (cac.edipi_hash), never the number. Write the number via `edipi`.
+    edipi_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     unit_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("unit.id", ondelete="SET NULL"),
@@ -1188,6 +1213,39 @@ class Person(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
+
+    # Write-only: assigning a 10-digit DoD ID (or None) stores its hash.
+    # Reading gives a value equal to nothing, so a form that sends the field
+    # always counts as a change and the number can never be read back.
+    @property
+    def edipi(self) -> object:
+        return _WRITE_ONLY
+
+    @edipi.setter
+    def edipi(self, value: Optional[str]) -> None:
+        from cac import edipi_hash
+
+        self.edipi_hash = edipi_hash(value) if value else None
+
+    @property
+    def has_cac(self) -> bool:
+        return self.edipi_hash is not None
+
+
+class _WriteOnly:
+    def __eq__(self, other: object) -> bool:
+        return False
+
+    def __ne__(self, other: object) -> bool:
+        return True
+
+    __hash__ = object.__hash__
+
+    def __repr__(self) -> str:
+        return "<write-only>"
+
+
+_WRITE_ONLY = _WriteOnly()
 
 
 class Personnel(Base):
@@ -1310,6 +1368,125 @@ class PersonnelLocationEvent(Base):
     changed_by_user_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    # Set when the change came from a card scan at a check-in station.
+    station_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("checkin_station.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class CheckinStation(Base):
+    """A card reader at a door: every scan there checks in/out at `site_id`.
+
+    Runs outside the web app — a kiosk browser or any client holding the
+    station token (sent as X-Station-Token) — so a busy entry point doesn't
+    need a logged-in operator. Only the token's SHA-256 is stored; it is
+    shown once when created or rotated. `mode` is "toggle" (in if not here,
+    else out), "in" or "out" for separate entry and exit doors.
+    """
+
+    __tablename__ = "checkin_station"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    site_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("site.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    mode: Mapped[str] = mapped_column(String(8), nullable=False, default="toggle")
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Last four characters of the token, so admins can tell kiosks apart.
+    token_hint: Mapped[str] = mapped_column(String(8), nullable=False)
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_seen_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    site: Mapped[Site] = relationship(Site, lazy="joined")
+
+
+class KioskPendingScan(Base):
+    """A card a check-in station didn't recognize, waiting for an operator.
+
+    `kind` "unknown_card": no one has this DoD ID — link it to a roster
+    person, add them to the roster, or sign them in as a guest.
+    "not_in_workspace": a roster person (`person_id`) not in this picture.
+    "guest_request": a visitor without a card used the kiosk's Guest button;
+    no card hash, just the name, organization and who they're visiting.
+    One open row per card per workspace; repeat scans bump the count and move
+    it to the latest door. What the card said (name, rank, grade) is held only
+    to prefill the operator's form, and the row is deleted once resolved or
+    dismissed.
+    """
+
+    __tablename__ = "kiosk_pending_scan"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "edipi_hash", name="uq_kiosk_pending_card"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Keyed hash of the card's DoD ID (cac.edipi_hash) — never the number.
+    # NULL for a guest request (no card).
+    edipi_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    person_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("person.id", ondelete="CASCADE"), nullable=True
+    )
+    station_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        ForeignKey("checkin_station.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    site_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("site.id", ondelete="SET NULL"), nullable=True
+    )
+    first_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    middle_initial: Mapped[Optional[str]] = mapped_column(String(1), nullable=True)
+    rank: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    pay_grade: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    branch: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    is_civilian: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    # Guest requests: their organization and who they're visiting.
+    affiliation: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    escort: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    card_expired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scan_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_scanned_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_scanned_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    station: Mapped[Optional[CheckinStation]] = relationship(
+        CheckinStation, lazy="joined"
+    )
+    site: Mapped[Optional[Site]] = relationship(Site, lazy="joined")
+    person: Mapped[Optional[Person]] = relationship(Person, lazy="joined")
 
 
 class PersonnelTeam(Base):

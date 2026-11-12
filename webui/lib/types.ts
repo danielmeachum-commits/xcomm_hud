@@ -39,6 +39,7 @@ export type SiteStatus =
   | "standby"
   | "offline"
   | "setup"
+  | "unvalidated"
 
 /** Service-shaped status value (legacy name). Keeps existing imports working. */
 export type StatusValue = ServiceStatus
@@ -624,6 +625,8 @@ export interface Person {
   dsn: string | null
   sipr_number: string | null
   email: string | null
+  /** A CAC is enrolled for check-in. The DoD ID itself is never sent. */
+  has_cac: boolean
   unit_id: number | null
   /** A person id, unlike `Personnel.supervisor_id`. */
   supervisor_id: number | null
@@ -659,6 +662,7 @@ export interface Personnel {
   dsn: string | null
   sipr_number: string | null
   email: string | null
+  has_cac: boolean
   notes: string | null
   work_center_id: number | null
   unit_id: number | null
@@ -1463,4 +1467,76 @@ export interface AssetImportResult {
   created: EquipmentAsset[]
   linked: number
   skipped: string[]
+}
+
+/** A CAC card reader at a door, bound to one site. Its token is only ever
+ *  returned on create / rotate (`CheckinStationWithToken`). */
+export type CheckinStationMode = "toggle" | "in" | "out"
+export interface CheckinStation {
+  id: number
+  workspace_id: number
+  site_id: number
+  site_name: string
+  name: string
+  mode: CheckinStationMode
+  token_hint: string
+  disabled: boolean
+  last_seen_at: string | null
+  created_at: string
+}
+export interface CheckinStationWithToken extends CheckinStation {
+  token: string
+}
+
+/** A card a check-in station couldn't place, waiting for an operator to
+ *  link it, add the person, or sign them in as a guest. Name/rank/grade are
+ *  as read off the card (absent for a back-barcode scan). */
+export interface KioskPending {
+  id: number
+  /** guest_request: a visitor without a CAC used the kiosk's Guest button. */
+  kind: "unknown_card" | "not_in_workspace" | "guest_request"
+  person_id: number | null
+  person_name: string | null
+  station_name: string | null
+  site_id: number | null
+  site_name: string | null
+  can_sign_in: boolean
+  first_name: string | null
+  last_name: string | null
+  middle_initial: string | null
+  rank: string | null
+  pay_grade: string | null
+  branch: Branch | null
+  is_civilian: boolean | null
+  /** Guest requests: as typed at the kiosk. */
+  affiliation: string | null
+  escort: string | null
+  card_expired: boolean
+  scan_count: number
+  first_scanned_at: string
+  last_scanned_at: string
+  suggestions: {
+    person_id: number
+    name: string
+    rank: string | null
+    branch: Branch | null
+    unit_id: number | null
+    in_workspace: boolean
+  }[]
+}
+
+/** One kiosk check-in / check-out, for the activity log. */
+export interface CheckinActivity {
+  id: number
+  at: string
+  personnel_id: number
+  name: string
+  is_guest: boolean
+  action: "in" | "out" | "moved"
+  site_name: string | null
+  from_site_name: string | null
+  station_id: number | null
+  station_name: string | null
+  /** An operator enrolled the card and signed them in from the queue. */
+  enrolled_at_desk: boolean
 }

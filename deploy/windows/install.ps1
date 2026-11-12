@@ -285,6 +285,7 @@ if (Test-Path $envFile) {
   $values = @{
     'POSTGRES_PASSWORD'                = New-Token
     'XCOMM_HUD_SECRET_KEY'             = $secretKey
+    'XCOMM_HUD_ID_KEY'                 = ([Convert]::ToBase64String((New-RandomBytes 32))).Replace('+', '-').Replace('/', '_')
     'XCOMM_HUD_INITIAL_ADMIN_PASSWORD' = New-Token
     'S3_ACCESS_KEY'                    = $s3Key
     'S3_SECRET_KEY'                    = $s3Secret

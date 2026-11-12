@@ -9,6 +9,7 @@ import {
   BookOpen,
   Boxes,
   Building2,
+  ScanLine,
   ChevronRight,
   ChevronUp,
   ExternalLink,
@@ -93,6 +94,8 @@ const WORKSPACE_ADMIN_ITEMS = [
   // Teams are put together for one deployment (FCP-1), unlike the shops and
   // units people are filed under.
   { path: "/admin/teams", label: "Teams", icon: UsersRound },
+  // CAC card readers at this workspace's doors (see public/kiosk.html).
+  { path: "/admin/checkin-stations", label: "Check-in stations", icon: ScanLine },
 ]
 
 // An admin nav row. `path` is workspace-scoped and gets the w() prefix;
@@ -335,6 +338,16 @@ export function AppSidebar({ user, sites }: Props) {
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
                     ))}
+                    {/* Door activity from the CAC check-in stations. */}
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        isActive={pathname === `${personnelHref}/checkins`}
+                        render={<Link href={`${personnelHref}/checkins`} />}
+                      >
+                        <ScanLine />
+                        <span>Check-in log</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 )}
               </SidebarMenuItem>
